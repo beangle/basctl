@@ -6,6 +6,7 @@
   "license": "GPLv3",
   "sourcePaths": ["src"],
   "importPaths": ["src"],
+  "stringImportPaths": ["resources"],
   "toolchainRequirements": {
     "dub": ">=1.34.0",
     "frontend": ">=2.102.0",

@@ -14,57 +14,146 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-module beangle.sas.main;
+/**
+ * basctl 命令行入口：`version` / `status` / `make` / `resolve` / `aes` / `firewall`。
+ */
+module bas.main;
+
+import bas.aes;
+import bas.banner;
+import bas.config;
+import bas.firewall;
+import bas.maker;
+import bas.net;
+import bas.resolver;
+import bas.serverstatus;
 
 import std.algorithm : canFind, sort;
-import std.conv : text, to;
+import std.conv : to;
 import std.exception : enforce;
-import std.file : DirEntry, SpanMode, dirEntries, exists, isDir, readText;
+import std.file : SpanMode, dirEntries, exists, isDir, readText;
 import std.format : format;
 import std.path : absolutePath, baseName, buildPath;
-import std.process : Config, execute, environment;
+import std.process : Config, environment, execute;
 import std.regex : matchFirst, regex;
 import std.stdio : stderr, stdout, writeln;
 import std.string : indexOf, join, lastIndexOf, split, strip;
 
-/** Keep in sync with `dub.json` / package release version. */
-enum sasCliVersion = "0.0.1";
+/** CLI 自身版本，随发布更新。 */
+enum basctlVersion = "0.0.1";
 
 version (unittest) {
 } else {
-  void main(string[] args) {
+  int main(string[] args) {
     if (args.length < 2) {
       printUsage();
-      return;
+      return 1;
     }
     switch (args[1]) {
+    case "version", "-v", "--version":
+      return cmdVersion();
     case "status":
-      cmdStatus();
-      break;
+      return cmdStatus();
+    case "make":
+      if (args.length < 4) {
+        stderr.writeln("Usage: basctl make /path/to/conf/server.xml <farm|server|all>");
+        return 1;
+      }
+      return runMaker(args[2], args[3]);
+    case "resolve":
+      return cmdResolve(args[2 .. $]);
+    case "aes":
+      if (args.length < 4) {
+        stderr.writeln("Usage: basctl aes <key> <plain|encoded>");
+        return 1;
+      }
+      return cmdAes(args[2], args[3]);
+    case "firewall":
+      return runFirewall(args[1 .. $]);
+    case "help", "-h", "--help":
+      printUsage();
+      return 0;
     default:
       stderr.writeln("Unknown command: ", args[1]);
       printUsage();
-      break;
+      return 1;
     }
   }
 }
 
 private:
 
+/** 打印命令用法到 stderr。 */
 void printUsage() {
-  stderr.writeln("Usage: basctl <command>");
+  stderr.writeln("Usage: basctl <command> [args]");
   stderr.writeln("Commands:");
-  stderr.writeln("  status   Show running servers (pid, listen ports) under SAS_HOME/servers");
+  stderr.writeln("  version                       Show logo and local hosts");
+  stderr.writeln("  status                        Show running servers under $SAS_HOME/servers");
+  stderr.writeln("  make <server.xml> <pattern>   Resolve webapps and build engines/servers");
+  stderr.writeln("  resolve <server.xml> [pattern...]  Resolve webapps only");
+  stderr.writeln("  aes <key> <plain|encoded>     AES/ECB/PKCS5 encrypt or decrypt");
+  stderr.writeln("  firewall [workdir]            Configure firewalld ports from conf/server.xml");
 }
 
-/** ASCII logo from Scala `org.beangle.sas.Version.logo` (Graffiti-style lines). */
-string sasLogo(string version_) {
-  return text(
-i` ___    __    ___
-/ __)  /__\  / __)
-\__ \ /(__)\ \__ \
-(___/(__)(__)(___/
-version $(version_)`);
+/** `version`：打印 logo 与本机地址。 */
+int cmdVersion() {
+  writeln(logo(basctlVersion));
+  writeln(hostsLine());
+  return 0;
+}
+
+/** `aes`：值长度为 32 视为密文解密，否则加密并输出十六进制。 */
+int cmdAes(string key, string value) {
+  auto aes = new Aes(key);
+  writeln(value.length == 32 ? aes.decrypt(value) : aes.encrypt(value));
+  return 0;
+}
+
+/** Resolves webapps of a config file（Scala `Resolver.main`）。 */
+int cmdResolve(string[] args) {
+  if (!args.length) {
+    stderr.writeln("Usage: basctl resolve /path/to/conf/server.xml [farm|server|all]...");
+    return -1;
+  }
+  auto configFile = args[0];
+  if (!exists(configFile)) {
+    stderr.writeln("Cannot find config file " ~ configFile);
+    return -1;
+  }
+  auto container = parseServerXmlFile(configFile);
+  auto sasHome = absolutePath(buildPath(configFile, "..", ".."));
+
+  auto patterns = args[1 .. $];
+  auto ips = localAddresses();
+  Webapp[] webapps;
+  bool all = !patterns.length;
+  foreach (p; patterns) {
+    if (p == "all")
+      all = true;
+  }
+
+  foreach (farm; container.farms) {
+    foreach (server; farm.servers) {
+      if (!ips.canFind(server.host.ip))
+        continue;
+      bool matched = all;
+      foreach (p; patterns) {
+        if (p == "all" || p == farm.name || p == server.qualifiedName) {
+          matched = true;
+          break;
+        }
+      }
+      if (matched) {
+        foreach (webapp; container.getWebapps(server)) {
+          if (!webapps.canFind(webapp))
+            webapps ~= webapp;
+        }
+      }
+    }
+  }
+
+  auto missing = resolveWebapps(sasHome, container.repository, container.snapshotRepo, webapps);
+  return missing.length ? -1 : 0;
 }
 
 /** Uses `SAS_HOME` when set; otherwise the current working directory. */
@@ -77,36 +166,33 @@ string resolveSasHome() @trusted {
   return absolutePath(getcwd());
 }
 
-void cmdStatus() {
-  writeln(sasLogo(sasCliVersion));
+/** `status`：列出 `$SAS_HOME/servers` 下仍在运行的实例及其监听端口。 */
+int cmdStatus() {
+  writeln(logo(basctlVersion));
   stdout.flush();
-  runStatus();
-}
-
-void runStatus() {
-  immutable sasHome = resolveSasHome();
-  immutable serversDir = buildPath(sasHome, "servers");
+  auto sasHome = resolveSasHome();
+  auto serversDir = buildPath(sasHome, "servers");
 
   if (!exists(serversDir) || !isDir(serversDir)) {
     stderr.writeln("No servers directory: ", serversDir);
-    return;
+    return 1;
   }
 
   string[] names;
-  foreach (DirEntry de; dirEntries(serversDir, SpanMode.shallow)) {
-    if (de.isDir)
-      names ~= baseName(de.name);
+  foreach (entry; dirEntries(serversDir, SpanMode.shallow)) {
+    if (entry.isDir)
+      names ~= baseName(entry.name);
   }
   names.sort();
 
-  immutable listenSnapshot = readListenSnapshot();
+  auto listenSnapshot = readListenSnapshot();
   int shown;
 
   foreach (dirName; names) {
-    immutable pidPath = buildPath(serversDir, dirName, "SERVER_PID");
+    auto pidPath = buildPath(serversDir, dirName, "SERVER_PID");
     if (!exists(pidPath))
       continue;
-    immutable pidStr = strip(readText(pidPath));
+    auto pidStr = strip(readText(pidPath));
     if (!pidStr.length)
       continue;
     int pid;
@@ -116,7 +202,7 @@ void runStatus() {
       stderr.writeln(dirName, ": invalid SERVER_PID content");
       continue;
     }
-    if (!processRunningOs(pid))
+    if (!processRunning(pid))
       continue;
 
     auto ports = portsForPidOs(listenSnapshot, pid);
@@ -126,6 +212,7 @@ void runStatus() {
     }
     writeln(format!"%s(pid=%s port=%s)"(dirName, pid, ports.length ? ports.join(",") : "?"));
   }
+  return 0;
 }
 
 /** Snapshot of TCP listeners: `ss -tlnp` on POSIX, `netstat -ano` on Windows. */
@@ -136,42 +223,14 @@ string readListenSnapshot() @trusted {
       res = execute(["netstat", "-ano"], null, Config.stderrPassThrough);
     if (res.status != 0)
       return "";
-    return cast(string) res.output;
+    return res.output;
   } else version (Posix) {
     auto res = execute(["ss", "-tlnp"], null, Config.stderrPassThrough);
     if (res.status != 0)
       return "";
-    return cast(string) res.output;
+    return res.output;
   } else {
     return "";
-  }
-}
-
-bool processRunningOs(int pid) @trusted {
-  version (Windows) {
-    import core.sys.windows.windows;
-
-    if (pid <= 0)
-      return false;
-    HANDLE h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, cast(DWORD) pid);
-    if (h is null)
-      return false;
-    CloseHandle(h);
-    return true;
-  } else version (Posix) {
-    import core.stdc.errno : errno, EPERM, ESRCH;
-    import core.sys.posix.signal : kill;
-
-    if (pid <= 0)
-      return false;
-    errno = 0;
-    if (kill(pid, 0) == 0)
-      return true;
-    if (errno == EPERM)
-      return true;
-    return errno != ESRCH;
-  } else {
-    return false;
   }
 }
 
@@ -186,7 +245,7 @@ private string[] portsForPidOs(string snapshot, int pid) {
 }
 
 /** Parses `ss -tlnp` output; returns distinct listen ports for `pid`. */
-private string[] portsFromSs(string ssOutput, int pid) {
+string[] portsFromSs(string ssOutput, int pid) {
   auto rePid = regex(format!`pid=%s(,|\))`(pid));
   string[] ports;
   foreach (line; ssOutput.split('\n')) {
@@ -194,11 +253,11 @@ private string[] portsFromSs(string ssOutput, int pid) {
     if (!stripped.length || stripped.canFind("State"))
       continue;
     if (!matchFirst(stripped, rePid).empty) {
-      immutable local = extractLocalAddressBeforeUsers(stripped);
+      auto local = extractLocalAddressBeforeUsers(stripped);
       if (!local.length)
         continue;
       try {
-        immutable p = extractListenPort(local);
+        auto p = extractListenPort(local);
         bool dup;
         foreach (ex; ports) {
           if (ex == p) {
@@ -219,12 +278,13 @@ private string[] portsFromSs(string ssOutput, int pid) {
 
 /**
  * Parses English `netstat -ano` TCP lines (`LISTENING` state).
- * Non-English Windows locales may use a different state label; use English netstat or rely on ss-equivalent tooling then.
+ * Non-English Windows locales may use a different state label; use English netstat,
+ * or rely on ss-equivalent tooling then.
  */
-private string[] portsFromNetstat(string netstatOutput, int pid) {
+string[] portsFromNetstat(string netstatOutput, int pid) {
   auto reLine = regex(`^\s*TCP\s+(\S+)\s+\S+\s+LISTENING\s+(\d+)\s*$`);
   string[] ports;
-  immutable pidStr = pid.to!string;
+  auto pidStr = pid.to!string;
   foreach (line; netstatOutput.split('\n')) {
     auto m = matchFirst(strip(line), reLine);
     if (m.empty)
@@ -232,7 +292,7 @@ private string[] portsFromNetstat(string netstatOutput, int pid) {
     if (m[2] != pidStr)
       continue;
     try {
-      immutable p = extractListenPort(m[1]);
+      auto p = extractListenPort(m[1]);
       bool dup;
       foreach (ex; ports) {
         if (ex == p) {
@@ -251,23 +311,23 @@ private string[] portsFromNetstat(string netstatOutput, int pid) {
 }
 
 /** Slice before `users:(` — same idea as `grep PID` on full line. */
-private string extractLocalAddressBeforeUsers(string line) {
+string extractLocalAddressBeforeUsers(string line) {
   enum marker = "users:(";
-  auto idx = indexOf(line, marker);
+  auto idx = line.indexOf(marker);
   if (idx < 0)
     return "";
   auto left = strip(line[0 .. idx]);
-  auto parts = split(left);
+  auto parts = left.split();
   if (parts.length < 2)
     return "";
   return parts[$ - 2];
 }
 
 /** Port segment from `host:port` or `[ipv6]:port`. */
-private string extractListenPort(string localAddrPort) {
+string extractListenPort(string localAddrPort) {
   auto bracketClose = lastIndexOf(localAddrPort, ']');
   if (bracketClose >= 0) {
-    immutable tail = localAddrPort[bracketClose + 1 .. $];
+    auto tail = localAddrPort[bracketClose + 1 .. $];
     enforce(tail.length >= 2 && tail[0] == ':');
     return strip(tail[1 .. $]);
   }
@@ -282,13 +342,13 @@ private string extractListenPort(string localAddrPort) {
 }
 
 @("portsFromSs finds port field") unittest {
-  immutable sample = "tcp LISTEN 0 128 127.0.0.1:9090 0.0.0.0:* users:((\"java\",pid=4242,fd=99))";
+  auto sample = "tcp LISTEN 0 128 127.0.0.1:9090 0.0.0.0:* users:((\"java\",pid=4242,fd=99))";
   auto ports = portsFromSs(sample ~ "\n", 4242);
   assert(ports == ["9090"]);
 }
 
 @("portsFromNetstat English LISTENING") unittest {
-  immutable sample = "  TCP    127.0.0.1:8088         0.0.0.0:0              LISTENING       805964\r";
+  auto sample = "  TCP    127.0.0.1:8088         0.0.0.0:0              LISTENING       805964\r";
   auto ports = portsFromNetstat(sample ~ "\n", 805964);
   assert(ports == ["8088"]);
 }

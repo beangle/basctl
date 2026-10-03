@@ -1,0 +1,146 @@
+/* Copyright (C) 2023 Beangle
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
+/**
+ * 解析 webapp 的 docBase 与其依赖（Scala `org.beangle.sas.tool.Resolver`）。
+ *
+ * 解析/下载全部交给本机 `jstart`（见 `bas.jstart`）；war 的远端直链走 `curl`。
+ */
+module bas.resolver;
+
+import bas.artifact;
+import bas.config;
+import bas.download;
+import bas.jstart;
+
+import std.algorithm : canFind, endsWith;
+import std.file : exists, isDir, timeLastModified;
+import std.path : absolutePath, buildPath;
+import std.string : empty, replace, split, strip;
+import std.stdio : writeln;
+import std.typecons : Nullable;
+
+/**
+ * 解析每个 webapp 的 docBase 与依赖，返回未能解析的坐标/路径。
+ *
+ * 对 gav：转成 war 后交给 jstart fetch（开发版用快照仓库，允许 `SAS_HOME/webapps`
+ * 下同名 war 覆盖较旧者）；对 http(s)：下载到 `SAS_HOME/webapps`；其余按本地路径处理，
+ * 并展开 `${sas.home}` / `../../../` 前缀。
+ */
+string[] resolveWebapps(string sasHome, Repository releaseRepo, SnapshotRepo snapshotRepo, Webapp[] webapps) {
+  string[] missings;
+
+  foreach (app; webapps) {
+    bool missingDocBase;
+
+    if (isGav(app.uri)) {
+      auto gav = toArtifact(app.uri);
+      if (gav.packaging == "jar")
+        gav = gav.withPackaging("war");
+      auto path = resolveArtifact(releaseRepo, snapshotRepo, gav);
+      if (!path.isNull) {
+        app.docBase = path.get;
+        if (gav.isSnapshot()) {
+          auto localWar = buildPath(sasHome, "webapps", gav.fileName());
+          if (exists(localWar) && timeLastModified(localWar) > timeLastModified(path.get))
+            app.docBase = absolutePath(localWar);
+        }
+      } else {
+        missingDocBase = true;
+        missings ~= gav.asGav();
+      }
+    } else if (isRemote(app.uri)) {
+      auto fileName = downloadToDir(app.uri, buildPath(sasHome, "webapps"));
+      app.docBase = buildPath(sasHome, "webapps", fileName);
+    } else {
+      auto docBase = app.uri;
+      if (docBase.canFind("${sas.home}"))
+        docBase = docBase.replace("${sas.home}", sasHome);
+      else if (docBase.canFind("../../.."))
+        docBase = docBase.replace("../../..", sasHome);
+      app.docBase = docBase;
+    }
+
+    if (!app.libs.isNull) {
+      foreach (a; parseGavs(app.libs.get))
+        resolveArtifact(releaseRepo, snapshotRepo, a);
+    }
+
+    if (!missingDocBase) {
+      if (exists(app.docBase)) {
+        if (app.resolveSupport && resolvable(app.docBase)) {
+          auto resolved = resolve(app.docBase, releaseRepo.local, releaseRepo.remotes, releaseRepo.token);
+          if (resolved.isNull) {
+            writeln("Cannot launch webapp:" ~ app.docBase);
+            missings ~= app.docBase;
+          }
+        }
+      } else {
+        missings ~= app.docBase;
+        writeln("Missing " ~ app.docBase);
+      }
+    }
+  }
+  return missings;
+}
+
+/**
+ * 确保一个构件在本地存在，返回其本地绝对路径。
+ *
+ * 正式版用 release 仓库、开发版用快照仓库，两者都交给 jstart fetch；上游不可达时
+ * 退回本地快照库已有文件。
+ */
+Nullable!string resolveArtifact(Repository releaseRepo, SnapshotRepo snapshotRepo, Artifact gav) {
+  if (gav.isSnapshot())
+    return fetch(gav.asGav(), snapshotRepo);
+  return fetch(gav.asGav(), releaseRepo);
+}
+
+/** 逗号 / 分号 / 换行分隔的 gav 列表（Scala `Resolver.parse`）。 */
+Artifact[] parseGavs(string gavs) {
+  Artifact[] artifacts;
+  if (gavs.strip().empty)
+    return artifacts;
+  auto text = gavs.replace(";", ",").replace("\n", ",").replace("\r", "");
+  while (text.canFind(",,"))
+    text = text.replace(",,", ",");
+  foreach (line; text.strip().split(",")) {
+    auto token = strip(line);
+    if (token.length)
+      artifacts ~= parseArtifact(token);
+  }
+  return artifacts;
+}
+
+private bool resolvable(string path) {
+  if (path.endsWith(".jar") || path.endsWith(".war"))
+    return true;
+  return exists(path) && isDir(path);
+}
+
+@("parse gav lists") unittest {
+  auto a = parseGavs("g1:a1:1; g2:a2:2,\n g3:a3:war:3");
+  assert(a.length == 3);
+  assert(a[0].asGav() == "g1:a1:1");
+  assert(a[2].packaging == "war");
+  assert(parseGavs("  ").length == 0);
+}
+
+@("resolvable recognizes archives and dirs") unittest {
+  assert(resolvable("/tmp/a.jar"));
+  assert(resolvable("/tmp/a.war"));
+  assert(!resolvable("/tmp/a.txt"));
+}
