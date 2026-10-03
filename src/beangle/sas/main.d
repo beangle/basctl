@@ -52,7 +52,7 @@ version (unittest) {
 private:
 
 void printUsage() {
-  stderr.writeln("Usage: sasctl <command>");
+  stderr.writeln("Usage: basctl <command>");
   stderr.writeln("Commands:");
   stderr.writeln("  status   Show running servers (pid, listen ports) under SAS_HOME/servers");
 }

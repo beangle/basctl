@@ -1,5 +1,5 @@
 {
-  "name": "beangle-sas",
+  "name": "beangle-basctl",
   "version": "0.0.1",
   "description": "A Simple Application Server.",
   "authors": ["chaostone"],
@@ -23,7 +23,7 @@
       "name": "executable",
       "targetType": "executable",
       "targetPath": "target",
-      "targetName": "sasctl",
+      "targetName": "basctl",
       "versions": ["EventCoreSilenceLeakWarnings"]
     },
     {
