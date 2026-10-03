@@ -1,0 +1,42 @@
+{
+  "name": "beangle-sas",
+  "version": "0.0.1",
+  "description": "A Simple Application Server.",
+  "authors": ["chaostone"],
+  "license": "GPLv3",
+  "sourcePaths": ["src"],
+  "importPaths": ["src"],
+  "toolchainRequirements": {
+    "dub": ">=1.34.0",
+    "frontend": ">=2.102.0",
+    "ldc": ">=1.32.0"
+  },
+  "dependencies": {
+    "dxml": "~>0.4.5",
+    "vibe-inet": "~>1.2.0",
+    "vibe-d:web": "~>0.10.2",
+    "vibe-http": "~>1.3.2",
+    "vibe-stream:tls": "~>1.3.0"
+  },
+  "configurations": [
+    {
+      "name": "executable",
+      "targetType": "executable",
+      "targetPath": "target",
+      "targetName": "sasctl",
+      "versions": ["EventCoreSilenceLeakWarnings"]
+    },
+    {
+      "name": "unittest",
+      "targetPath": "target",
+      "sourcePaths": ["src", "test"],
+      "importPaths": ["src", "test"],
+      "dependencies": {
+        "silly": "~>1.1.1"
+      }
+    }
+  ],
+  "subConfigurations": {
+    "vibe-stream:tls": "notls"
+  }
+}

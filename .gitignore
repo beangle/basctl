@@ -1,0 +1,20 @@
+*~
+
+# Build output directies
+target
+classes
+
+# Windows 构建生成（由 scripts/setup-windows.ps1 创建）
+lib
+packages
+
+*.log
+
+# dub 本地缓存
+/.dub/
+
+#idea
+*.iml
+*.ipr
+*.iws
+.idea

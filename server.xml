@@ -1,0 +1,27 @@
+<?xml version='1.0' encoding='utf-8'?>
+<Sas version="0.13.9" port="8080">
+  <Engines>
+    <Engine name="tomcat" type="tomcat" version="11.0.18">
+      <Jar uri="gav://org.postgresql:postgresql:42.7.9"/>
+    </Engine>
+  </Engines>
+
+  <Farms>
+    <Farm name="tools" engine="tomcat">
+      <Server name="server1" http="8088"/>
+    </Farm>
+    <Farm name="platform" engine="tomcat">
+      <ServerOptions>-Dems.profile=local</ServerOptions>
+      <Server name="server1" http="8081"/>
+    </Farm>
+  </Farms>
+
+  <Webapps>
+    <Webapp name="tools" uri="gav://org.beangle.otk:beangle-otk-ws:0.0.21" runAt="tools" path="/api/tools" />
+    <Webapp  uri="gav://org.beangle.ems:beangle-ems-cas:4.17.2" runAt="platform" path="/cas" />
+    <Webapp  uri="gav://org.beangle.ems:beangle-ems-portal:4.17.2" runAt="platform" path="/portal" />
+    <Webapp  uri="gav://org.beangle.ems:beangle-ems-ws:4.17.2" runAt="platform" path="/api/platform" />
+  </Webapps>
+
+</Sas>
+
