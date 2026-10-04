@@ -102,7 +102,7 @@ void printUsage() {
   stderr.writeln("Usage: basctl <command> [args]");
   stderr.writeln("Commands:");
   stderr.writeln("  version                       Show logo and local hosts");
-  stderr.writeln("  status                        Show running servers under $SAS_HOME/servers");
+  stderr.writeln("  status                        Show running servers under $BAS_HOME/servers");
   stderr.writeln("  init [--force] [workdir]      Install the control scripts under <workdir>/bin");
   stderr.writeln("  make [server.xml] <pattern>   Generate specs and resolve dependencies (no start)");
   stderr.writeln("  make <type> [options]         Prepare a container for jstart `[engine] init` (creator)");
@@ -164,7 +164,7 @@ int cmdResolve(string[] args) {
     return -1;
   }
   auto container = parseServerXmlFile(configFile);
-  auto sasHome = absolutePath(buildPath(configFile, "..", ".."));
+  auto basHome = absolutePath(buildPath(configFile, "..", ".."));
 
   auto patterns = args[1 .. $];
   auto ips = localAddresses();
@@ -195,26 +195,26 @@ int cmdResolve(string[] args) {
     }
   }
 
-  auto missing = resolveWebapps(sasHome, container.repository, container.snapshotRepo, webapps);
+  auto missing = resolveWebapps(basHome, container.repository, container.snapshotRepo, webapps);
   return missing.length ? -1 : 0;
 }
 
-/** `SAS_HOME` 有值时取其指向目录，否则取当前工作目录。 */
+/** `BAS_HOME` 有值时取其指向目录，否则取当前工作目录。 */
 string resolveSasHome() @trusted {
   import std.file : getcwd;
 
-  auto fromEnv = strip(environment.get("SAS_HOME", ""));
+  auto fromEnv = strip(environment.get("BAS_HOME", ""));
   if (fromEnv.length)
     return absolutePath(fromEnv);
   return absolutePath(getcwd());
 }
 
-/** `status`：列出 `$SAS_HOME/servers` 下仍在运行的实例及其监听端口。 */
+/** `status`：列出 `$BAS_HOME/servers` 下仍在运行的实例及其监听端口。 */
 int cmdStatus() {
   writeln(logo(basctlVersion));
   stdout.flush();
-  auto sasHome = resolveSasHome();
-  auto serversDir = buildPath(sasHome, "servers");
+  auto basHome = resolveSasHome();
+  auto serversDir = buildPath(basHome, "servers");
 
   if (!exists(serversDir) || !isDir(serversDir)) {
     stderr.writeln("No servers directory: ", serversDir);

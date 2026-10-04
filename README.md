@@ -36,7 +36,7 @@ dub test --compiler=ldc2
 | 命令 | 说明 |
 |---|---|
 | `basctl version` | 打印版本横幅与本机地址 |
-| `basctl status` | 列出 `$SAS_HOME/servers` 下运行中的实例及其监听端口 |
+| `basctl status` | 列出 `$BAS_HOME/servers` 下运行中的实例及其监听端口 |
 | `basctl init [--force] [--dry-run] [workdir]` | 初始化组件目录：把控制脚本铺到 `<workdir>/bin`，并建 `conf/` |
 | `basctl make [server.xml] <farm\|server\|all>` | 只准备不启动：生成 jstart spec 并 `jstart resolve` 预取依赖 |
 | `basctl resolve <server.xml> [pattern...]` | 只解析 webapp，不生成实例 |
@@ -65,10 +65,10 @@ basctl init --dry-run /opt/sas
 
 ## 目录约定
 
-`SAS_HOME` 取 `conf/server.xml` 的上两级目录：
+`BAS_HOME` 取 `conf/server.xml` 的上两级目录：
 
 ```
-$SAS_HOME/
+$BAS_HOME/
   conf/server.xml
   engines/<name>-<version>/     # 解压并按需裁剪后的 Tomcat
   servers/<farm>.<server>/      # 单个实例的 catalina.base
@@ -91,7 +91,7 @@ $SAS_HOME/
 ## 与 jstart 的关系
 
 构件的解析与下载委托给本机 `jstart` 命令（`fetch` / `resolve`）；`basctl` 只负责配置模型、
-目录编排与配置渲染。`jstart` 不在 `PATH` 时可用环境变量 `sas_jstart` 指定其路径。
+目录编排与配置渲染。`jstart` 不在 `PATH` 时可用环境变量 `bas_jstart` 指定其路径。
 
 运行 war 时，jstart 按 `[engine] init` 协议调用 basctl 的 `make <type>` 并把 war 交给它：它准备
 webapp、写出最终启动命令，jstart 再 exec。`basctl make tomcat-embed` /
@@ -110,10 +110,10 @@ init = basctl make tomcat-embed
 
 `basctl run` 则面向单应用：它把目标写成单应用 spec（`[app] entry` +
 `make <tomcat|undertow>-embed`），再前台 `jstart run` 并把终端与退出码透传给调用者；
-引擎/容器版本内置在 basctl，可用 `sas_*_version` 覆盖。详见 [docs/run.md](docs/run.md)。
+引擎/容器版本内置在 basctl，可用 `bas_*_version` 覆盖。详见 [docs/run.md](docs/run.md)。
 
 `server.xml` 中 `<repository>` / `<snapshot-repo>` 的 `local` / `remote` / `token` 原样透传给
-`jstart`；`remote` 里的 `${sas_remote_url}`、`token` 里的 `${sas_remote_token}` 在解析阶段
+`jstart`；`remote` 里的 `${bas_remote_url}`、`token` 里的 `${bas_remote_token}` 在解析阶段
 展开为同名环境变量。
 
 ## 许可证

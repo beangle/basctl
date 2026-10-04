@@ -38,8 +38,8 @@
   `WEB-INF` 一起拼进最终 classpath；
 - **多应用（`[subapp <id>]`）没有 `--app-classpath-file`**：jstart 既不写
   `<base>/engine-app.classpath` 也不传该参数，应用依赖不进 JVM classpath，由各
-  `<Context>` 的 `DependencyClassLoader` 按 `-Dsas.repo` 从本地仓库解析；
-- `--local-repo`：本地仓库地址，入口转成 `-Dsas.repo=`（容器内 `DependencyClassLoader`
+  `<Context>` 的 `DependencyClassLoader` 按 `-Dbas.repo` 从本地仓库解析；
+- `--local-repo`：本地仓库地址，入口转成 `-Dbas.repo=`（容器内 `DependencyClassLoader`
   据此解析 war 内依赖清单）；
 - `--entry-out`：最终 argv 的写出文件（NUL 分隔），jstart 读到后 exec。
 
@@ -83,7 +83,7 @@ jstart run --print app.jstart    # 只打印最终启动命令，不 exec
 ```
 
 `basctl start` 会自动按 `server.xml` 生成 spec（`[engine] init` 固定为当前 basctl 的
-`make tomcat-dist` 命令行，可用 `sas_basctl` 覆盖路径），再委托 `jstart run`。
+`make tomcat-dist` 命令行，可用 `bas_basctl` 覆盖路径），再委托 `jstart run`。
 
 ### 必要参数
 
@@ -97,12 +97,12 @@ jstart 单 webapp 时按此调用（多 webapp 见《多 webapp》一节，没�
 
 | 参数 | 必填 | 由谁提供 | 说明 |
 |---|---|---|---|
-| `--base=<dir>` | 是 | jstart | 组件 base（`webapps/`、`engines/`、pid 都在其下）；creator 转成 `-Dsas.home=` |
+| `--base=<dir>` | 是 | jstart | 组件 base（`webapps/`、`engines/`、pid 都在其下）；creator 转成 `-Dbas.home=` |
 | `--entry=<war\|dir>` | 单应用必填 | jstart | war 文件或已解压目录；多 webapp 不传 |
 | `--entry-out=<file>` | 是 | jstart | 最终 argv（NUL 分隔）的写出文件，jstart 读到后 exec |
 | `--engine-classpath-file=<file>` | 是 | jstart | 引擎 jar 清单（`[engine]` 段除 init 外）的解析结果；`tomcat-dist` 也用它找发行包 zip、把 jar 复制进 `lib/` |
 | `--app-classpath-file=<file>` | 单应用有 | jstart | 应用依赖 classpath，与 `WEB-INF` 一起拼进最终 classpath |
-| `--local-repo=<dir>` | 否 | jstart | 本地仓库，creator 转成 `-Dsas.repo=` |
+| `--local-repo=<dir>` | 否 | jstart | 本地仓库，creator 转成 `-Dbas.repo=` |
 | `--app-jvm-arg=<opt>` | 否（可重复） | jstart | `[runtime]` 与 `-D`/`-X` 参数，进最终命令的 JVM 位置 |
 | `--port=` `--path=` `--jsp=` `--listener=` `--docBase=` `--Dk=v` 及其它 | 否 | spec `[args]` / 命令行透传 | 容器参数，由 creator 消费或转发 |
 | `--dist=<tomcat.zip>` | 否 | spec `[args]` | `tomcat-dist` 的发行包；缺省取引擎 classpath 上第一个 `.zip` |
@@ -245,7 +245,7 @@ entry 是目录时不复制、不解压，直接作为 docBase；两种情况下
 
 - 入口通过 `JAVA_HOME/bin/java`（兜底 PATH 上的 `java`）启动容器；`--app-jvm-arg=` 与
   `[runtime]`/`-D`/`-X` 参数由 jstart 透传，写进最终命令的 JVM 参数位置；
-- `--local-repo` 转成 `-Dsas.repo=`，`base` 转成 `-Dsas.home=`，供容器内
+- `--local-repo` 转成 `-Dbas.repo=`，`base` 转成 `-Dbas.home=`，供容器内
   `DependencyClassLoader` 解析每个 webapp 的依赖清单；
 - 单应用与多应用（`[subapp <id>]`）都由本入口处理：无 `--entry` 且 `<base>/engine-subapps.jstart`
   存在即判定为多应用（单应用运行会删除该文件）。嵌入式类型不支持多应用。

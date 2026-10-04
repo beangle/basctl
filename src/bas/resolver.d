@@ -36,11 +36,11 @@ import std.typecons : Nullable;
 /**
  * 解析每个 webapp 的 docBase 与依赖，返回未能解析的坐标/路径。
  *
- * 对 gav：转成 war 后交给 jstart fetch（开发版用快照仓库，允许 `SAS_HOME/webapps`
- * 下同名 war 覆盖较旧者）；对 http(s)：下载到 `SAS_HOME/webapps`；其余按本地路径处理，
- * 并展开 `${sas.home}` / `../../../` 前缀。
+ * 对 gav：转成 war 后交给 jstart fetch（开发版用快照仓库，允许 `BAS_HOME/webapps`
+ * 下同名 war 覆盖较旧者）；对 http(s)：下载到 `BAS_HOME/webapps`；其余按本地路径处理，
+ * 并展开 `${bas.home}` / `../../../` 前缀。
  */
-string[] resolveWebapps(string sasHome, Repository releaseRepo, SnapshotRepo snapshotRepo, Webapp[] webapps) {
+string[] resolveWebapps(string basHome, Repository releaseRepo, SnapshotRepo snapshotRepo, Webapp[] webapps) {
   string[] missings;
 
   foreach (app; webapps) {
@@ -54,7 +54,7 @@ string[] resolveWebapps(string sasHome, Repository releaseRepo, SnapshotRepo sna
       if (!path.isNull) {
         app.docBase = path.get;
         if (gav.isSnapshot()) {
-          auto localWar = buildPath(sasHome, "webapps", gav.fileName());
+          auto localWar = buildPath(basHome, "webapps", gav.fileName());
           if (exists(localWar) && timeLastModified(localWar) > timeLastModified(path.get))
             app.docBase = absolutePath(localWar);
         }
@@ -63,14 +63,14 @@ string[] resolveWebapps(string sasHome, Repository releaseRepo, SnapshotRepo sna
         missings ~= gav.asGav();
       }
     } else if (isRemote(app.uri)) {
-      auto fileName = downloadToDir(app.uri, buildPath(sasHome, "webapps"));
-      app.docBase = buildPath(sasHome, "webapps", fileName);
+      auto fileName = downloadToDir(app.uri, buildPath(basHome, "webapps"));
+      app.docBase = buildPath(basHome, "webapps", fileName);
     } else {
       auto docBase = app.uri;
-      if (docBase.canFind("${sas.home}"))
-        docBase = docBase.replace("${sas.home}", sasHome);
+      if (docBase.canFind("${bas.home}"))
+        docBase = docBase.replace("${bas.home}", basHome);
       else if (docBase.canFind("../../.."))
-        docBase = docBase.replace("../../..", sasHome);
+        docBase = docBase.replace("../../..", basHome);
       app.docBase = docBase;
     }
 

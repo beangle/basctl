@@ -83,13 +83,13 @@ import std.process : environment;
 }
 
 @("embedVersions can be overridden per artifact") unittest {
-  auto previous = environment.get("sas_engine_version", "");
-  environment["sas_engine_version"] = "9.9.9";
+  auto previous = environment.get("bas_engine_version", "");
+  environment["bas_engine_version"] = "9.9.9";
   scope (exit) {
     if (previous.length)
-      environment["sas_engine_version"] = previous;
+      environment["bas_engine_version"] = previous;
     else
-      environment.remove("sas_engine_version");
+      environment.remove("bas_engine_version");
   }
   assert(embedVersions().engine == "9.9.9");
 }

@@ -27,7 +27,7 @@
  *  4. 后台 `jstart run <spec>`：jstart 先运行 `[engine] init`（写成本 basctl 的
  *     `make tomcat-dist` 命令行）→ 它准备容器环境并写出最终启动命令，jstart 再 exec。
  *
- * 实例目录沿用 `servers/<farm.server>`——spec 里写 `[app] base = $SAS_HOME/servers`
+ * 实例目录沿用 `servers/<farm.server>`——spec 里写 `[app] base = $BAS_HOME/servers`
  * 加 `[app] instance = <farm.server>`，jstart 的直接组件目录就是它；`SERVER_PID` 与
  * `logs/console.out` 也与既有布局一致。
  *
@@ -74,7 +74,7 @@ int runStart(string configFile, string pattern) {
     return 1;
   }
   auto container = parseServerXmlFile(configFile);
-  auto sasHome = dirName(dirName(absolutePath(configFile)));
+  auto basHome = dirName(dirName(absolutePath(configFile)));
   auto servers = localServers(container, pattern);
   if (!servers.length) {
     stderr.writeln("No local server matches " ~ pattern);
@@ -87,14 +87,14 @@ int runStart(string configFile, string pattern) {
   PreparedServer[] prepared;
   int alreadyRunning;
   foreach (server; servers) {
-    auto pid = runningPid(sasHome, server);
+    auto pid = runningPid(basHome, server);
     if (!pid.isNull) {
       writeln(server.qualifiedName ~ " appears to still be running with PID " ~ pid.get.to!string
           ~ ". Start skipped.");
       alreadyRunning++;
       continue;
     }
-    auto spec = prepareServer(sasHome, container, server);
+    auto spec = prepareServer(basHome, container, server);
     if (!spec.isNull)
       prepared ~= PreparedServer(server, spec.get);
   }
@@ -109,8 +109,8 @@ int runStart(string configFile, string pattern) {
   // 2. 后台启动，再统一确认存活
   int[] pids;
   foreach (ref p; prepared) {
-    prepareLog(sasHome, p.server);
-    pids ~= launchBackground(p.spec, consoleLog(sasHome, p.server), repoArgs(container));
+    prepareLog(basHome, p.server);
+    pids ~= launchBackground(p.spec, consoleLog(basHome, p.server), repoArgs(container));
   }
 
   Thread.sleep(msecs(startupProbeMs));
@@ -118,13 +118,13 @@ int runStart(string configFile, string pattern) {
   int started;
   foreach (i, ref p; prepared) {
     if (pids[i] > 0 && processRunning(pids[i])) {
-      writePidFile(sasHome, p.server, pids[i]);
+      writePidFile(basHome, p.server, pids[i]);
       writeln(format!"%s started (pid=%s, log=%s)"(p.server.qualifiedName, pids[i],
-          consoleLog(sasHome, p.server)));
+          consoleLog(basHome, p.server)));
       started++;
     } else {
-      stderr.writeln(p.server.qualifiedName ~ " failed to start, see " ~ consoleLog(sasHome, p.server));
-      printLogTail(consoleLog(sasHome, p.server));
+      stderr.writeln(p.server.qualifiedName ~ " failed to start, see " ~ consoleLog(basHome, p.server));
+      printLogTail(consoleLog(basHome, p.server));
     }
   }
   writeln(started, " servers started.");
@@ -144,7 +144,7 @@ int runMake(string configFile, string pattern) {
     return 1;
   }
   auto container = parseServerXmlFile(configFile);
-  auto sasHome = dirName(dirName(absolutePath(configFile)));
+  auto basHome = dirName(dirName(absolutePath(configFile)));
   auto servers = localServers(container, pattern);
   if (!servers.length) {
     stderr.writeln("No local server matches " ~ pattern);
@@ -154,7 +154,7 @@ int runMake(string configFile, string pattern) {
 
   int prepared, failed;
   foreach (server; servers) {
-    if (prepareServer(sasHome, container, server).isNull)
+    if (prepareServer(basHome, container, server).isNull)
       failed++;
     else
       prepared++;
@@ -190,7 +190,7 @@ int runStop(string configFile, string[] rest) {
     return 1;
   }
   auto container = parseServerXmlFile(configFile);
-  auto sasHome = dirName(dirName(absolutePath(configFile)));
+  auto basHome = dirName(dirName(absolutePath(configFile)));
   auto servers = localServers(container, rest[0]);
   if (!servers.length) {
     stderr.writeln("No local server matches " ~ rest[0]);
@@ -200,7 +200,7 @@ int runStop(string configFile, string[] rest) {
 
   int stopped, skipped;
   foreach (server; servers) {
-    auto spec = buildPath(sasHome, "conf", server.qualifiedName ~ ".jstart");
+    auto spec = buildPath(basHome, "conf", server.qualifiedName ~ ".jstart");
     if (!exists(spec)) {
       stderr.writeln(server.qualifiedName ~ ": no spec " ~ spec
           ~ " (started outside basctl? use the legacy stop.sh)");
@@ -216,7 +216,7 @@ int runStop(string configFile, string[] rest) {
       continue;
     }
     writeln(server.qualifiedName ~ ": stopped");
-    removeStalePid(sasHome, server);
+    removeStalePid(basHome, server);
     stopped++;
   }
   writeln(stopped, " servers stopped.",
@@ -240,8 +240,8 @@ Server[] localServers(Container container, string pattern) {
 }
 
 /** 停止后清理残留 `SERVER_PID`（进程已不在时）。 */
-private void removeStalePid(string sasHome, Server server) {
-  auto path = buildPath(sasHome, "servers", server.qualifiedName, "SERVER_PID");
+private void removeStalePid(string basHome, Server server) {
+  auto path = buildPath(basHome, "servers", server.qualifiedName, "SERVER_PID");
   if (!exists(path))
     return;
   try {
@@ -263,7 +263,7 @@ private struct PreparedServer {
  * 为单个 `<server>` 生成 spec：解析 webapp、确保引擎依赖本地齐备、写出 `[engine] init` 命令行
  * 与 `conf/<name>.jstart`。成功返回 spec 路径，失败返回空。
  */
-private Nullable!string prepareServer(string sasHome, Container container, Server server) {
+private Nullable!string prepareServer(string basHome, Container container, Server server) {
   auto webapps = container.getWebapps(server);
   if (!webapps.length) {
     writeln(server.qualifiedName ~ ": no webapp deployed, skipped.");
@@ -277,9 +277,9 @@ private Nullable!string prepareServer(string sasHome, Container container, Serve
     return Nullable!string.init;
   }
 
-  auto serverDir = buildPath(sasHome, "servers", server.qualifiedName);
+  auto serverDir = buildPath(basHome, "servers", server.qualifiedName);
   auto errorFile = buildPath(serverDir, "error");
-  auto missings = resolveWebapps(sasHome, container.repository, container.snapshotRepo, webapps);
+  auto missings = resolveWebapps(basHome, container.repository, container.snapshotRepo, webapps);
   mkdirRecurse(serverDir);
   if (missings.length) {
     write(errorFile, missings.join("\n"));
@@ -294,9 +294,9 @@ private Nullable!string prepareServer(string sasHome, Container container, Serve
     return Nullable!string.init;
 
   auto initCommand = engineInitCommand();
-  auto spec = buildPath(sasHome, "conf", server.qualifiedName ~ ".jstart");
+  auto spec = buildPath(basHome, "conf", server.qualifiedName ~ ".jstart");
   mkdirRecurse(dirName(spec));
-  write(spec, renderLaunchSpec(buildPath(sasHome, "servers"), server.qualifiedName, sasHome,
+  write(spec, renderLaunchSpec(buildPath(basHome, "servers"), server.qualifiedName, basHome,
       initCommand, engineDeps, runtimeArgsFor(server), appArgsFor(server), subappSpecs(webapps)));
   writeln(server.qualifiedName ~ ": wrote " ~ spec);
   if (!resolveSpec(spec, repoArgs(container)))
@@ -344,7 +344,7 @@ string[] runtimeArgsFor(Server server) {
   auto farm = server.farm;
   auto heap = server.maxHeapSize.length ? server.maxHeapSize : "300M";
   string[] args = ["-server", "-Djava.awt.headless=true", "-Xmx" ~ heap,
-    "-Djava.security.egd=file:/dev/./urandom", "-Dsas.server=" ~ server.qualifiedName];
+    "-Djava.security.egd=file:/dev/./urandom", "-Dbas.server=" ~ server.qualifiedName];
   if (!farm.serverOptions.isNull) {
     foreach (line; farm.serverOptions.get.split("\n")) {
       auto one = strip(line);
@@ -487,13 +487,13 @@ private int launchBackground(string spec, string log, const(string)[] repos) {
 }
 
 /** 实例控制台日志：`logs/<farm.server>/console.out`（`servers/<name>/logs` 为其软链）。 */
-string consoleLog(string sasHome, Server server) {
-  return buildPath(sasHome, "logs", server.qualifiedName, "console.out");
+string consoleLog(string basHome, Server server) {
+  return buildPath(basHome, "logs", server.qualifiedName, "console.out");
 }
 
 /** 运行中的实例 pid（`servers/<name>/SERVER_PID` 指向一个存活进程时）。 */
-Nullable!int runningPid(string sasHome, Server server) {
-  auto path = buildPath(sasHome, "servers", server.qualifiedName, "SERVER_PID");
+Nullable!int runningPid(string basHome, Server server) {
+  auto path = buildPath(basHome, "servers", server.qualifiedName, "SERVER_PID");
   if (!exists(path))
     return Nullable!int.init;
   try {
@@ -505,18 +505,18 @@ Nullable!int runningPid(string sasHome, Server server) {
 }
 
 /** 记录实例 pid（`servers/<name>/SERVER_PID`，供 `status`/`stop` 使用）。 */
-private void writePidFile(string sasHome, Server server, int pid) {
-  auto serverDir = buildPath(sasHome, "servers", server.qualifiedName);
+private void writePidFile(string basHome, Server server, int pid) {
+  auto serverDir = buildPath(basHome, "servers", server.qualifiedName);
   mkdirRecurse(serverDir);
   write(buildPath(serverDir, "SERVER_PID"), pid.to!string);
 }
 
 /** 启动前准备日志：`servers/<name>/logs` → `logs/<name>`，并归档旧 console.out。 */
-private void prepareLog(string sasHome, Server server) {
-  auto logDir = buildPath(sasHome, "logs", server.qualifiedName);
+private void prepareLog(string basHome, Server server) {
+  auto logDir = buildPath(basHome, "logs", server.qualifiedName);
   mkdirRecurse(logDir);
-  linkIfMissing(logDir, buildPath(sasHome, "servers", server.qualifiedName, "logs"));
-  rollLog(sasHome, server);
+  linkIfMissing(logDir, buildPath(basHome, "servers", server.qualifiedName, "logs"));
+  rollLog(basHome, server);
 }
 
 /** 打印日志末尾若干行，方便一眼看出启动失败原因。 */

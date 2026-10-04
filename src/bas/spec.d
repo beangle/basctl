@@ -91,11 +91,11 @@ string engineInitCommand(string containerType = "tomcat-dist") {
 }
 
 /**
- * basctl 可执行文件路径：优先环境变量 `sas_basctl`，否则用 `/proc/self/exe`，
+ * basctl 可执行文件路径：优先环境变量 `bas_basctl`，否则用 `/proc/self/exe`，
  * 最后退回 `PATH` 上的 `basctl`。
  */
 string basctlExecutable() @trusted {
-  auto fromEnv = strip(environment.get("sas_basctl", ""));
+  auto fromEnv = strip(environment.get("bas_basctl", ""));
   if (fromEnv.length)
     return fromEnv;
   version (linux) {

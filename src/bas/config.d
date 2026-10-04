@@ -655,7 +655,7 @@ Repository parseRepository(XmlElem elem) {
   return new Repository(local, remote, token);
 }
 
-/** 解析开发版 `<snapshot-repo>`：`remote` 先展开 `${sas_remote_url}`。 */
+/** 解析开发版 `<snapshot-repo>`：`remote` 先展开 `${bas_remote_url}`。 */
 SnapshotRepo parseSnapshotRepo(XmlElem elem) {
   auto local = nonBlankAttr(elem, "local");
   auto remote = expandSasRemoteUrl(nonBlankAttr(elem, "remote"));
@@ -663,14 +663,14 @@ SnapshotRepo parseSnapshotRepo(XmlElem elem) {
   return new SnapshotRepo(local, remote, token);
 }
 
-/** 解析仓库的 `token` 属性，支持 `${sas_remote_token}` 占位。 */
+/** 解析仓库的 `token` 属性，支持 `${bas_remote_token}` 占位。 */
 Nullable!string resolveToken(Nullable!string token) {
   if (token.isNull || strip(token.get).empty)
     return Nullable!string.init;
   auto result = token.get;
-  enum marker = "${sas_remote_token}";
+  enum marker = "${bas_remote_token}";
   if (result.canFind(marker)) {
-    auto envToken = environment.get("sas_remote_token", "");
+    auto envToken = environment.get("bas_remote_token", "");
     if (envToken.empty)
       return Nullable!string.init;
     result = result.replace(marker, envToken);
@@ -680,15 +680,15 @@ Nullable!string resolveToken(Nullable!string token) {
   return nullable(result);
 }
 
-/** 展开 `${sas_remote_url}`，取到 `/api/` 之前；离线时返回空。 */
+/** 展开 `${bas_remote_url}`，取到 `/api/` 之前；离线时返回空。 */
 Nullable!string expandSasRemoteUrl(Nullable!string remote) {
   if (remote.isNull)
     return Nullable!string.init;
-  enum marker = "${sas_remote_url}";
+  enum marker = "${bas_remote_url}";
   auto value = remote.get;
   if (!value.canFind(marker))
     return nullable(value);
-  auto remoteUrl = environment.get("sas_remote_url", "");
+  auto remoteUrl = environment.get("bas_remote_url", "");
   if (remoteUrl.empty)
     return Nullable!string.init;
   auto cut = remoteUrl.indexOf("/api/");
@@ -779,13 +779,13 @@ Farm parseFarm(Container conf, XmlElem elem) {
   return farm;
 }
 
-/** 展开 `server-options` 中的 `${sas_remote_url}`；环境变量缺失时原样返回。 */
+/** 展开 `server-options` 中的 `${bas_remote_url}`；环境变量缺失时原样返回。 */
 string expandServerOptionsEnv(string opts) {
-  enum marker = "${sas_remote_url}";
+  enum marker = "${bas_remote_url}";
   auto trimmed = trimLines(opts);
   if (!trimmed.canFind(marker))
     return trimmed;
-  auto remoteUrl = environment.get("sas_remote_url", "");
+  auto remoteUrl = environment.get("bas_remote_url", "");
   if (remoteUrl.empty)
     return trimmed;
   return trimmed.replace(marker, remoteUrl);

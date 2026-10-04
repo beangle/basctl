@@ -23,7 +23,7 @@
  * 其退出并返回同一退出码。
  *
  * 与多实例模式的差别只有输入来源：`start` 从 `conf/server.xml` 取引擎版本与实例
- * 清单，`run` 用 basctl 内置的缺省版本（可用 `sas_*_version` 环境变量覆盖），并固定
+ * 清单，`run` 用 basctl 内置的缺省版本（可用 `bas_*_version` 环境变量覆盖），并固定
  * 一个组件目录（`--base` / `--instance`，缺省 `/tmp/sas`）。两者的 spec 渲染与
  * `make <type>` 回调完全共用（见 {@link bas.spec}）。
  */
@@ -40,7 +40,7 @@ import std.process : ProcessException, environment, spawnProcess, wait;
 import std.stdio : stderr, stdout, writeln;
 import std.string : startsWith, strip;
 
-/** 嵌入式运行构件的缺省版本；每项可用 `sas_*_version` 环境变量覆盖。 */
+/** 嵌入式运行构件的缺省版本；每项可用 `bas_*_version` 环境变量覆盖。 */
 struct EmbedVersions {
   string engine = "0.13.16";
   string scala = "3.9.0";
@@ -227,7 +227,7 @@ int execJstart(string[] args) {
   try {
     return wait(spawnProcess(jstartCommand() ~ args));
   } catch (ProcessException) {
-    stderr.writeln("Cannot run " ~ jstartCommand() ~ ", install jstart or set sas_jstart to its path.");
+    stderr.writeln("Cannot run " ~ jstartCommand() ~ ", install jstart or set bas_jstart to its path.");
     return 1;
   }
 }
@@ -284,17 +284,17 @@ string[] undertowDeps(EmbedVersions v) {
   ];
 }
 
-/** 内置版本，逐项用 `sas_*_version` 环境变量覆盖。 */
+/** 内置版本，逐项用 `bas_*_version` 环境变量覆盖。 */
 EmbedVersions embedVersions() @trusted {
   EmbedVersions v;
-  v.engine = envOr("sas_engine_version", v.engine);
-  v.scala = envOr("sas_scala_version", v.scala);
-  v.commons = envOr("sas_commons_version", v.commons);
-  v.slf4j = envOr("sas_slf4j_version", v.slf4j);
-  v.logback = envOr("sas_logback_version", v.logback);
-  v.tomcat = envOr("sas_tomcat_version", v.tomcat);
-  v.undertow = envOr("sas_undertow_version", v.undertow);
-  v.undertowEe = envOr("sas_undertow_ee_version", v.undertowEe);
+  v.engine = envOr("bas_engine_version", v.engine);
+  v.scala = envOr("bas_scala_version", v.scala);
+  v.commons = envOr("bas_commons_version", v.commons);
+  v.slf4j = envOr("bas_slf4j_version", v.slf4j);
+  v.logback = envOr("bas_logback_version", v.logback);
+  v.tomcat = envOr("bas_tomcat_version", v.tomcat);
+  v.undertow = envOr("bas_undertow_version", v.undertow);
+  v.undertowEe = envOr("bas_undertow_ee_version", v.undertowEe);
   return v;
 }
 

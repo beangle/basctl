@@ -59,12 +59,12 @@ bool processRunning(int pid) @trusted {
  * 滚动 `servers/<name>/logs/console.out` 到 `logs/archive/<name>-yyyyMMdd.out`，
  * 然后重建空的 console.out。
  */
-void rollLog(string sasHome, Server server) {
-  auto serverHome = buildPath(sasHome, "servers", server.qualifiedName);
+void rollLog(string basHome, Server server) {
+  auto serverHome = buildPath(basHome, "servers", server.qualifiedName);
   auto consoleOut = buildPath(serverHome, "logs", "console.out");
   if (exists(consoleOut)) {
     auto now = Clock.currTime();
-    auto archiveDir = buildPath(sasHome, "logs", "archive");
+    auto archiveDir = buildPath(basHome, "logs", "archive");
     mkdirRecurse(archiveDir);
     auto archive = buildPath(archiveDir, format!"%s-%04d%02d%02d.out"(
         server.qualifiedName, now.year, now.month, now.day));

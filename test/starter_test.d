@@ -42,7 +42,7 @@ import std.algorithm : canFind;
   auto server = cfg.farms[0].servers[0];
   auto args = runtimeArgsFor(server);
   assert(args.canFind("-Xmx512M"));
-  assert(args.canFind("-Dsas.server=f.s1"));
+  assert(args.canFind("-Dbas.server=f.s1"));
   assert(args.canFind("-Dems.profile=local"));
   assert(args.canFind("--add-opens=java.base/java.lang=ALL-UNNAMED"));
   assert(appArgsFor(server) == ["--port=8080"]);

@@ -72,7 +72,7 @@
 
   <xs:complexType name="repositoryType">
     <xs:annotation>
-      <xs:documentation>release / SNAPSHOT 仓库；remote 与 token 支持 ${sas_remote_url}、${sas_remote_token} 占位。</xs:documentation>
+      <xs:documentation>release / SNAPSHOT 仓库；remote 与 token 支持 ${bas_remote_url}、${bas_remote_token} 占位。</xs:documentation>
     </xs:annotation>
     <xs:attribute name="local" type="xs:string">
       <xs:annotation>

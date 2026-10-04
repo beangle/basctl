@@ -516,10 +516,10 @@ void createEmbed(string mainClass, EngineOptions o) {
 
   string[] argv = [javaExecutable()];
   argv ~= o.appJvmArgs;
-  // 组件 base 即 sas.home：DependencyClassLoader 由它推 ${sas.home}/webapps 里的快照覆盖
-  argv ~= "-Dsas.home=" ~ base;
+  // 组件 base 即 bas.home：DependencyClassLoader 由它推 ${bas.home}/webapps 里的快照覆盖
+  argv ~= "-Dbas.home=" ~ base;
   if (o.localRepo.length)
-    argv ~= "-Dsas.repo=" ~ o.localRepo;
+    argv ~= "-Dbas.repo=" ~ o.localRepo;
   argv ~= "-cp";
   argv ~= runtimeClasspath(o.engineClasspath(), o.appClasspath(), docBase);
   argv ~= mainClass;
@@ -558,10 +558,10 @@ void createDist(EngineOptions o) {
 
   string[] argv = [javaExecutable()];
   argv ~= o.appJvmArgs;
-  // sas.home 指向组件 base：DependencyClassLoader 由它推 ${sas.home}/webapps 里的快照覆盖
-  argv ~= "-Dsas.home=" ~ absolutePath(o.base);
+  // bas.home 指向组件 base：DependencyClassLoader 由它推 ${bas.home}/webapps 里的快照覆盖
+  argv ~= "-Dbas.home=" ~ absolutePath(o.base);
   if (o.localRepo.length)
-    argv ~= "-Dsas.repo=" ~ o.localRepo;
+    argv ~= "-Dbas.repo=" ~ o.localRepo;
   foreach (p; o.properties)
     argv ~= "-D" ~ p.key ~ "=" ~ p.value;
   argv ~= "-Dcatalina.base=" ~ absolutePath(home);
@@ -595,10 +595,10 @@ void createDistMulti(EngineOptions o) {
 
   string[] argv = [javaExecutable()];
   argv ~= o.appJvmArgs;
-  // sas.home 指向组件 base：DependencyClassLoader 由它推 ${sas.home}/webapps 里的快照覆盖
-  argv ~= "-Dsas.home=" ~ absolutePath(o.base);
+  // bas.home 指向组件 base：DependencyClassLoader 由它推 ${bas.home}/webapps 里的快照覆盖
+  argv ~= "-Dbas.home=" ~ absolutePath(o.base);
   if (o.localRepo.length)
-    argv ~= "-Dsas.repo=" ~ o.localRepo;
+    argv ~= "-Dbas.repo=" ~ o.localRepo;
   foreach (p; o.properties)
     argv ~= "-D" ~ p.key ~ "=" ~ p.value;
   argv ~= "-Dcatalina.base=" ~ absolutePath(home);

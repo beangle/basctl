@@ -116,7 +116,7 @@ int runInit(string[] args) {
   }
 
   if (!workdir.length) {
-    auto fromEnv = strip(environment.get("SAS_HOME", ""));
+    auto fromEnv = strip(environment.get("BAS_HOME", ""));
     workdir = fromEnv.length ? fromEnv : getcwd();
   }
   workdir = absolutePath(workdir);
@@ -134,5 +134,5 @@ void initUsage() {
   stderr.writeln("  Install the control scripts (env.sh, sas.sh, start.sh, stop.sh,");
   stderr.writeln("  restart.sh) into <workdir>/bin and create <workdir>/conf. Existing");
   stderr.writeln("  scripts are kept unless --force is given. <workdir> defaults to");
-  stderr.writeln("  $SAS_HOME (or the current directory).");
+  stderr.writeln("  $BAS_HOME (or the current directory).");
 }

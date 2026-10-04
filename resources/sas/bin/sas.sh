@@ -4,17 +4,17 @@
 set -o pipefail
 
 PRGDIR=$(dirname "$0")
-export SAS_HOME=$(cd "$PRGDIR/../" >/dev/null; pwd)
-. "$SAS_HOME/bin/env.sh"
+export BAS_HOME=$(cd "$PRGDIR/../" >/dev/null; pwd)
+. "$BAS_HOME/bin/env.sh"
 
-if [ -x "$SAS_HOME/bin/setenv.sh" ]; then
-  . "$SAS_HOME/bin/setenv.sh"
+if [ -x "$BAS_HOME/bin/setenv.sh" ]; then
+  . "$BAS_HOME/bin/setenv.sh"
 fi
 
 # basctl 作为子进程运行，setenv.sh 里未 export 的变量要显式导出
-export sas_remote_url
+export bas_remote_url
 
-conf="$SAS_HOME/conf/server.xml"
+conf="$BAS_HOME/conf/server.xml"
 
 usage() {
   echo "Usage: sas.sh <command> [args]"
@@ -35,10 +35,10 @@ case "$cmd" in
   version)  exec "$basctl_cmd" version ;;
   status)   exec "$basctl_cmd" status ;;
   resolve)  exec "$basctl_cmd" resolve "$conf" "${@:2}" ;;
-  start)    exec "$SAS_HOME/bin/start.sh" "${@:2}" ;;
-  stop)     exec "$SAS_HOME/bin/stop.sh" "${@:2}" ;;
-  run)      exec "$basctl_cmd" run --workdir="$SAS_HOME" "${@:2}" ;;
-  restart)  exec "$SAS_HOME/bin/restart.sh" "${@:2}" ;;
-  pull)     exec "$basctl_cmd" pull "$SAS_HOME" ;;
+  start)    exec "$BAS_HOME/bin/start.sh" "${@:2}" ;;
+  stop)     exec "$BAS_HOME/bin/stop.sh" "${@:2}" ;;
+  run)      exec "$basctl_cmd" run --workdir="$BAS_HOME" "${@:2}" ;;
+  restart)  exec "$BAS_HOME/bin/restart.sh" "${@:2}" ;;
+  pull)     exec "$basctl_cmd" pull "$BAS_HOME" ;;
   *)        usage ;;
 esac

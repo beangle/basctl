@@ -17,7 +17,7 @@
 /**
  * `pull`：从控制端拉取 `conf/server.xml`。
  *
- * remote 缺省取环境变量 `sas_remote_url`（由发行包的 `bin/setenv.sh` 提供），请求带
+ * remote 缺省取环境变量 `bas_remote_url`（由发行包的 `bin/setenv.sh` 提供），请求带
  * `ip:<本机地址>` 头，服务端据此下发该机器对应的配置。旧配置备份为
  * `conf/server_old.xml`；拉取失败时保留现有配置不动。
  */
@@ -56,14 +56,14 @@ int runPull(string[] args) {
   }
 
   if (!remote.length)
-    remote = strip(environment.get("sas_remote_url", ""));
+    remote = strip(environment.get("bas_remote_url", ""));
   if (!remote.length) {
-    stderr.writeln("define sas_remote_url in bin/setenv.sh (or pass --remote=<url>)");
+    stderr.writeln("define bas_remote_url in bin/setenv.sh (or pass --remote=<url>)");
     return 1;
   }
 
   if (!workdir.length) {
-    auto fromEnv = strip(environment.get("SAS_HOME", ""));
+    auto fromEnv = strip(environment.get("BAS_HOME", ""));
     workdir = fromEnv.length ? fromEnv : getcwd();
   }
   workdir = absolutePath(workdir);
@@ -115,6 +115,6 @@ string ipHeader(const(string)[] addresses) {
 void pullUsage() {
   stderr.writeln("Usage: basctl pull [--remote=<url>] [workdir]");
   stderr.writeln("  Fetch <remote>/config/server.xml into <workdir>/conf, backing up the old");
-  stderr.writeln("  file as server_old.xml. <url> defaults to $sas_remote_url, <workdir> to");
-  stderr.writeln("  $SAS_HOME (or the current directory).");
+  stderr.writeln("  file as server_old.xml. <url> defaults to $bas_remote_url, <workdir> to");
+  stderr.writeln("  $BAS_HOME (or the current directory).");
 }

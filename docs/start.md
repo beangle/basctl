@@ -6,7 +6,7 @@
 
 ```sh
 basctl start conf/server.xml platform   # 启动 platform farm 在本机的实例
-basctl start platform                   # 简写：用 $SAS_HOME/conf/server.xml
+basctl start platform                   # 简写：用 $BAS_HOME/conf/server.xml
 basctl start all
 ```
 
@@ -46,7 +46,7 @@ instance = platform.server1                  # 组件目录名 → jstart 实例
 working_dir = /opt/sas
 
 [engine]
-init = basctl make tomcat-dist              # 当前 basctl（可用 sas_basctl 覆盖路径）
+init = basctl make tomcat-dist              # 当前 basctl（可用 bas_basctl 覆盖路径）
 org.apache.tomcat:tomcat:zip:11.0.18         # 发行包（creator 取 classpath 上的 zip 解压）
 org.beangle.sas:beangle-sas-engine:0.13.16   # 引擎 jar（会被装进 dist 的 lib/）
 org.beangle.sas:beangle-sas-juli:0.13.16     # 容器日志桥接（放 Catalina 系统 classpath，不进 lib/）
@@ -59,7 +59,7 @@ org.postgresql:postgresql:42.7.9             # <engine><jar> 原样带上
 -Djava.awt.headless=true
 -Xmx256M                                     # farm/server 的 max-heap-size（缺省 300M）
 -Djava.security.egd=file:/dev/./urandom
--Dsas.server=platform.server1
+-Dbas.server=platform.server1
 -Dems.profile=local                          # <farm><server-options>
 
 [args]
@@ -92,8 +92,8 @@ libs = org.postgresql:postgresql:42.7.9      # <webapp libs="...">
 
 - 只支持 `type="tomcat"` 的引擎（多 Context 需要 `tomcat-dist`），其它类型会报错；
 - `[engine] init` 直接写当前 `basctl` 的 `make tomcat-dist` 命令行（路径取自
-  `/proc/self/exe`，可用环境变量 `sas_basctl` 覆盖，含空格时会加引号）；`jstart` 仍用
-  `sas_jstart` 指定；
+  `/proc/self/exe`，可用环境变量 `bas_basctl` 覆盖，含空格时会加引号）；`jstart` 仍用
+  `bas_jstart` 指定；
 - 实例目录靠 `[app] instance` 显式命名（`servers/<farm.server>`），与 `make`/`status`/`logs`
   的布局一致；`instance` 是 spec-only 的键，stop 也从 spec 读，删了 spec 就停不掉该实例；
 - 生成物是派生物：改配置后重跑 `basctl start` 会覆盖 spec；
