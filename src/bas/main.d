@@ -15,8 +15,8 @@
  */
 
 /**
- * basctl 命令行入口：`version` / `status` / `make` / `resolve` / `start` / `stop` /
- * `run` / `firewall` / `pull`。
+ * basctl 命令行入口：`version` / `status` / `init` / `make` / `resolve` / `start` /
+ * `stop` / `run` / `firewall` / `pull`。
  */
 module bas.main;
 
@@ -25,6 +25,7 @@ import bas.config;
 import bas.embed : runEmbedded;
 import bas.enginecreator;
 import bas.firewall;
+import bas.init;
 import bas.net;
 import bas.pull;
 import bas.resolver;
@@ -57,6 +58,8 @@ version (unittest) {
       return cmdVersion();
     case "status":
       return cmdStatus();
+    case "init":
+      return runInit(args[2 .. $]);
     case "make":
       return cmdMake(args[2 .. $]);
     case "resolve":
@@ -100,6 +103,7 @@ void printUsage() {
   stderr.writeln("Commands:");
   stderr.writeln("  version                       Show logo and local hosts");
   stderr.writeln("  status                        Show running servers under $SAS_HOME/servers");
+  stderr.writeln("  init [--force] [workdir]      Install the control scripts under <workdir>/bin");
   stderr.writeln("  make [server.xml] <pattern>   Generate specs and resolve dependencies (no start)");
   stderr.writeln("  make <type> [options]         Prepare a container for jstart `[engine] init` (creator)");
   stderr.writeln("  resolve <server.xml> [pattern...]  Resolve webapps only");

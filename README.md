@@ -37,6 +37,7 @@ dub test --compiler=ldc2
 |---|---|
 | `basctl version` | 打印版本横幅与本机地址 |
 | `basctl status` | 列出 `$SAS_HOME/servers` 下运行中的实例及其监听端口 |
+| `basctl init [--force] [--dry-run] [workdir]` | 初始化组件目录：把控制脚本铺到 `<workdir>/bin`，并建 `conf/` |
 | `basctl make [server.xml] <farm\|server\|all>` | 只准备不启动：生成 jstart spec 并 `jstart resolve` 预取依赖 |
 | `basctl resolve <server.xml> [pattern...]` | 只解析 webapp，不生成实例 |
 | `basctl start [server.xml] <farm\|server\|all>` | 按 farm 生成 jstart spec、resolve 并后台启动实例 |
@@ -45,6 +46,22 @@ dub test --compiler=ldc2
 | `basctl make <type> [options]` | 容器入口（creator）：把 jstart 的 `[engine] init` 协议翻译成容器启动命令 |
 | `basctl firewall [workdir]` | 按配置交互式配置 firewalld 端口 |
 | `basctl pull [--remote=<url>] [workdir]` | 从控制端拉取 `conf/server.xml`（请求带 `ip:` 头，旧配置备份为 `server_old.xml`） |
+
+## 组件目录初始化
+
+`basctl init [workdir]` 把控制脚本（`env.sh`、`sas.sh`、`start.sh`、`stop.sh`、
+`restart.sh`）铺到 `<workdir>/bin` 并建好 `conf/`，用于从零搭建一个 sas 组件目录。
+脚本内嵌在 basctl 里，随 basctl 版本发布，不再依赖单独的发行包：
+
+```sh
+basctl init /opt/sas          # 写入 /opt/sas/bin/*.sh（已存在的脚本保留）
+basctl init --force /opt/sas  # 覆盖为当前 basctl 内置的脚本
+basctl init --dry-run /opt/sas
+```
+
+`bin/setenv.sh` 与 `conf/server.xml` 是用户配置（分别由用户与 `basctl pull` 维护），
+`init` 不生成也不改动它们。这是脚本唯一的安装/升级途径：升级 `basctl` 后重跑
+`basctl init --force`，不再有单独的发行包 zip（原 `sas.sh update` 已移除）。
 
 ## 目录约定
 
