@@ -1,17 +1,22 @@
 # basctl
 
 `basctl` 是 Beangle SAS（Simple Application Server）的控制面命令行工具，用 D 语言实现。
-它把 `conf/server.xml` 解析成可运行的 Tomcat 实例目录：解析 webapp（`gav://` /
-`http(s)://` / 本地路径）、生成 `engines/` 与 `servers/`，并渲染 Tomcat 的
-`server.xml`、`web.xml`、`setenv.sh`；也可按 farm 生成 jstart launch spec 并直接拉起实例，
-或以嵌入式模式运行单个 webapp（war / Maven 坐标 / url），同时提供实例状态与防火墙等工具。
+它把 `conf/server.xml` 解析成可运行的 Tomcat 实例：解析 webapp（`gav://` /
+`http(s)://` / 本地路径）、生成实例目录与 jstart launch spec，并渲染容器所需的
+`server.xml`、`web.xml`；也可按 farm 直接拉起实例，或以嵌入式模式运行单个 webapp
+（war / Maven 坐标 / url），同时提供实例状态与防火墙等工具。
 
-本仓库由 `beangle-sas` 的 `core`（Scala）子项目迁移而来，**Proxy 相关能力不迁移**；
-`engine` 模块的**容器入口**（creator，配合 jstart 的 war 运行协议）也在此用 D 重写。
-逐文件映射与已知差异见 [docs/core-migration.md](docs/core-migration.md)，容器入口见
-[docs/engine-creator.md](docs/engine-creator.md)，`start` 的流程与生成的 spec 见
-[docs/start.md](docs/start.md)，嵌入式 `run` 见 [docs/run.md](docs/run.md)；控制面与运行时拆分需求见
-[docs/requirements-sas-control-plane.md](docs/requirements-sas-control-plane.md)。
+`engine` 模块的**容器入口**（creator，配合 jstart 的 war 运行协议）也由 basctl 提供，
+见 [docs/engine-creator.md](docs/engine-creator.md)；`start` 的流程与生成的 spec 见
+[docs/start.md](docs/start.md)，嵌入式 `run` 见 [docs/run.md](docs/run.md)。
+
+## 配置格式
+
+`conf/server.xml` 的格式由 [resources/bas-1.0.0.xsd](resources/bas-1.0.0.xsd) 定义：根元素为
+`<bas>`，元素与属性一律小写连字符（如 `<snapshot-repo>`、`max-heap-size`、`run-at`）。
+发布副本为 <http://beangle.github.io/schema/bas-1.0.0.xsd>，在配置根元素上加
+`xsi:noNamespaceSchemaLocation="http://beangle.github.io/schema/bas-1.0.0.xsd"` 即可获得
+IDE 补全与校验（见 `server.xml` 样例）。
 
 ## 构建与测试
 
@@ -90,7 +95,7 @@ init = basctl make tomcat-embed
 `make <tomcat|undertow>-embed`），再前台 `jstart run` 并把终端与退出码透传给调用者；
 引擎/容器版本内置在 basctl，可用 `sas_*_version` 覆盖。详见 [docs/run.md](docs/run.md)。
 
-`server.xml` 中 `<Repository>` / `<SnapshotRepo>` 的 `local` / `remote` / `token` 原样透传给
+`server.xml` 中 `<repository>` / `<snapshot-repo>` 的 `local` / `remote` / `token` 原样透传给
 `jstart`；`remote` 里的 `${sas_remote_url}`、`token` 里的 `${sas_remote_token}` 在解析阶段
 展开为同名环境变量。
 

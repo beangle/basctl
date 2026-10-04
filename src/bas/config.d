@@ -15,7 +15,7 @@
  */
 
 /**
- * `server.xml`（`<Sas>`）的配置模型与解析（不含 Proxy）。
+ * `server.xml`（`<bas>`）的配置模型与解析（不含 Proxy）。格式定义见 `resources/bas-1.0.0.xsd`。
  *
  * 解析结果是一个可直接遍历的对象图：`Container` 持有 engines / hosts / farms /
  * webapps / resources，`Farm` 引用 `Engine`，`Server` 引用 `Farm` 与 `Host`，
@@ -52,7 +52,7 @@ enum engineUndertow = "undertow";
 enum engineJetty = "jetty";
 enum engineAny = "any";
 
-/** A `<Listener>` under `<Engine>`：类名加任意属性。 */
+/** A `<listener>` under `<engine>`：类名加任意属性。 */
 class Listener {
   string className;
   string[string] properties;
@@ -62,7 +62,7 @@ class Listener {
   }
 }
 
-/** A `<Loader>` under `<Context>`：类名加任意属性。 */
+/** A `<loader>` under `<context>`：类名加任意属性。 */
 class Loader {
   string className;
   string[string] properties;
@@ -72,19 +72,19 @@ class Loader {
   }
 }
 
-/** A `<JarScanner>` under `<Context>`：只有属性。 */
+/** A `<jar-scanner>` under `<context>`：只有属性。 */
 class JarScanner {
   string[string] properties;
 }
 
-/** An optional `<Context>` under `<Engine>`. */
+/** An optional `<context>` under `<engine>`. */
 class Context {
   Loader loader;
   JarScanner jarScanner;
 }
 
 /**
- * An engine jar reference（`<Jar uri="...">`）。
+ * An engine jar reference（`<jar uri="...">`）。
  *
  * `uri` 可以是 `gav://`、`http(s)://` 或本地路径；`name` 推导出落地文件名。
  */
@@ -121,7 +121,7 @@ private string baseNameOf(string path) {
   return baseName(path);
 }
 
-/** An engine definition from `<Engines><Engine>`. */
+/** An engine definition from `<engines><engine>`. */
 class Engine {
   string name;
   string typ;
@@ -186,7 +186,7 @@ void applyEngineDefault(Container container, Engine engine) {
   }
 }
 
-/** A named host mapping（`<Hosts><Host>`）。 */
+/** A named host mapping（`<hosts><host>`）。 */
 class Host {
   string name;
   string ip;
@@ -206,7 +206,7 @@ class Host {
   }
 }
 
-/** A keyed resource（`<Resources><Resource>`），属性原样保留。 */
+/** A keyed resource（`<resources><resource>`），属性原样保留。 */
 class Resource {
   string name;
   string[string] properties;
@@ -256,7 +256,7 @@ class HttpConnector {
   bool disableUploadTimeout = true;
 }
 
-/** A farm groups servers sharing one engine（`<Farm>`）。 */
+/** A farm groups servers sharing one engine（`<farm>`）。 */
 class Farm {
   string name;
   Engine engine;
@@ -276,7 +276,7 @@ class Farm {
   }
 }
 
-/** A single JVM instance under a farm（`<Server>`）。 */
+/** A single JVM instance under a farm（`<server>`）。 */
 class Server {
   Farm farm;
   string name;
@@ -299,7 +299,7 @@ class Server {
   }
 }
 
-/** A deployed web application（`<Webapp>`）。 */
+/** A deployed web application（`<webapp>`）。 */
 class Webapp {
   string uri;
   string[string] properties;
@@ -348,7 +348,7 @@ class Webapp {
   }
 }
 
-/** 正式版仓库配置（server.xml 的 `<Repository>`）。 */
+/** 正式版仓库配置（server.xml 的 `<repository>`）。 */
 class Repository {
   Nullable!string local;
   Nullable!string remote;
@@ -371,7 +371,7 @@ class Repository {
   }
 }
 
-/** 开发版（SNAPSHOT）仓库配置（server.xml 的 `<SnapshotRepo>`）。 */
+/** 开发版（SNAPSHOT）仓库配置（server.xml 的 `<snapshot-repo>`）。 */
 class SnapshotRepo {
   Nullable!string local;
   Nullable!string remote;
@@ -526,54 +526,54 @@ class Container {
 /** 解析 `server.xml` 文本为 `Container`。 */
 Container parseServerXml(string xmlText) {
   auto dom = parseDOM(xmlText);
-  auto sasElem = requireRootElement(dom, "Sas");
+  auto basElem = requireRootElement(dom, "bas");
 
   auto conf = new Container;
-  conf.version_ = requireAttr(sasElem, "version", "<Sas>");
+  conf.version_ = requireAttr(basElem, "version", "<bas>");
 
   // 1. repositories
   conf.repository = new Repository;
-  foreach (c; elementChildren(sasElem)) {
-    if (c.name == "Repository")
+  foreach (c; elementChildren(basElem)) {
+    if (c.name == "repository")
       conf.repository = parseRepository(c);
-    else if (c.name == "SnapshotRepo")
+    else if (c.name == "snapshot-repo")
       conf.snapshotRepo = parseSnapshotRepo(c);
   }
   if (conf.snapshotRepo is null)
     conf.snapshotRepo = new SnapshotRepo;
 
   // 2. engines
-  foreach (section; elementChildren(sasElem)) {
+  foreach (section; elementChildren(basElem)) {
     switch (section.name) {
-    case "Engines":
+    case "engines":
       foreach (e; elementChildren(section)) {
-        if (e.name == "Engine")
+        if (e.name == "engine")
           conf.engines ~= parseEngine(e);
       }
       break;
-    case "Hosts":
+    case "hosts":
       foreach (h; elementChildren(section)) {
-        if (h.name == "Host")
+        if (h.name == "host")
           conf.hosts ~= parseHost(h);
       }
       break;
-    case "Resources":
+    case "resources":
       foreach (r; elementChildren(section)) {
-        if (r.name == "Resource") {
+        if (r.name == "resource") {
           auto res = parseResource(r);
           conf.resources[res.name] = res;
         }
       }
       break;
-    case "Farms":
+    case "farms":
       foreach (f; elementChildren(section)) {
-        if (f.name == "Farm")
+        if (f.name == "farm")
           conf.farms ~= parseFarm(conf, f);
       }
       break;
-    case "Webapps":
+    case "webapps":
       foreach (w; elementChildren(section)) {
-        if (w.name == "Webapp")
+        if (w.name == "webapp")
           conf.webapps ~= parseWebapp(conf, w);
       }
       break;
@@ -647,7 +647,7 @@ Nullable!string nonBlankAttr(XmlElem elem, string name) {
   return nullable(strip(v.get));
 }
 
-/** 解析正式版 `<Repository>`：本地目录、远端地址与可选令牌。 */
+/** 解析正式版 `<repository>`：本地目录、远端地址与可选令牌。 */
 Repository parseRepository(XmlElem elem) {
   auto local = nonBlankAttr(elem, "local");
   auto remote = nonBlankAttr(elem, "remote");
@@ -655,7 +655,7 @@ Repository parseRepository(XmlElem elem) {
   return new Repository(local, remote, token);
 }
 
-/** 解析开发版 `<SnapshotRepo>`：`remote` 先展开 `${sas_remote_url}`。 */
+/** 解析开发版 `<snapshot-repo>`：`remote` 先展开 `${sas_remote_url}`。 */
 SnapshotRepo parseSnapshotRepo(XmlElem elem) {
   auto local = nonBlankAttr(elem, "local");
   auto remote = expandSasRemoteUrl(nonBlankAttr(elem, "remote"));
@@ -697,29 +697,29 @@ Nullable!string expandSasRemoteUrl(Nullable!string remote) {
   return nullable(value.replace(marker, remoteUrl));
 }
 
-/** 解析 `<Engine>` 及其 `<Listener>` / `<Context>` / `<Jar>` 子节点。 */
+/** 解析 `<engine>` 及其 `<listener>` / `<context>` / `<jar>` 子节点。 */
 Engine parseEngine(XmlElem elem) {
-  auto e = new Engine(requireAttr(elem, "name", "<Engine>"),
-      requireAttr(elem, "type", "<Engine>"),
-      requireAttr(elem, "version", "<Engine>"));
-  auto jsp = optAttr(elem, "jspSupport");
+  auto e = new Engine(requireAttr(elem, "name", "<engine>"),
+      requireAttr(elem, "type", "<engine>"),
+      requireAttr(elem, "version", "<engine>"));
+  auto jsp = optAttr(elem, "jsp-support");
   e.jspSupport = !jsp.isNull && jsp.get == "true";
 
   foreach (c; elementChildren(elem)) {
     switch (c.name) {
-    case "Listener":
-      auto l = new Listener(requireAttr(c, "className", "<Listener>"));
-      l.properties = attrsExcept(c, ["className"]);
+    case "listener":
+      auto l = new Listener(requireAttr(c, "class-name", "<listener>"));
+      l.properties = attrsExcept(c, ["class-name"]);
       e.listeners ~= l;
       break;
-    case "Context":
+    case "context":
       auto ctx = new Context;
       foreach (x; elementChildren(c)) {
-        if (x.name == "Loader") {
-          auto ld = new Loader(requireAttr(x, "className", "<Loader>"));
-          ld.properties = attrsExcept(x, ["className"]);
+        if (x.name == "loader") {
+          auto ld = new Loader(requireAttr(x, "class-name", "<loader>"));
+          ld.properties = attrsExcept(x, ["class-name"]);
           ctx.loader = ld;
-        } else if (x.name == "JarScanner") {
+        } else if (x.name == "jar-scanner") {
           auto js = new JarScanner;
           js.properties = attrsExcept(x, []);
           ctx.jarScanner = js;
@@ -727,8 +727,8 @@ Engine parseEngine(XmlElem elem) {
       }
       e.context = ctx;
       break;
-    case "Jar":
-      e.jars ~= new Jar(requireAttr(c, "uri", "<Jar>"));
+    case "jar":
+      e.jars ~= new Jar(requireAttr(c, "uri", "<jar>"));
       break;
     default:
       break;
@@ -737,38 +737,38 @@ Engine parseEngine(XmlElem elem) {
   return e;
 }
 
-/** 解析 `<Host>`（名称 + 绑定 IP）。 */
+/** 解析 `<host>`（名称 + 绑定 IP）。 */
 Host parseHost(XmlElem elem) {
-  return new Host(requireAttr(elem, "name", "<Host>"), requireAttr(elem, "ip", "<Host>"));
+  return new Host(requireAttr(elem, "name", "<host>"), requireAttr(elem, "ip", "<host>"));
 }
 
-/** 解析 `<Resource>`：`name` 单独取出，其余属性原样透传给 Tomcat。 */
+/** 解析 `<resource>`：`name` 单独取出，其余属性原样透传给 Tomcat。 */
 Resource parseResource(XmlElem elem) {
-  auto r = new Resource(requireAttr(elem, "name", "<Resource>"));
+  auto r = new Resource(requireAttr(elem, "name", "<resource>"));
   r.properties = attrsExcept(elem, ["name"]);
   return r;
 }
 
-/** 解析 `<Farm>`：绑定引擎、`ServerOptions`，并递归解析各 `<Server>`。 */
+/** 解析 `<farm>`：绑定引擎、`server-options`，并递归解析各 `<server>`。 */
 Farm parseFarm(Container conf, XmlElem elem) {
-  auto name = requireAttr(elem, "name", "<Farm>");
+  auto name = requireAttr(elem, "name", "<farm>");
   enforce!ServerXmlException(!name.canFind('.'), "farm name " ~ name ~ " cannot contains dot");
-  auto engName = requireAttr(elem, "engine", "<Farm>");
+  auto engName = requireAttr(elem, "engine", "<farm>");
   auto eng = conf.engine(engName);
   enforce!ServerXmlException(eng !is null, "Cannot find engine for " ~ engName);
 
   auto farm = new Farm(name, eng);
-  auto mhs = nonBlankAttr(elem, "maxHeapSize");
+  auto mhs = nonBlankAttr(elem, "max-heap-size");
   farm.maxHeapSize = mhs.isNull ? "300M" : mhs.get;
 
-  auto serverOptions = findFirstChildText(elem, "ServerOptions");
+  auto serverOptions = findFirstChildText(elem, "server-options");
   if (serverOptions.length)
     farm.serverOptions = nullable(expandServerOptionsEnv(serverOptions));
 
   foreach (c; elementChildren(elem)) {
-    if (c.name == "Http")
+    if (c.name == "http")
       readHttpConnector(c, farm.http);
-    else if (c.name == "Server")
+    else if (c.name == "server")
       farm.servers ~= parseServer(conf, farm, c);
   }
 
@@ -779,7 +779,7 @@ Farm parseFarm(Container conf, XmlElem elem) {
   return farm;
 }
 
-/** 展开 `ServerOptions` 中的 `${sas_remote_url}`；环境变量缺失时原样返回。 */
+/** 展开 `server-options` 中的 `${sas_remote_url}`；环境变量缺失时原样返回。 */
 string expandServerOptionsEnv(string opts) {
   enum marker = "${sas_remote_url}";
   auto trimmed = trimLines(opts);
@@ -791,71 +791,73 @@ string expandServerOptionsEnv(string opts) {
   return trimmed.replace(marker, remoteUrl);
 }
 
-/** 解析 `<Server>`：http 端口、host 归属与堆大小（缺省继承 farm）。 */
+/** 解析 `<server>`：http 端口、host 归属与堆大小（缺省继承 farm）。 */
 Server parseServer(Container conf, Farm farm, XmlElem elem) {
-  auto s = new Server(farm, requireAttr(elem, "name", "<Server>"));
+  auto s = new Server(farm, requireAttr(elem, "name", "<server>"));
   s.http = parseIntAttr(elem, "http", 0);
 
   auto hostName = nonBlankAttr(elem, "host");
   s.host = hostName.isNull ? Host.localhost() : conf.getHost(hostName.get);
 
-  auto mhs = nonBlankAttr(elem, "maxHeapSize");
+  auto mhs = nonBlankAttr(elem, "max-heap-size");
   s.maxHeapSize = mhs.isNull ? farm.maxHeapSize : mhs.get;
   return s;
 }
 
-/** 读取 `<Http>` 上的连接器参数，只覆盖显式给出的项。 */
+/** 读取 `<http>` 上的连接器参数，只覆盖显式给出的项。 */
 void readHttpConnector(XmlElem elem, HttpConnector http) {
-  auto el = optAttr(elem, "enableLookups");
+  auto el = optAttr(elem, "enable-lookups");
   if (!el.isNull)
     http.enableLookups = el.get == "true";
 
-  auto ac = optPositiveIntAttr(elem, "acceptCount");
+  auto ac = optPositiveIntAttr(elem, "accept-count");
   if (!ac.isNull)
     http.acceptCount = ac;
 
-  auto mc = optPositiveIntAttr(elem, "maxConnections");
+  auto mc = optPositiveIntAttr(elem, "max-connections");
   if (!mc.isNull)
     http.maxConnections = mc;
 
-  auto dut = optAttr(elem, "disableUploadTimeout");
+  auto dut = optAttr(elem, "disable-upload-timeout");
   if (!dut.isNull)
     http.disableUploadTimeout = dut.get == "true";
 
-  auto ct = optPositiveIntAttr(elem, "connectionTimeout");
+  auto ct = optPositiveIntAttr(elem, "connection-timeout");
   if (!ct.isNull)
     http.connectionTimeout = ct.get;
 }
 
 Webapp parseWebapp(Container conf, XmlElem elem) {
-  auto w = new Webapp(requireAttr(elem, "uri", "<Webapp>"));
+  auto w = new Webapp(requireAttr(elem, "uri", "<webapp>"));
 
-  static immutable reserved = ["name", "uri", "reloadable", "path", "runAt", "docBase", "libs", "jspSupport"];
+  static immutable reserved = ["name", "uri", "reloadable", "path", "run-at", "doc-base", "libs",
+    "jsp-support", "resolve-support"];
   w.properties = attrsExcept(elem, reserved);
 
-  auto jsp = optAttr(elem, "jspSupport");
+  auto jsp = optAttr(elem, "jsp-support");
   w.jspSupport = !jsp.isNull && jsp.get == "true";
+
+  auto resolve = optAttr(elem, "resolve-support");
+  w.resolveSupport = resolve.isNull || strip(resolve.get) != "false";
 
   auto libs = nonBlankAttr(elem, "libs");
   if (!libs.isNull)
     w.libs = libs;
 
   foreach (c; elementChildren(elem)) {
-    if (c.name == "ResourceRef") {
-      auto refName = requireAttr(c, "ref", "<ResourceRef>");
+    if (c.name == "resource-ref") {
+      auto refName = requireAttr(c, "ref", "<resource-ref>");
       auto res = refName in conf.resources;
       enforce!ServerXmlException(res !is null, "Missing resource ref '" ~ refName ~ "' for webapp " ~ w.uri);
       w.resources ~= *res;
-    } else if (c.name == "Realm") {
+    } else if (c.name == "realm") {
       w.realms = "<Realm " ~ renderAttrs(c) ~ "/>";
-    } else if (c.name == "resolveSupport") {
-      w.resolveSupport = strip(deepText(c)) == "true";
     }
   }
 
   w.updatePath(nonBlankAttr(elem, "path").isNull ? "" : nonBlankAttr(elem, "path").get);
 
-  auto runAt = optAttr(elem, "runAt");
+  auto runAt = optAttr(elem, "run-at");
   if (!runAt.isNull) {
     foreach (token; splitRunTokens(runAt.get)) {
       Farm matchedFarm;

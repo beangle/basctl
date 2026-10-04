@@ -12,11 +12,11 @@ basctl start all
 
 ## 流程
 
-1. **选实例**：从 `<Farms>` 中挑出匹配 pattern（farm 名 / `farm.server` / `all`）、且
-   `<Server>` 所属 host 在本机的实例；
+1. **选实例**：从 `<farms>` 中挑出匹配 pattern（farm 名 / `farm.server` / `all`）、且
+   `<server>` 所属 host 在本机的实例；
 2. **解析 webapp**：沿用 `make` / `resolve` 的语义（`gav://`、http(s) 直链、本地路径、
    SNAPSHOT 本地覆盖）；失败写 `servers/<farm.server>/error` 并跳过该实例；
-3. **生成 spec**：`conf/<farm.server>.jstart`——一个 `<Server>` 一份 spec（一个 JVM），
+3. **生成 spec**：`conf/<farm.server>.jstart`——一个 `<server>` 一份 spec（一个 JVM），
    并把 `[engine] init` 写成本 basctl 的 `make tomcat-dist` 命令行；
 4. **`jstart resolve <spec>`**：校验 spec 与各 webapp 的依赖齐备，失败即不启动该实例；
 5. **后台 `jstart run <spec>`**：jstart 先运行 `[engine] init`（即 `make tomcat-dist`
@@ -52,18 +52,18 @@ org.beangle.sas:beangle-sas-engine:0.13.16   # 引擎 jar（会被装进 dist �
 org.beangle.sas:beangle-sas-juli:0.13.16     # 容器日志桥接（放 Catalina 系统 classpath，不进 lib/）
 org.scala-lang:scala-library:3.9.0           # 引擎 jar 随包声明的 META-INF/beangle/dependencies
 org.scala-lang:scala3-library_3:3.9.0        #   （自动读取补齐，无需在 server.xml 重复声明）
-org.postgresql:postgresql:42.7.9             # <Engine><Jar> 原样带上
+org.postgresql:postgresql:42.7.9             # <engine><jar> 原样带上
 
 [runtime]
 -server
 -Djava.awt.headless=true
--Xmx256M                                     # farm/server 的 maxHeapSize（缺省 300M）
+-Xmx256M                                     # farm/server 的 max-heap-size（缺省 300M）
 -Djava.security.egd=file:/dev/./urandom
 -Dsas.server=platform.server1
--Dems.profile=local                          # <Farm><ServerOptions>
+-Dems.profile=local                          # <farm><server-options>
 
 [args]
---port=8081                                  # <Server http="8081">
+--port=8081                                  # <server http="8081">
 
 [subapp cas]
 entry = /repo/org/beangle/ems/beangle-ems-cas_3/4.8.8/beangle-ems-cas_3-4.8.8.war
@@ -72,10 +72,10 @@ path = /cas
 [subapp portal]
 entry = /repo/org/beangle/ems/beangle-ems-portal/4.8.8/beangle-ems-portal-4.8.8.war
 path = /portal
-libs = org.postgresql:postgresql:42.7.9      # <Webapp libs="...">
+libs = org.postgresql:postgresql:42.7.9      # <webapp libs="...">
 ```
 
-- 一个 `<Server>` = 一个 JVM = 一份 spec；server 上的每个 `<Webapp>` 是一段
+- 一个 `<server>` = 一个 JVM = 一份 spec；server 上的每个 `<webapp>` 是一段
   `[subapp <id>]`（id 由 context path 推导），各自 docBase 与 `libs`，**依赖互不串味**：
   每个 Context 用自己的 `DependencyClassLoader`，应用依赖不进 JVM classpath；
 - `[engine]` 的依赖会被 creator 装进 Tomcat `lib/`：发行包来自 `[engine]` 里的 `.zip`，

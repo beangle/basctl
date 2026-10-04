@@ -19,9 +19,9 @@
  *
  * 沿用 sas「按 farm 启动」的语义，启动本身交给 jstart：
  *
- *  1. 从 `conf/server.xml` 选出匹配的本机 `<Server>`（farm 名 / `farm.server` / `all`）；
- *  2. 逐个解析 webapp（沿用 `make`/`resolve` 的语义），为每个 `<Server>` 生成一份
- *     launch spec `conf/<farm.server>.jstart`——一个 `<Server>` 一个 JVM，内部每个
+ *  1. 从 `conf/server.xml` 选出匹配的本机 `<server>`（farm 名 / `farm.server` / `all`）；
+ *  2. 逐个解析 webapp（沿用 `make`/`resolve` 的语义），为每个 `<server>` 生成一份
+ *     launch spec `conf/<farm.server>.jstart`——一个 `<server>` 一个 JVM，内部每个
  *     webapp 一段 `[subapp <id>]`（各自 docBase 与 `libs`，依赖互不串味）；
  *  3. `jstart resolve <spec>` 校验 spec 与依赖齐备；
  *  4. 后台 `jstart run <spec>`：jstart 先运行 `[engine] init`（写成本 basctl 的
@@ -260,7 +260,7 @@ private struct PreparedServer {
 }
 
 /**
- * 为单个 `<Server>` 生成 spec：解析 webapp、确保引擎依赖本地齐备、写出 `[engine] init` 命令行
+ * 为单个 `<server>` 生成 spec：解析 webapp、确保引擎依赖本地齐备、写出 `[engine] init` 命令行
  * 与 `conf/<name>.jstart`。成功返回 spec 路径，失败返回空。
  */
 private Nullable!string prepareServer(string sasHome, Container container, Server server) {
@@ -339,7 +339,7 @@ string subappId(string contextPath, const(string)[] used) {
   return id;
 }
 
-/** `[runtime]`：sas 的 JVM 默认参数 + `<Farm><ServerOptions>`。 */
+/** `[runtime]`：sas 的 JVM 默认参数 + `<farm><server-options>`。 */
 string[] runtimeArgsFor(Server server) {
   auto farm = server.farm;
   auto heap = server.maxHeapSize.length ? server.maxHeapSize : "300M";
@@ -366,7 +366,7 @@ string[] appArgsFor(Server server) {
 }
 
 /**
- * `[engine]` 依赖行：tomcat 发行包 + `<Engine><Jar>`（`applyEngineDefault` 已把引擎 jar
+ * `[engine]` 依赖行：tomcat 发行包 + `<engine><jar>`（`applyEngineDefault` 已把引擎 jar
  * 加进去）+ 引擎 jar 随包发布的 `META-INF/beangle/dependencies`（引擎运行时依赖）。
  *
  * 逐条校验确保本地齐备（gav 走 jstart fetch），缺失即失败——避免 `run` 阶段才发现。
@@ -442,9 +442,9 @@ private string shellJoin(const(string)[] args) {
 }
 
 /**
- * 调用 jstart（`resolve` / `run`）时的仓库参数：本地库取 `<Repository local>`，
- * 缺省退回 `<SnapshotRepo local>`；上游分别是 `<Repository remote>` 与
- * `<SnapshotRepo remote>`（快照仓库走独立的 `--snapshot-remote=`）。
+ * 调用 jstart（`resolve` / `run`）时的仓库参数：本地库取 `<repository local>`，
+ * 缺省退回 `<snapshot-repo local>`；上游分别是 `<repository remote>` 与
+ * `<snapshot-repo remote>`（快照仓库走独立的 `--snapshot-remote=`）。
  * 都没配时不传，交给 jstart 的内置默认。
  */
 string[] repoArgs(Container container) {

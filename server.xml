@@ -1,27 +1,28 @@
 <?xml version='1.0' encoding='utf-8'?>
-<Sas version="0.13.9" port="8080">
-  <Engines>
-    <Engine name="tomcat" type="tomcat" version="11.0.18">
-      <Jar uri="gav://org.postgresql:postgresql:42.7.9"/>
-    </Engine>
-  </Engines>
+<bas xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+     xsi:noNamespaceSchemaLocation="http://beangle.github.io/schema/bas-1.0.0.xsd"
+     version="0.13.9">
+  <engines>
+    <engine name="tomcat" type="tomcat" version="11.0.18">
+      <jar uri="gav://org.postgresql:postgresql:42.7.9"/>
+    </engine>
+  </engines>
 
-  <Farms>
-    <Farm name="tools" engine="tomcat">
-      <Server name="server1" http="8088"/>
-    </Farm>
-    <Farm name="platform" engine="tomcat">
-      <ServerOptions>-Dems.profile=local</ServerOptions>
-      <Server name="server1" http="8081"/>
-    </Farm>
-  </Farms>
+  <farms>
+    <farm name="tools" engine="tomcat">
+      <server name="server1" http="8088"/>
+    </farm>
+    <farm name="platform" engine="tomcat">
+      <server-options>-Dems.profile=local</server-options>
+      <server name="server1" http="8081"/>
+    </farm>
+  </farms>
 
-  <Webapps>
-    <Webapp name="tools" uri="gav://org.beangle.otk:beangle-otk-ws:0.0.21" runAt="tools" path="/api/tools" />
-    <Webapp  uri="gav://org.beangle.ems:beangle-ems-cas:4.17.2" runAt="platform" path="/cas" />
-    <Webapp  uri="gav://org.beangle.ems:beangle-ems-portal:4.17.2" runAt="platform" path="/portal" />
-    <Webapp  uri="gav://org.beangle.ems:beangle-ems-ws:4.17.2" runAt="platform" path="/api/platform" />
-  </Webapps>
+  <webapps>
+    <webapp name="tools" uri="gav://org.beangle.otk:beangle-otk-ws:0.0.21" run-at="tools" path="/api/tools" />
+    <webapp  uri="gav://org.beangle.ems:beangle-ems-cas:4.17.2" run-at="platform" path="/cas" />
+    <webapp  uri="gav://org.beangle.ems:beangle-ems-portal:4.17.2" run-at="platform" path="/portal" />
+    <webapp  uri="gav://org.beangle.ems:beangle-ems-ws:4.17.2" run-at="platform" path="/api/platform" />
+  </webapps>
 
-</Sas>
-
+</bas>

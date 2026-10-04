@@ -69,15 +69,15 @@ import std.format : format;
 
 @("runAt resolves qualified server name") unittest {
   auto xml = format!(`
-    <Sas version="1">
-      <Engines><Engine name="t" type="tomcat" version="9"/></Engines>
-      <Farms>
-        <Farm name="a" engine="t"><Server name="s1" http="8080"/></Farm>
-      </Farms>
-      <Webapps>
-        <Webapp uri="gav://x:y:1" runAt="a.s1" path="/x"/>
-      </Webapps>
-    </Sas>`);
+    <bas version="1">
+      <engines><engine name="t" type="tomcat" version="9"/></engines>
+      <farms>
+        <farm name="a" engine="t"><server name="s1" http="8080"/></farm>
+      </farms>
+      <webapps>
+        <webapp uri="gav://x:y:1" run-at="a.s1" path="/x"/>
+      </webapps>
+    </bas>`);
   auto cfg = parseServerXml(xml);
   assert(cfg.webapps[0].runAt.length == 1);
   assert(cfg.webapps[0].runAt[0].qualifiedName == "a.s1");
@@ -85,26 +85,25 @@ import std.format : format;
 
 @("listener, context and resource refs") unittest {
   auto xml = `
-    <Sas version="9">
-      <Engines>
-        <Engine name="t" type="tomcat" version="11" jspSupport="true">
-          <Listener className="L1" foo="bar"/>
-          <Context>
-            <Loader className="MyLoader" loaderClass="MyClassLoader"/>
-            <JarScanner scanAllFiles="false"/>
-          </Context>
-        </Engine>
-      </Engines>
-      <Hosts><Host name="h1" ip="10.0.0.1"/></Hosts>
-      <Resources><Resource name="ds1" url="jdbc:x" type="javax.sql.DataSource"/></Resources>
-      <Farms><Farm name="f" engine="t" maxHeapSize="1G"><Server name="s" http="80" host="h1"/></Farm></Farms>
-      <Webapps>
-        <Webapp uri="gav://a:b:1" runAt="f" path="/" docBase="/tmp/a.war">
-          <ResourceRef ref="ds1"/>
-          <resolveSupport>false</resolveSupport>
-        </Webapp>
-      </Webapps>
-    </Sas>`;
+    <bas version="9">
+      <engines>
+        <engine name="t" type="tomcat" version="11" jsp-support="true">
+          <listener class-name="L1" foo="bar"/>
+          <context>
+            <loader class-name="MyLoader" loaderClass="MyClassLoader"/>
+            <jar-scanner scanAllFiles="false"/>
+          </context>
+        </engine>
+      </engines>
+      <hosts><host name="h1" ip="10.0.0.1"/></hosts>
+      <resources><resource name="ds1" url="jdbc:x" type="javax.sql.DataSource"/></resources>
+      <farms><farm name="f" engine="t" max-heap-size="1G"><server name="s" http="80" host="h1"/></farm></farms>
+      <webapps>
+        <webapp uri="gav://a:b:1" run-at="f" path="/" doc-base="/tmp/a.war" resolve-support="false">
+          <resource-ref ref="ds1"/>
+        </webapp>
+      </webapps>
+    </bas>`;
   auto cfg = parseServerXml(xml);
   assert(cfg.engines[0].jspSupport);
   assert(cfg.engines[0].listeners.length == 1);
@@ -133,15 +132,15 @@ import std.format : format;
 @("missing farm engine is rejected") unittest {
   import std.exception : assertThrown;
 
-  auto xml = `<Sas version="1"><Engines/><Farms><Farm name="f" engine="nope"/></Farms></Sas>`;
+  auto xml = `<bas version="1"><engines/><farms><farm name="f" engine="nope"/></farms></bas>`;
   assertThrown!ServerXmlException(parseServerXml(xml));
 }
 
 @("applyEngineDefault fills tomcat defaults once") unittest {
-  auto cfg = parseServerXml(`<Sas version="0.13.9">
-      <Engines><Engine name="tomcat" type="tomcat" version="11.0.5"/></Engines>
-      <Farms><Farm name="f" engine="tomcat"><Server name="s" http="8080"/></Farm></Farms>
-    </Sas>`);
+  auto cfg = parseServerXml(`<bas version="0.13.9">
+      <engines><engine name="tomcat" type="tomcat" version="11.0.5"/></engines>
+      <farms><farm name="f" engine="tomcat"><server name="s" http="8080"/></farm></farms>
+    </bas>`);
   auto engine = cfg.engines[0];
   applyEngineDefault(cfg, engine);
   assert(engine.listeners.length == 2);

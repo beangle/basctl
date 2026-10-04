@@ -1,0 +1,365 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+  elementFormDefault="qualified"
+  version="1.0.0">
+
+  <!--
+    bas 配置（conf/server.xml）的格式定义，schema 版本 1.0.0。
+
+    源文件：basctl/resources/bas-1.0.0.xsd
+    发布副本：http://beangle.github.io/schema/bas-1.0.0.xsd
+    解析实现：basctl/src/bas/config.d（parseServerXml）
+
+    版本策略：schema 版本独立于 basctl / sas 的发行号。**发布后的文件冻结、不再改动**；
+    遇到不兼容改动（元素或属性改名、删除、收紧约束）时新增 bas-<新版本>.xsd，
+    旧文件原样保留——使用者配置里的 xsi:noNamespaceSchemaLocation 不必改动。
+    仅新增可选元素 / 属性的兼容改动，可直接更新当前最新版本文件。
+
+    约定：
+    - 根元素为 <bas>；元素与属性一律小写连字符（kebab-case）。
+    - 标注 anyAttribute 的元素会原样保留未声明属性（透传给 Tomcat 的
+      Context/Loader/JarScanner/Resource/Realm），其余元素上的未声明项被忽略。
+    - <proxy> 及其子节点供反代侧使用，basctl 不消费，仅为兼容 sashub 生成的配置而收录。
+  -->
+
+  <!-- ================= 基础类型 ================= -->
+
+  <xs:simpleType name="boolType">
+    <xs:annotation>
+      <xs:documentation>布尔字面量，仅接受 true / false</xs:documentation>
+    </xs:annotation>
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="true"/>
+      <xs:enumeration value="false"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:simpleType name="farmNameType">
+    <xs:annotation>
+      <xs:documentation>farm 名；不能包含点（点用于 `farm.server` 限定名）</xs:documentation>
+    </xs:annotation>
+    <xs:restriction base="xs:string">
+      <xs:pattern value="[^.]+"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <!-- ================= 根 ================= -->
+
+  <xs:element name="bas">
+    <xs:annotation>
+      <xs:documentation>配置根；各段顺序不限、各自至多一次（repository 与 snapshot-repo 可同时出现）。</xs:documentation>
+    </xs:annotation>
+    <xs:complexType>
+      <xs:all>
+        <xs:element name="repository" type="repositoryType" minOccurs="0"/>
+        <xs:element name="snapshot-repo" type="repositoryType" minOccurs="0"/>
+        <xs:element name="engines" type="enginesType" minOccurs="0"/>
+        <xs:element name="hosts" type="hostsType" minOccurs="0"/>
+        <xs:element name="resources" type="resourcesType" minOccurs="0"/>
+        <xs:element name="farms" type="farmsType" minOccurs="0"/>
+        <xs:element name="webapps" type="webappsType" minOccurs="0"/>
+        <xs:element name="proxy" type="proxyType" minOccurs="0"/>
+      </xs:all>
+      <xs:attribute name="version" type="xs:string" use="required">
+        <xs:annotation>
+          <xs:documentation>sas/basctl 版本；basctl 据此解析引擎与 juli 构件。</xs:documentation>
+        </xs:annotation>
+      </xs:attribute>
+    </xs:complexType>
+  </xs:element>
+
+  <!-- ================= 仓库 ================= -->
+
+  <xs:complexType name="repositoryType">
+    <xs:annotation>
+      <xs:documentation>release / SNAPSHOT 仓库；remote 与 token 支持 ${sas_remote_url}、${sas_remote_token} 占位。</xs:documentation>
+    </xs:annotation>
+    <xs:attribute name="local" type="xs:string">
+      <xs:annotation>
+        <xs:documentation>本地仓库目录；缺省由 jstart 决定。</xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+    <xs:attribute name="remote" type="xs:string">
+      <xs:annotation>
+        <xs:documentation>上游地址，逗号分隔；缺省交给 jstart 内置默认（仅 release）。</xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+    <xs:attribute name="token" type="xs:string">
+      <xs:annotation>
+        <xs:documentation>受保护仓库的读令牌。</xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+  </xs:complexType>
+
+  <!-- ================= 引擎 ================= -->
+
+  <xs:complexType name="enginesType">
+    <xs:sequence>
+      <xs:element name="engine" type="engineType" minOccurs="0" maxOccurs="unbounded"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="engineType">
+    <xs:choice minOccurs="0" maxOccurs="unbounded">
+      <xs:element name="listener" type="listenerType"/>
+      <xs:element name="context" type="contextType"/>
+      <xs:element name="jar" type="jarType"/>
+    </xs:choice>
+    <xs:attribute name="name" type="xs:string" use="required"/>
+    <xs:attribute name="type" type="xs:string" use="required">
+      <xs:annotation>
+        <xs:documentation>tomcat / undertow / jetty / any</xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+    <xs:attribute name="version" type="xs:string" use="required"/>
+    <xs:attribute name="jsp-support" type="boolType"/>
+    <xs:attribute name="websocket-support" type="boolType">
+      <xs:annotation>
+        <xs:documentation>由 sashub 生成；basctl 当前不消费。</xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+  </xs:complexType>
+
+  <xs:complexType name="listenerType">
+    <xs:annotation>
+      <xs:documentation>Server 级 Listener；class-name 之外的同级属性原样透传。</xs:documentation>
+    </xs:annotation>
+    <xs:attribute name="class-name" type="xs:string" use="required"/>
+    <xs:anyAttribute processContents="lax"/>
+  </xs:complexType>
+
+  <xs:complexType name="contextType">
+    <xs:all>
+      <xs:element name="loader" type="loaderType" minOccurs="0"/>
+      <xs:element name="jar-scanner" type="jarScannerType" minOccurs="0"/>
+    </xs:all>
+  </xs:complexType>
+
+  <xs:complexType name="loaderType">
+    <xs:annotation>
+      <xs:documentation>Context 的 Loader；class-name 之外的同级属性原样透传。</xs:documentation>
+    </xs:annotation>
+    <xs:attribute name="class-name" type="xs:string" use="required"/>
+    <xs:anyAttribute processContents="lax"/>
+  </xs:complexType>
+
+  <xs:complexType name="jarScannerType">
+    <xs:annotation>
+      <xs:documentation>Context 的 JarScanner；属性全部原样透传。</xs:documentation>
+    </xs:annotation>
+    <xs:anyAttribute processContents="lax"/>
+  </xs:complexType>
+
+  <xs:complexType name="jarType">
+    <xs:annotation>
+      <xs:documentation>引擎 jar；uri 为 gav:// / http(s):// 或本地路径。</xs:documentation>
+    </xs:annotation>
+    <xs:attribute name="uri" type="xs:string" use="required"/>
+  </xs:complexType>
+
+  <!-- ================= 主机 ================= -->
+
+  <xs:complexType name="hostsType">
+    <xs:sequence>
+      <xs:element name="host" type="hostType" minOccurs="0" maxOccurs="unbounded"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="hostType">
+    <xs:attribute name="name" type="xs:string" use="required"/>
+    <xs:attribute name="ip" type="xs:string" use="required"/>
+  </xs:complexType>
+
+  <!-- ================= 资源 ================= -->
+
+  <xs:complexType name="resourcesType">
+    <xs:sequence>
+      <xs:element name="resource" type="resourceType" minOccurs="0" maxOccurs="unbounded"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="resourceType">
+    <xs:annotation>
+      <xs:documentation>JNDI 资源；name 之外的属性原样透传给 Tomcat（如 url/type/username/password/driverClassName）。</xs:documentation>
+    </xs:annotation>
+    <xs:attribute name="name" type="xs:string" use="required"/>
+    <xs:anyAttribute processContents="lax"/>
+  </xs:complexType>
+
+  <!-- ================= 实例组 ================= -->
+
+  <xs:complexType name="farmsType">
+    <xs:sequence>
+      <xs:element name="farm" type="farmType" minOccurs="0" maxOccurs="unbounded"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="farmType">
+    <xs:annotation>
+      <xs:documentation>子元素顺序不限；server 可重复，其余各至多一次。</xs:documentation>
+    </xs:annotation>
+    <xs:choice minOccurs="0" maxOccurs="unbounded">
+      <xs:element name="server-options" type="xs:string">
+        <xs:annotation>
+          <xs:documentation>追加到 JVM 参数的进程参数（整段文本，按行拼接）。</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="proxy-options" type="xs:string">
+        <xs:annotation>
+          <xs:documentation>反代片段；basctl 不消费。</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="http" type="httpType"/>
+      <xs:element name="server" type="serverType"/>
+    </xs:choice>
+    <xs:attribute name="name" type="farmNameType" use="required"/>
+    <xs:attribute name="engine" type="xs:string" use="required">
+      <xs:annotation>
+        <xs:documentation>引用的 &lt;engine name&gt;，必须已声明。</xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+    <xs:attribute name="max-heap-size" type="xs:string">
+      <xs:annotation>
+        <xs:documentation>JVM 堆上限，如 300M / 1G；缺省 300M。</xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+  </xs:complexType>
+
+  <xs:complexType name="httpType">
+    <xs:annotation>
+      <xs:documentation>HTTP Connector 参数；只覆盖显式给出的项。</xs:documentation>
+    </xs:annotation>
+    <xs:attribute name="enable-lookups" type="boolType"/>
+    <xs:attribute name="accept-count" type="xs:nonNegativeInteger"/>
+    <xs:attribute name="max-connections" type="xs:nonNegativeInteger"/>
+    <xs:attribute name="disable-upload-timeout" type="boolType"/>
+    <xs:attribute name="connection-timeout" type="xs:nonNegativeInteger">
+      <xs:annotation>
+        <xs:documentation>毫秒；缺省 20000。</xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+  </xs:complexType>
+
+  <xs:complexType name="serverType">
+    <xs:attribute name="name" type="xs:string" use="required"/>
+    <xs:attribute name="http" type="xs:nonNegativeInteger">
+      <xs:annotation>
+        <xs:documentation>JVM 内的 http 端口；缺省 0。</xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+    <xs:attribute name="host" type="xs:string">
+      <xs:annotation>
+        <xs:documentation>引用的 &lt;host name&gt;；缺省 localhost。</xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+    <xs:attribute name="max-heap-size" type="xs:string">
+      <xs:annotation>
+        <xs:documentation>缺省继承所属 farm。</xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+    <xs:attribute name="proxy-http-port" type="xs:nonNegativeInteger">
+      <xs:annotation>
+        <xs:documentation>由 sashub 生成；basctl 不消费。</xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+    <xs:attribute name="proxy-options" type="xs:string">
+      <xs:annotation>
+        <xs:documentation>由 sashub 生成；basctl 不消费。</xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+  </xs:complexType>
+
+  <!-- ================= 应用 ================= -->
+
+  <xs:complexType name="webappsType">
+    <xs:sequence>
+      <xs:element name="webapp" type="webappType" minOccurs="0" maxOccurs="unbounded"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="webappType">
+    <xs:choice minOccurs="0" maxOccurs="unbounded">
+      <xs:element name="resource-ref" type="resourceRefType"/>
+      <xs:element name="realm" type="realmType"/>
+    </xs:choice>
+    <xs:attribute name="uri" type="xs:string" use="required">
+      <xs:annotation>
+        <xs:documentation>gav:// / http(s):// 或本地路径。</xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+    <xs:attribute name="name" type="xs:string"/>
+    <xs:attribute name="path" type="xs:string">
+      <xs:annotation>
+        <xs:documentation>context path；/ 或空视为 ROOT。</xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+    <xs:attribute name="run-at" type="xs:string">
+      <xs:annotation>
+        <xs:documentation>部署目标，逗号分隔的 farm 名或 `farm.server` 限定名。</xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+    <xs:attribute name="doc-base" type="xs:string">
+      <xs:annotation>
+        <xs:documentation>直接指定目录/war；缺省由 uri 推导。</xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+    <xs:attribute name="libs" type="xs:string">
+      <xs:annotation>
+        <xs:documentation>追加依赖，逗号分隔的 gav。</xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+    <xs:attribute name="jsp-support" type="boolType"/>
+    <xs:attribute name="resolve-support" type="boolType">
+      <xs:annotation>
+        <xs:documentation>是否解析 war 内依赖；缺省 true，仅字面 false 关闭。</xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+    <xs:attribute name="unpack" type="boolType"/>
+    <xs:anyAttribute processContents="lax">
+      <xs:annotation>
+        <xs:documentation>其余属性原样透传给 Tomcat Context（如 reloadable）。</xs:documentation>
+      </xs:annotation>
+    </xs:anyAttribute>
+  </xs:complexType>
+
+  <xs:complexType name="resourceRefType">
+    <xs:attribute name="ref" type="xs:string" use="required">
+      <xs:annotation>
+        <xs:documentation>引用的 &lt;resource name&gt;，必须已声明。</xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+  </xs:complexType>
+
+  <xs:complexType name="realmType">
+    <xs:annotation>
+      <xs:documentation>Context 的 Realm；属性全部原样透传。</xs:documentation>
+    </xs:annotation>
+    <xs:anyAttribute processContents="lax"/>
+  </xs:complexType>
+
+  <!-- ================= 反代（basctl 不消费） ================= -->
+
+  <xs:complexType name="proxyType">
+    <xs:all>
+      <xs:element name="https" type="httpsType" minOccurs="0"/>
+      <xs:element name="status" type="statusType" minOccurs="0"/>
+    </xs:all>
+    <xs:attribute name="engine" type="xs:string"/>
+    <xs:attribute name="hostname" type="xs:string"/>
+    <xs:attribute name="maxconn" type="xs:nonNegativeInteger"/>
+    <xs:attribute name="http-port" type="xs:nonNegativeInteger"/>
+  </xs:complexType>
+
+  <xs:complexType name="httpsType">
+    <xs:attribute name="port" type="xs:nonNegativeInteger"/>
+    <xs:attribute name="ciphers" type="xs:string"/>
+    <xs:attribute name="protocols" type="xs:string"/>
+    <xs:attribute name="force-https" type="boolType"/>
+  </xs:complexType>
+
+  <xs:complexType name="statusType">
+    <xs:attribute name="url" type="xs:string"/>
+    <xs:attribute name="auth" type="xs:string"/>
+  </xs:complexType>
+
+</xs:schema>

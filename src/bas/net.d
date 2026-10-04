@@ -23,7 +23,7 @@ import std.format : format;
 /**
  * 返回 `127.0.0.1` 与本机所有非回环 IPv4 地址。
  *
- * Maker 用它判断某个 `<Server>` 是否部署在本机。非 Linux 平台退化为只返回回环地址。
+ * Maker 用它判断某个 `<server>` 是否部署在本机。非 Linux 平台退化为只返回回环地址。
  */
 string[] localAddresses() {
   string[] result = ["127.0.0.1"];

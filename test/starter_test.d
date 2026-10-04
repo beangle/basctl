@@ -33,12 +33,12 @@ import std.algorithm : canFind;
 }
 
 @("runtimeArgsFor adds sas defaults and farm options") unittest {
-  auto cfg = parseServerXml(`<Sas version="1"><Engines><Engine name="tomcat" type="tomcat"
-      version="11.0.18"/></Engines><Farms><Farm name="f" engine="tomcat" maxHeapSize="512M">
-      <ServerOptions>-Dems.profile=local
-      --add-opens=java.base/java.lang=ALL-UNNAMED</ServerOptions>
-      <Server name="s1" http="8080"/></Farm></Farms>
-      <Webapps><Webapp uri="gav://g:a:1" runAt="f" path="/"/></Webapps></Sas>`);
+  auto cfg = parseServerXml(`<bas version="1"><engines><engine name="tomcat" type="tomcat"
+      version="11.0.18"/></engines><farms><farm name="f" engine="tomcat" max-heap-size="512M">
+      <server-options>-Dems.profile=local
+      --add-opens=java.base/java.lang=ALL-UNNAMED</server-options>
+      <server name="s1" http="8080"/></farm></farms>
+      <webapps><webapp uri="gav://g:a:1" run-at="f" path="/"/></webapps></bas>`);
   auto server = cfg.farms[0].servers[0];
   auto args = runtimeArgsFor(server);
   assert(args.canFind("-Xmx512M"));
@@ -49,23 +49,23 @@ import std.algorithm : canFind;
 }
 
 @("repoArgs passes release and snapshot repositories through to jstart") unittest {
-  auto cfg = parseServerXml(`<Sas version="0.13.16">
-      <Repository local="/m2" remote="http://r1,http://r2"/>
-      <SnapshotRepo remote="http://snap"/>
-      <Engines><Engine name="tomcat" type="tomcat" version="11.0.18"/></Engines>
-      <Hosts><Host name="local" ip="127.0.0.1"/></Hosts>
-      <Farms><Farm name="f" engine="tomcat"><Server name="s" http="8080"/></Farm></Farms>
-      <Webapps><Webapp uri="gav://g:a:1" runAt="f" path="/"/></Webapps></Sas>`);
+  auto cfg = parseServerXml(`<bas version="0.13.16">
+      <repository local="/m2" remote="http://r1,http://r2"/>
+      <snapshot-repo remote="http://snap"/>
+      <engines><engine name="tomcat" type="tomcat" version="11.0.18"/></engines>
+      <hosts><host name="local" ip="127.0.0.1"/></hosts>
+      <farms><farm name="f" engine="tomcat"><server name="s" http="8080"/></farm></farms>
+      <webapps><webapp uri="gav://g:a:1" run-at="f" path="/"/></webapps></bas>`);
   assert(repoArgs(cfg) == ["--local=/m2", "--remote=http://r1,http://r2",
       "--snapshot-remote=http://snap"]);
 }
 
 @("repoArgs falls back to the snapshot local and omits empty repositories") unittest {
-  auto cfg = parseServerXml(`<Sas version="0.13.16">
-      <SnapshotRepo local="/m2snap"/>
-      <Engines><Engine name="tomcat" type="tomcat" version="11.0.18"/></Engines>
-      <Hosts><Host name="local" ip="127.0.0.1"/></Hosts>
-      <Farms><Farm name="f" engine="tomcat"><Server name="s" http="8080"/></Farm></Farms>
-      <Webapps><Webapp uri="gav://g:a:1" runAt="f" path="/"/></Webapps></Sas>`);
+  auto cfg = parseServerXml(`<bas version="0.13.16">
+      <snapshot-repo local="/m2snap"/>
+      <engines><engine name="tomcat" type="tomcat" version="11.0.18"/></engines>
+      <hosts><host name="local" ip="127.0.0.1"/></hosts>
+      <farms><farm name="f" engine="tomcat"><server name="s" http="8080"/></farm></farms>
+      <webapps><webapp uri="gav://g:a:1" run-at="f" path="/"/></webapps></bas>`);
   assert(repoArgs(cfg) == ["--local=/m2snap"]);
 }
