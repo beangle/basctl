@@ -33,15 +33,15 @@ import std.stdio : stderr, writeln;
 import std.string : startsWith, strip;
 
 /** 内嵌的控制脚本，按安装顺序排列。 */
-private immutable string[] scriptNames = ["env.sh", "sas.sh", "start.sh", "stop.sh", "restart.sh"];
+private immutable string[] scriptNames = ["env.sh", "bas.sh", "start.sh", "stop.sh", "restart.sh"];
 
 /** 取某个内嵌脚本的内容（相对 `resources/` 的路径）。 */
 string scriptBody(string name) {
   switch (name) {
   case "env.sh":
     return import("sas/bin/env.sh");
-  case "sas.sh":
-    return import("sas/bin/sas.sh");
+  case "bas.sh":
+    return import("sas/bin/bas.sh");
   case "start.sh":
     return import("sas/bin/start.sh");
   case "stop.sh":
@@ -131,7 +131,7 @@ int runInit(string[] args) {
 /** 打印 `init` 用法到 stderr。 */
 void initUsage() {
   stderr.writeln("Usage: basctl init [--force] [--dry-run] [workdir]");
-  stderr.writeln("  Install the control scripts (env.sh, sas.sh, start.sh, stop.sh,");
+  stderr.writeln("  Install the control scripts (env.sh, bas.sh, start.sh, stop.sh,");
   stderr.writeln("  restart.sh) into <workdir>/bin and create <workdir>/conf. Existing");
   stderr.writeln("  scripts are kept unless --force is given. <workdir> defaults to");
   stderr.writeln("  $BAS_HOME (or the current directory).");

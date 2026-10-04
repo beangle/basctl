@@ -1,5 +1,5 @@
 #!/bin/bash
-# sas 控制脚本的共享环境：控制命令位置与仓库地址。
+# bas 控制脚本的共享环境：控制命令位置与仓库地址。
 #
 # 控制面 basctl 与运行器 jstart 都取 PATH 上的同名命令，可分别用 bas_basctl /
 # bas_jstart 覆盖（例如指向未安装到 PATH 的本地构建产物）。

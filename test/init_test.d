@@ -24,7 +24,7 @@ import std.file : exists, readText, rmdirRecurse, tempDir, write;
 import std.path : buildPath;
 import std.uuid : randomUUID;
 
-private immutable string[] names = ["env.sh", "sas.sh", "start.sh", "stop.sh", "restart.sh"];
+private immutable string[] names = ["env.sh", "bas.sh", "start.sh", "stop.sh", "restart.sh"];
 
 private string newRoot(string tag) {
   return buildPath(tempDir, "basctl-init-" ~ tag ~ "-" ~ randomUUID().toString());
@@ -51,16 +51,16 @@ private string newRoot(string tag) {
   scope (exit) if (exists(root)) rmdirRecurse(root);
 
   installScripts(root, false, false);
-  auto sas = buildPath(root, "bin", "sas.sh");
-  write(sas, "CUSTOM");
+  auto bas = buildPath(root, "bin", "bas.sh");
+  write(bas, "CUSTOM");
 
   auto kept = installScripts(root, false, false);
   assert(kept.written == 0 && kept.kept == 5);
-  assert(readText(sas) == "CUSTOM");
+  assert(readText(bas) == "CUSTOM");
 
   auto forced = installScripts(root, true, false);
   assert(forced.written == 5 && forced.kept == 0);
-  assert(readText(sas).canFind("basctl_cmd"));
+  assert(readText(bas).canFind("basctl_cmd"));
 }
 
 @("installScripts dry run touches nothing") unittest {

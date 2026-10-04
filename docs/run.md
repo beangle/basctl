@@ -19,7 +19,7 @@ basctl run --print /path/to/app.war          # 只写 spec 并打印 jstart 命�
 | `--engine=<tomcat\|undertow>` | 嵌入式容器，缺省 `tomcat`（对应 `*-embed` creator） |
 | `--base=<dir>` | base 根目录，缺省 `/tmp`；组件目录 = `<base>/<instance>` |
 | `--instance=<name>` | 组件目录名，缺省 `sas`；限单个安全路径段 `[A-Za-z0-9._-]` |
-| `--workdir=<dir>` | 启动前 `chdir`，缺省当前目录（`sas.sh run` 会传 `$BAS_HOME`） |
+| `--workdir=<dir>` | 启动前 `chdir`，缺省当前目录（`bas.sh run` 会传 `$BAS_HOME`） |
 | `--spec=<file>` | spec 输出路径，缺省 `<base>/<instance>/run.jstart` |
 | `--local=<dir>` / `--remote=<urls>` | jstart 的本地库与上游；缺省取 `M2_REPO` / `M2_REMOTE_REPO`，都没有时用 jstart 默认 |
 | `--offline` | 只用本地仓库解析（透传 jstart） |

@@ -1,5 +1,5 @@
 #!/bin/bash
-# sas 控制入口：命令转发给 basctl（控制面/运行器）与各子脚本。
+# bas 控制入口：命令转发给 basctl（控制面/运行器）与各子脚本。
 # 脚本本身随 basctl 发布，升级 basctl 后用 `basctl init --force` 刷新。
 set -o pipefail
 
@@ -17,7 +17,7 @@ export bas_remote_url
 conf="$BAS_HOME/conf/server.xml"
 
 usage() {
-  echo "Usage: sas.sh <command> [args]"
+  echo "Usage: bas.sh <command> [args]"
   echo "commands:"
   echo "  version     Show version and local hosts         (basctl version)"
   echo "  status      Show running servers                 (basctl status)"

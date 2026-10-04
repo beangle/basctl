@@ -49,7 +49,7 @@ dub test --compiler=ldc2
 
 ## 组件目录初始化
 
-`basctl init [workdir]` 把控制脚本（`env.sh`、`sas.sh`、`start.sh`、`stop.sh`、
+`basctl init [workdir]` 把控制脚本（`env.sh`、`bas.sh`、`start.sh`、`stop.sh`、
 `restart.sh`）铺到 `<workdir>/bin` 并建好 `conf/`，用于从零搭建一个 sas 组件目录。
 脚本内嵌在 basctl 里，随 basctl 版本发布，不再依赖单独的发行包：
 
@@ -61,7 +61,7 @@ basctl init --dry-run /opt/sas
 
 `bin/setenv.sh` 与 `conf/server.xml` 是用户配置（分别由用户与 `basctl pull` 维护），
 `init` 不生成也不改动它们。这是脚本唯一的安装/升级途径：升级 `basctl` 后重跑
-`basctl init --force`，不再有单独的发行包 zip（原 `sas.sh update` 已移除）。
+`basctl init --force`，不再有单独的发行包 zip（原 `bas.sh update` 已移除）。
 
 ## 目录约定
 
