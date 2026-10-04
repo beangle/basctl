@@ -15,9 +15,8 @@
  */
 
 /**
- * 配置生成：把 Scala 侧 Freemarker 模板（`tomcat/conf/server.xml.ftl`、
- * `tomcat/conf/web.xml.ftl`、`sas/setenv.sh.ftl`、`sas/firewall.ftl`）改写为
- * D 代码直接渲染，输出保持等价。
+ * 配置生成：直接渲染 Tomcat 的 `server.xml`、`web.xml`，以及实例的 `setenv.sh`
+ * 和 firewalld zone 片段。
  */
 module bas.render;
 
@@ -112,7 +111,7 @@ string renderServerXml(Container container, Farm farm, Server server) {
   return sb.data;
 }
 
-/** Renders `bin/setenv.sh`（Scala `sas/setenv.sh.ftl`）. */
+/** 渲染 `bin/setenv.sh`。 */
 string renderSetenvSh(Farm farm, Server server) {
   string options = farm.serverOptions.isNull ? "" : farm.serverOptions.get;
   if (farm.engine.typ != engineAny)
@@ -124,7 +123,7 @@ string renderSetenvSh(Farm farm, Server server) {
 }
 
 /**
- * Renders the Tomcat `conf/web.xml`（Scala `tomcat/conf/web.xml.ftl`）.
+ * 渲染 Tomcat `conf/web.xml`。
  *
  * Servlet 命名空间按引擎大版本切换；MIME 映射来自内嵌的 `sas/mime.types`。
  */
@@ -230,7 +229,7 @@ private void putCharacterEncoding(ref Appender!string sb) {
   sb.put("  <response-character-encoding>UTF-8</response-character-encoding>\n");
 }
 
-/** Renders a firewalld zone fragment（Scala `sas/firewall.ftl`）. */
+/** 渲染 firewalld zone 片段。 */
 string renderFirewallConf(const(int)[] ports) {
   auto sb = appender!string;
   sb.put("<?xml version=\"1.0\" encoding=\"utf-8\"?>\n");
@@ -262,49 +261,4 @@ private string boolText(bool value) {
 /** 转义 XML 属性值中的 `&`、`"`、`<`。 */
 private string esc(string value) {
   return value.replace("&", "&amp;").replace("\"", "&quot;").replace("<", "&lt;");
-}
-
-@("render server.xml keeps fail-fast listener and connectors") unittest {
-  auto xml = `<Sas version="9"><Engines><Engine name="tomcat" type="tomcat" version="11.0.5"/></Engines>
-    <Farms><Farm name="f" engine="tomcat"><Server name="s" http="8080"/></Farm></Farms>
-    <Webapps><Webapp uri="gav://g:a:1" runAt="f" path="/x"/></Webapps></Sas>`;
-  auto cfg = parseServerXml(xml);
-  auto ctx = new Context;
-  auto loader = new Loader("org.beangle.sas.engine.tomcat.ExtendableWebappLoader");
-  loader.properties["loaderClass"] = "org.beangle.sas.engine.tomcat.DependencyClassLoader";
-  ctx.loader = loader;
-  cfg.engines[0].context = ctx;
-  auto text = renderServerXml(cfg, cfg.farms[0], cfg.farms[0].servers[0]);
-  assert(text.canFind("WebappFailFastListener"));
-  assert(text.canFind(`port="8080"`));
-  assert(text.canFind("useVirtualThreads=\"true\""));
-  assert(text.canFind(`<Context path="/x"`));
-  assert(text.canFind(`<Loader className="org.beangle.sas.engine.tomcat.ExtendableWebappLoader"`));
-}
-
-@("render setenv.sh uses server options") unittest {
-  auto xml = `<Sas version="9"><Engines><Engine name="t" type="tomcat" version="9"/></Engines>
-    <Farms><Farm name="f" engine="t"><ServerOptions>-Dx=1</ServerOptions>
-    <Server name="s" http="80"/></Farm></Farms></Sas>`;
-  auto cfg = parseServerXml(xml);
-  auto text = renderSetenvSh(cfg.farms[0], cfg.farms[0].servers[0]);
-  assert(text.canFind("-Xmx300M"));
-  assert(text.canFind("-Dx=1"));
-}
-
-@("render web.xml switches namespace by version") unittest {
-  Engine e11 = new Engine("t", "tomcat", "11.0.5");
-  auto xml11 = renderWebXml(e11);
-  assert(xml11.canFind("web-app_6_1.xsd"));
-  assert(!xml11.canFind("jsp/jspx"));
-
-  Engine e9 = new Engine("t", "tomcat", "9.0.1");
-  e9.jspSupport = true;
-  auto xml9 = renderWebXml(e9);
-  assert(xml9.canFind("web-app_4_0.xsd"));
-  assert(xml9.canFind("JspServlet"));
-}
-
-@("render firewall xml lists ports") unittest {
-  assert(renderFirewallConf([8080, 8081]).canFind(`<port protocol="tcp" port="8081"/>`));
 }

@@ -15,7 +15,7 @@
  */
 
 /**
- * Tomcat 引擎与实例目录的生成（Scala `org.beangle.sas.maker.TomcatMaker`）。
+ * Tomcat 引擎与实例目录的生成。
  */
 module bas.tomcatmaker;
 
@@ -35,7 +35,7 @@ import std.stdio : writeln;
 import std.string : endsWith, replace, strip;
 import std.typecons : nullable;
 
-/** 增加 sas 对 tomcat 的默认要求到配置模型（Scala `applyEngineDefault`）. */
+/** 把 bas 对 Tomcat 的默认要求补进配置模型。 */
 void applyEngineDefault(Container container, Engine engine) {
   if (!engine.listeners.length) {
     engine.listeners ~= new Listener("org.apache.catalina.core.JreMemoryLeakPreventionListener");
@@ -170,7 +170,7 @@ void makeServer(string sasHome, Container container, Server server) {
   }
 }
 
-/** 生成一个 base 的目录结构和配置文件（Scala `doMakeBase`）. */
+/** 生成一个 base 的目录结构和配置文件。 */
 void doMakeBase(string sasHome, Container container, Server server) {
   auto engine = server.farm.engine;
   auto base = buildPath(sasHome, "servers", server.qualifiedName);
@@ -208,7 +208,7 @@ void doMakeBase(string sasHome, Container container, Server server) {
   genBaseConfig(container, server, sasHome);
 }
 
-/** 解压 war 到 `webapps/<contextPath with #>` 并更新 docBase（Scala `unzipWar`）. */
+/** 解压 war 到 `webapps/<contextPath with #>` 并更新 docBase。 */
 void unzipWar(string base, Webapp webapp) {
   auto path = webapp.contextPath;
   if (path.startsWith("/"))
@@ -224,7 +224,7 @@ void unzipWar(string base, Webapp webapp) {
   webapp.docBase = absolutePath(docBase);
 }
 
-/** 生成实例的 `conf/server.xml` 与 `bin/setenv.sh`（Scala `genBaseConfig`）. */
+/** 生成实例的 `conf/server.xml` 与 `bin/setenv.sh`。 */
 void genBaseConfig(Container container, Server server, string targetDir) {
   auto serverDir = buildPath(targetDir, "servers", server.qualifiedName);
   mkdirRecurse(serverDir);

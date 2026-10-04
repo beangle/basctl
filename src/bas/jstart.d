@@ -15,7 +15,7 @@
  */
 
 /**
- * 本机 `jstart` 命令的封装（Scala `org.beangle.sas.tool.Jstart`）。
+ * 本机 `jstart` 命令的封装。
  *
  * 构件解析/下载交给 jstart：
  *  - `jstart resolve <target>`：取得目标（gav / 本地 war / url）并补齐依赖，回显本地绝对路径；
@@ -126,7 +126,7 @@ string[] buildArgs(string command, string sub, string target, Nullable!string lo
 }
 
 /** 结果路径是 stdout 的最后一个非空行（jstart 可能在其前打印进度）。 */
-private Nullable!string lastLine(string output) {
+Nullable!string lastLine(string output) {
   auto lines = output.split("\n");
   for (auto i = lines.length; i > 0; --i) {
     auto line = strip(lines[i - 1]);
@@ -134,19 +134,4 @@ private Nullable!string lastLine(string output) {
       return nullable(line);
   }
   return Nullable!string.init;
-}
-
-@("build args keeps official and snapshot remotes separate") unittest {
-  import std.typecons : nullable;
-
-  auto args = buildArgs("jstart", "resolve", "g:a:1", nullable("/repo"), ["https://a", "https://b"], false, []);
-  assert(args == ["jstart", "resolve", "g:a:1", "--local=/repo", "--remote=https://a,https://b"]);
-
-  auto snap = buildArgs("jstart", "fetch", "g:a:1-SNAPSHOT", Nullable!string.init, [], true, ["https://snap"]);
-  assert(snap == ["jstart", "fetch", "g:a:1-SNAPSHOT", "--snapshot-remote=https://snap", "--offline"]);
-}
-
-@("last line skips trailing blanks") unittest {
-  assert(lastLine("/repo/g/a/1/a-1.jar\n\n").get == "/repo/g/a/1/a-1.jar");
-  assert(lastLine("").isNull);
 }

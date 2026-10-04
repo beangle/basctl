@@ -15,7 +15,7 @@
  */
 
 /**
- * 解析 webapp 的 docBase 与其依赖（Scala `org.beangle.sas.tool.Resolver`）。
+ * 解析 webapp 的 docBase 与其依赖。
  *
  * 解析/下载全部交给本机 `jstart`（见 `bas.jstart`）；war 的远端直链走 `curl`。
  */
@@ -109,7 +109,7 @@ Nullable!string resolveArtifact(Repository releaseRepo, SnapshotRepo snapshotRep
   return fetch(gav.asGav(), releaseRepo);
 }
 
-/** 逗号 / 分号 / 换行分隔的 gav 列表（Scala `Resolver.parse`）。 */
+/** 逗号 / 分号 / 换行分隔的 gav 列表。 */
 Artifact[] parseGavs(string gavs) {
   Artifact[] artifacts;
   if (gavs.strip().empty)
@@ -125,22 +125,8 @@ Artifact[] parseGavs(string gavs) {
   return artifacts;
 }
 
-private bool resolvable(string path) {
+bool resolvable(string path) {
   if (path.endsWith(".jar") || path.endsWith(".war"))
     return true;
   return exists(path) && isDir(path);
-}
-
-@("parse gav lists") unittest {
-  auto a = parseGavs("g1:a1:1; g2:a2:2,\n g3:a3:war:3");
-  assert(a.length == 3);
-  assert(a[0].asGav() == "g1:a1:1");
-  assert(a[2].packaging == "war");
-  assert(parseGavs("  ").length == 0);
-}
-
-@("resolvable recognizes archives and dirs") unittest {
-  assert(resolvable("/tmp/a.jar"));
-  assert(resolvable("/tmp/a.war"));
-  assert(!resolvable("/tmp/a.txt"));
 }

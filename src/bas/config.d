@@ -15,12 +15,11 @@
  */
 
 /**
- * `server.xml`（`<Sas>`）的配置模型与解析，对应 Scala 的
- * `org.beangle.sas.config` 包（**不含 Proxy**）。
+ * `server.xml`（`<Sas>`）的配置模型与解析（不含 Proxy）。
  *
  * 解析结果是一个可直接遍历的对象图：`Container` 持有 engines / hosts / farms /
  * webapps / resources，`Farm` 引用 `Engine`，`Server` 引用 `Farm` 与 `Host`，
- * `Webapp.runAt` 直接引用 `Server` 对象，与 Scala 版的引用语义一致。
+ * `Webapp.runAt` 直接引用 `Server` 对象。
  */
 module bas.config;
 
@@ -48,7 +47,7 @@ class ServerXmlException : Exception {
   }
 }
 
-/** Tomcat / Undertow / Jetty 引擎类型常量（Scala `EngineType`）。 */
+/** Tomcat / Undertow / Jetty 引擎类型常量。 */
 enum engineTomcat = "tomcat";
 enum engineUndertow = "undertow";
 enum engineJetty = "jetty";
@@ -88,8 +87,7 @@ class Context {
 /**
  * An engine jar reference（`<Jar uri="...">`）。
  *
- * `uri` 可以是 `gav://`、`http(s)://` 或本地路径；`name` 按 Scala `Jar.name`
- * 的规则推导出落地文件名。
+ * `uri` 可以是 `gav://`、`http(s)://` 或本地路径；`name` 推导出落地文件名。
  */
 class Jar {
   string uri;
@@ -209,7 +207,7 @@ class Resource {
   }
 }
 
-/** HTTP connector attributes（Scala `HttpConnector`）。 */
+/** HTTP 连接器参数。 */
 class HttpConnector {
   string protocol = "HTTP/1.1";
   string uriEncoding = "UTF-8";
@@ -253,7 +251,7 @@ class Server {
     this.name = name;
   }
 
-  /** `farm.server` qualified name（Scala `Server.qualifiedName`）。 */
+  /** `farm.server` 形式的限定名。 */
   string qualifiedName() const {
     return farm.name.length ? farm.name ~ "." ~ name : name;
   }
@@ -296,7 +294,7 @@ class Webapp {
     return Nullable!string.init;
   }
 
-  /** Normalizes a context path（Scala `Webapp.updatePath`）。 */
+  /** 规范化 context path。 */
   void updatePath(string path) {
     auto p = strip(path);
     if (p.empty || p == "/")
@@ -369,7 +367,7 @@ private string[] splitRepos(string urls) {
   return res;
 }
 
-/** Parsed `server.xml` root：engines / hosts / farms / webapps / resources（Scala `Container`）。 */
+/** `server.xml` 根对象：engines / hosts / farms / webapps / resources。 */
 class Container {
   string version_;
   Repository repository;
@@ -487,7 +485,7 @@ class Container {
   }
 }
 
-/** Parses `server.xml` text into a `Container`（Scala `Container.apply`）. */
+/** 解析 `server.xml` 文本为 `Container`。 */
 Container parseServerXml(string xmlText) {
   auto dom = parseDOM(xmlText);
   auto sasElem = requireRootElement(dom, "Sas");

@@ -15,7 +15,7 @@
  */
 
 /**
- * firewalld 端口配置助手（Scala `org.beangle.sas.tool.Firewall`）。
+ * firewalld 端口配置助手。
  */
 module bas.firewall;
 

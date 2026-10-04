@@ -15,7 +15,7 @@
  */
 
 /**
- * 实例存活探测与日志滚动（Scala `ServerStatus` + `SasTool` 的对应部分）。
+ * 实例存活探测与日志滚动。
  */
 module bas.serverstatus;
 
@@ -29,7 +29,7 @@ import std.path : buildPath;
 import std.string : empty, split, strip;
 import std.typecons : Nullable, nullable;
 
-/** 一个实例进程的描述（Scala `ServerStatus`）。 */
+/** 一个实例进程的描述。 */
 struct ServerStatus {
   int processId;
   string processDesc;
@@ -96,7 +96,7 @@ bool processRunning(int pid) @trusted {
 
 /**
  * 滚动 `servers/<name>/logs/console.out` 到 `logs/archive/<name>-yyyyMMdd.out`，
- * 然后重建空的 console.out（Scala `SasTool.rollLog`）。
+ * 然后重建空的 console.out。
  */
 void rollLog(string sasHome, Server server) {
   auto serverHome = buildPath(sasHome, "servers", server.qualifiedName);

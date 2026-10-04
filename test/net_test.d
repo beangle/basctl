@@ -14,19 +14,13 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-/** 从工作目录读取 `conf/server.xml`。 */
-module bas.shellenv;
+/** Unit tests for bas.net. */
+module test.net_test;
 
-import bas.config;
+import bas.net;
 
-import std.file : exists, readText;
-import std.path : buildPath;
-import std.typecons : Nullable, nullable;
+import std.algorithm : canFind;
 
-/** Reads `<workdir>/conf/server.xml`; returns null when the file is missing. */
-Nullable!Container readContainer(string workdir) {
-  auto target = buildPath(workdir, "conf", "server.xml");
-  if (!exists(target))
-    return Nullable!Container.init;
-  return nullable(parseServerXml(readText(target)));
+@("local addresses always include loopback") unittest {
+  assert(localAddresses().canFind("127.0.0.1"));
 }

@@ -14,19 +14,17 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-/** 从工作目录读取 `conf/server.xml`。 */
-module bas.shellenv;
+/** Unit tests for bas.mimetypes. */
+module test.mimetypes_test;
 
-import bas.config;
+import bas.mimetypes;
 
-import std.file : exists, readText;
-import std.path : buildPath;
-import std.typecons : Nullable, nullable;
-
-/** Reads `<workdir>/conf/server.xml`; returns null when the file is missing. */
-Nullable!Container readContainer(string workdir) {
-  auto target = buildPath(workdir, "conf", "server.xml");
-  if (!exists(target))
-    return Nullable!Container.init;
-  return nullable(parseServerXml(readText(target)));
+@("parse mime types lines") unittest {
+  auto entries = parseMimeTypes("#comment\ntype=text/html   exts=html,htm\ntype=image/png  exts=png\n");
+  assert(entries.length == 5);
+  assert(entries[0].key == "text/html" && entries[0].mimeType == "text/html");
+  assert(entries[1].key == "html" && entries[1].mimeType == "text/html");
+  assert(entries[2].key == "htm" && entries[2].mimeType == "text/html");
+  assert(entries[3].key == "image/png");
+  assert(entries[4].key == "png" && entries[4].mimeType == "image/png");
 }

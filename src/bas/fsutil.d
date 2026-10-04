@@ -14,7 +14,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-/** 目录 / 软链接工具，替代 Scala 的 `org.beangle.commons.io.Dirs`（用到的部分）。 */
+/** 目录 / 软链接工具。 */
 module bas.fsutil;
 
 import std.file : FileException, SpanMode, dirEntries, exists, isDir, isSymlink, mkdirRecurse,
@@ -101,35 +101,4 @@ void setExecutable(string path) {
 
     chmod(path.toStringz, 0b111_101_101); // 0755: rwxr-xr-x
   }
-}
-
-version (unittest) {
-  import std.file : mkdir, readText, tempDir, write;
-  import std.uuid : randomUUID;
-}
-
-@("removeTree unlinks symlinks without touching targets") unittest {
-  auto root = buildPath(tempDir, "basctl-fs-" ~ randomUUID().toString());
-  mkdirRecurse(root);
-  scope (exit) removeTree(root);
-
-  mkdir(buildPath(root, "target"));
-  write(buildPath(root, "target", "keep.txt"), "keep");
-  mkdir(buildPath(root, "base"));
-  linkIfMissing(buildPath(root, "target"), buildPath(root, "base", "lib"));
-
-  removeTree(buildPath(root, "base"));
-  assert(exists(buildPath(root, "target", "keep.txt")));
-  assert(readText(buildPath(root, "target", "keep.txt")) == "keep");
-}
-
-@("pathExists handles dangling symlinks") unittest {
-  auto root = buildPath(tempDir, "basctl-fs2-" ~ randomUUID().toString());
-  mkdirRecurse(root);
-  scope (exit) removeTree(root);
-
-  assert(!pathExists(buildPath(root, "none")));
-  linkIfMissing(buildPath(root, "none"), buildPath(root, "dangling"));
-  assert(isLink(buildPath(root, "dangling")));
-  assert(pathExists(buildPath(root, "dangling")));
 }

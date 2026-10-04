@@ -15,7 +15,7 @@
  */
 
 /**
- * 编排入口：把 `server.xml` 变成可运行的实例目录（Scala `org.beangle.sas.tool.Maker`）。
+ * 编排入口：把 `server.xml` 变成可运行的实例目录。
  */
 module bas.maker;
 
@@ -49,7 +49,7 @@ int runMaker(string configFile, string serverPattern) {
  * 选择部署在本机、且匹配 pattern 的 server，先解析应用，再生成引擎与实例。
  *
  * `serverPattern` 可为 `all`、farm 名或 `farm.server`。未解析成功的实例会写入
- * `servers/<name>/error`，成功则清掉该文件（Scala `Maker.make`）。
+ * `servers/<name>/error`，成功则清掉该文件。
  */
 void make(Container container, string sasHome, string serverPattern) {
   auto releaseRepo = container.repository;

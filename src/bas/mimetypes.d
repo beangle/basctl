@@ -15,10 +15,10 @@
  */
 
 /**
- * `mime.types` 解析（替代 Scala `org.beangle.commons.activation.MediaTypes`）。
+ * `mime.types` 解析。
  *
  * 每行形如 `type=<mime> ... exts=<逗号分隔的扩展名>`；注释行以 `#` 开头。
- * 与 Scala 一致，结果同时包含扩展名和完整 mime 名两类键。
+ * 结果同时包含扩展名和完整 mime 名两类键。
  */
 module bas.mimetypes;
 
@@ -55,14 +55,4 @@ MimeEntry[] parseMimeTypes(string text) {
     }
   }
   return entries;
-}
-
-@("parse mime types lines") unittest {
-  auto entries = parseMimeTypes("#comment\ntype=text/html   exts=html,htm\ntype=image/png  exts=png\n");
-  assert(entries.length == 5);
-  assert(entries[0].key == "text/html" && entries[0].mimeType == "text/html");
-  assert(entries[1].key == "html" && entries[1].mimeType == "text/html");
-  assert(entries[2].key == "htm" && entries[2].mimeType == "text/html");
-  assert(entries[3].key == "image/png");
-  assert(entries[4].key == "png" && entries[4].mimeType == "image/png");
 }

@@ -14,14 +14,14 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-/** 本机地址枚举（Scala `org.beangle.commons.net.Networks.addresses`）。 */
+/** 本机地址枚举。 */
 module bas.net;
 
 import std.algorithm : canFind;
 import std.format : format;
 
 /**
- * 返回 `127.0.0.1` 与本机所有非回环 IPv4 地址（Scala `Networks.addresses(1)`）。
+ * 返回 `127.0.0.1` 与本机所有非回环 IPv4 地址。
  *
  * Maker 用它判断某个 `<Server>` 是否部署在本机。非 Linux 平台退化为只返回回环地址。
  */
@@ -55,8 +55,4 @@ string[] localAddresses() {
     }
   }
   return result;
-}
-
-@("local addresses always include loopback") unittest {
-  assert(localAddresses().canFind("127.0.0.1"));
 }

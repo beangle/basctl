@@ -53,7 +53,7 @@ bool curlDownload(string url, string local) {
   return true;
 }
 
-/** 下载到 `dir`，返回文件名；已存在则跳过（Scala `SasTool.download`）。 */
+/** 下载到 `dir`，返回文件名；已存在则跳过。 */
 string downloadToDir(string url, string dir) {
   auto fileName = url[url.lastIndexOf('/') + 1 .. $];
   auto dest = dir ~ "/" ~ fileName;

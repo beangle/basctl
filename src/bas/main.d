@@ -15,18 +15,19 @@
  */
 
 /**
- * basctl 命令行入口：`version` / `status` / `make` / `resolve` / `aes` / `firewall`。
+ * basctl 命令行入口：`version` / `status` / `make` / `resolve` / `start` / `engine` / `firewall`。
  */
 module bas.main;
 
-import bas.aes;
 import bas.banner;
 import bas.config;
+import bas.enginecreator;
 import bas.firewall;
 import bas.maker;
 import bas.net;
 import bas.resolver;
 import bas.serverstatus;
+import bas.starter;
 
 import std.algorithm : canFind, sort;
 import std.conv : to;
@@ -62,12 +63,15 @@ version (unittest) {
       return runMaker(args[2], args[3]);
     case "resolve":
       return cmdResolve(args[2 .. $]);
-    case "aes":
-      if (args.length < 4) {
-        stderr.writeln("Usage: basctl aes <key> <plain|encoded>");
-        return 1;
-      }
-      return cmdAes(args[2], args[3]);
+    case "start":
+      if (args.length == 3)
+        return runStart(buildPath(resolveSasHome(), "conf", "server.xml"), args[2]);
+      if (args.length >= 4)
+        return runStart(args[2], args[3]);
+      stderr.writeln("Usage: basctl start [server.xml] <farm|server|all>");
+      return 1;
+    case "engine":
+      return runEngineCreator(args[2 .. $]);
     case "firewall":
       return runFirewall(args[1 .. $]);
     case "help", "-h", "--help":
@@ -91,7 +95,8 @@ void printUsage() {
   stderr.writeln("  status                        Show running servers under $SAS_HOME/servers");
   stderr.writeln("  make <server.xml> <pattern>   Resolve webapps and build engines/servers");
   stderr.writeln("  resolve <server.xml> [pattern...]  Resolve webapps only");
-  stderr.writeln("  aes <key> <plain|encoded>     AES/ECB/PKCS5 encrypt or decrypt");
+  stderr.writeln("  start [server.xml] <pattern>  Generate a jstart spec per server and start it");
+  stderr.writeln("  engine <type> [options]       Engine entry (creator) for [engine] init scripts");
   stderr.writeln("  firewall [workdir]            Configure firewalld ports from conf/server.xml");
 }
 
@@ -102,14 +107,7 @@ int cmdVersion() {
   return 0;
 }
 
-/** `aes`：值长度为 32 视为密文解密，否则加密并输出十六进制。 */
-int cmdAes(string key, string value) {
-  auto aes = new Aes(key);
-  writeln(value.length == 32 ? aes.decrypt(value) : aes.encrypt(value));
-  return 0;
-}
-
-/** Resolves webapps of a config file（Scala `Resolver.main`）。 */
+/** 解析配置文件中的 webapp（`resolve` 命令）。 */
 int cmdResolve(string[] args) {
   if (!args.length) {
     stderr.writeln("Usage: basctl resolve /path/to/conf/server.xml [farm|server|all]...");
@@ -156,7 +154,7 @@ int cmdResolve(string[] args) {
   return missing.length ? -1 : 0;
 }
 
-/** Uses `SAS_HOME` when set; otherwise the current working directory. */
+/** `SAS_HOME` 有值时取其指向目录，否则取当前工作目录。 */
 string resolveSasHome() @trusted {
   import std.file : getcwd;
 
@@ -215,7 +213,7 @@ int cmdStatus() {
   return 0;
 }
 
-/** Snapshot of TCP listeners: `ss -tlnp` on POSIX, `netstat -ano` on Windows. */
+/** TCP 监听端口快照：POSIX 用 `ss -tlnp`，Windows 用 `netstat -ano`。 */
 string readListenSnapshot() @trusted {
   version (Windows) {
     auto res = execute(["netstat", "-ano", "-p", "tcp"], null, Config.stderrPassThrough);
@@ -234,7 +232,7 @@ string readListenSnapshot() @trusted {
   }
 }
 
-/** Dispatch to OS-specific listener snapshot parser. */
+/** 按操作系统分派到对应的监听端口解析函数。 */
 private string[] portsForPidOs(string snapshot, int pid) {
   version (Windows)
     return portsFromNetstat(snapshot, pid);
@@ -244,8 +242,8 @@ private string[] portsForPidOs(string snapshot, int pid) {
     return [];
 }
 
-/** Parses `ss -tlnp` output; returns distinct listen ports for `pid`. */
-string[] portsFromSs(string ssOutput, int pid) {
+/** 解析 `ss -tlnp` 输出，返回 `pid` 的监听端口（去重）。 */
+public string[] portsFromSs(string ssOutput, int pid) {
   auto rePid = regex(format!`pid=%s(,|\))`(pid));
   string[] ports;
   foreach (line; ssOutput.split('\n')) {
@@ -277,11 +275,10 @@ string[] portsFromSs(string ssOutput, int pid) {
 }
 
 /**
- * Parses English `netstat -ano` TCP lines (`LISTENING` state).
- * Non-English Windows locales may use a different state label; use English netstat,
- * or rely on ss-equivalent tooling then.
+ * 解析英文 `netstat -ano` 的 TCP 行（状态为 `LISTENING`）。
+ * 非英文 Windows 区域的状态名不同，需用英文 netstat，或改用 ss 等价工具。
  */
-string[] portsFromNetstat(string netstatOutput, int pid) {
+public string[] portsFromNetstat(string netstatOutput, int pid) {
   auto reLine = regex(`^\s*TCP\s+(\S+)\s+\S+\s+LISTENING\s+(\d+)\s*$`);
   string[] ports;
   auto pidStr = pid.to!string;
@@ -310,7 +307,7 @@ string[] portsFromNetstat(string netstatOutput, int pid) {
   return ports;
 }
 
-/** Slice before `users:(` — same idea as `grep PID` on full line. */
+/** 截取 `users:(` 之前的部分，等价于在整行上 grep 出 PID。 */
 string extractLocalAddressBeforeUsers(string line) {
   enum marker = "users:(";
   auto idx = line.indexOf(marker);
@@ -323,8 +320,8 @@ string extractLocalAddressBeforeUsers(string line) {
   return parts[$ - 2];
 }
 
-/** Port segment from `host:port` or `[ipv6]:port`. */
-string extractListenPort(string localAddrPort) {
+/** 从 `host:port` 或 `[ipv6]:port` 中取出端口段。 */
+public string extractListenPort(string localAddrPort) {
   auto bracketClose = lastIndexOf(localAddrPort, ']');
   if (bracketClose >= 0) {
     auto tail = localAddrPort[bracketClose + 1 .. $];
@@ -334,21 +331,4 @@ string extractListenPort(string localAddrPort) {
   auto colon = lastIndexOf(localAddrPort, ':');
   enforce(colon > 0 && colon + 1 < localAddrPort.length);
   return strip(localAddrPort[colon + 1 .. $]);
-}
-
-@("extractListenPort ipv4 and bracket ipv6") unittest {
-  assert(extractListenPort("127.0.0.1:8080") == "8080");
-  assert(extractListenPort("[::1]:8443") == "8443");
-}
-
-@("portsFromSs finds port field") unittest {
-  auto sample = "tcp LISTEN 0 128 127.0.0.1:9090 0.0.0.0:* users:((\"java\",pid=4242,fd=99))";
-  auto ports = portsFromSs(sample ~ "\n", 4242);
-  assert(ports == ["9090"]);
-}
-
-@("portsFromNetstat English LISTENING") unittest {
-  auto sample = "  TCP    127.0.0.1:8088         0.0.0.0:0              LISTENING       805964\r";
-  auto ports = portsFromNetstat(sample ~ "\n", 805964);
-  assert(ports == ["8088"]);
 }

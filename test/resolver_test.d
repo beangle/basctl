@@ -14,19 +14,21 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-/** 从工作目录读取 `conf/server.xml`。 */
-module bas.shellenv;
+/** Unit tests for bas.resolver. */
+module test.resolver_test;
 
-import bas.config;
+import bas.resolver;
 
-import std.file : exists, readText;
-import std.path : buildPath;
-import std.typecons : Nullable, nullable;
+@("parse gav lists") unittest {
+  auto a = parseGavs("g1:a1:1; g2:a2:2,\n g3:a3:war:3");
+  assert(a.length == 3);
+  assert(a[0].asGav() == "g1:a1:1");
+  assert(a[2].packaging == "war");
+  assert(parseGavs("  ").length == 0);
+}
 
-/** Reads `<workdir>/conf/server.xml`; returns null when the file is missing. */
-Nullable!Container readContainer(string workdir) {
-  auto target = buildPath(workdir, "conf", "server.xml");
-  if (!exists(target))
-    return Nullable!Container.init;
-  return nullable(parseServerXml(readText(target)));
+@("resolvable recognizes archives and dirs") unittest {
+  assert(resolvable("/tmp/a.jar"));
+  assert(resolvable("/tmp/a.war"));
+  assert(!resolvable("/tmp/a.txt"));
 }
