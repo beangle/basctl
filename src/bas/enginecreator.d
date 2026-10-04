@@ -15,7 +15,7 @@
  */
 
 /**
- * 引擎入口（creator）：把 jstart 的 `[engine] init` 协议翻译成最终启动命令。
+ * 容器入口（creator）：把 jstart 的 `[engine] init` 协议翻译成最终启动命令。
  *
  * war 没有 `Main-Class`，jstart 把它交给 spec 声明的 init 脚本：脚本准备容器环境、
  * 把最终 argv（NUL 分隔）写进 `--entry-out` 后退出，jstart 再 exec 那条命令。
@@ -25,8 +25,8 @@
  * --app-classpath-file=<file> --local-repo=<dir> --entry-out=<file>
  * [--app-jvm-arg=<opt>]... [args...]`
  *
- * 配合一行 wrapper 即可（`[engine] init = /opt/sas/bin/tomcat-init`）：
- * `#!/usr/bin/env bash` 换行 `exec basctl engine tomcat-embed "$@"`
+ * jstart 的 `[engine] init` 可直接写成本命令（jstart 支持“程序 + 参数”），无需 wrapper：
+ * `init = basctl make tomcat-embed`
  *
  * 多 webapp（jstart 的 `[subapp <id>]`）不再传 `--entry`，改为把每个 webapp 的
  * entry/path/libs 写进 `<base>/engine-subapps.jstart`；`tomcat-dist` 逐段准备 docBase 并
@@ -60,6 +60,11 @@ enum undertowEmbedMain = "org.beangle.sas.engine.undertow.Bootstrap";
 
 /** 全量 tomcat 发行包的容器入口 main。 */
 enum tomcatDistMain = "org.apache.catalina.startup.Bootstrap";
+
+/** jstart `[engine] init` 支持的容器类型（`make` 的 creator 模式）。 */
+bool isContainerType(string type) @safe nothrow {
+  return type == "tomcat-dist" || type == "tomcat-embed" || type == "undertow-embed";
+}
 
 /** 精简规则变更时递增，令旧的解压目录重新解压。 */
 private enum slimVersion = "slim1";
@@ -503,7 +508,7 @@ void explodeZip(string zipPath, string dest) {
  * `java <jvm-args> -cp <引擎 + 应用 + WEB-INF> <Bootstrap> --base= --docBase= ...`。
  */
 void createEmbed(string mainClass, EngineOptions o) {
-  o.requireSingle("basctl engine <tomcat-embed|undertow-embed> --base=<dir> --entry=<war|dir> "
+  o.requireSingle("basctl make <tomcat-embed|undertow-embed> --base=<dir> --entry=<war|dir> "
     ~ "--engine-classpath-file=<file> --entry-out=<file> [--app-classpath-file=<file>] "
     ~ "[--app-jvm-arg=<opt>...] [args...]");
   auto docBase = prepareWebapp(o);
@@ -537,7 +542,7 @@ void createEmbed(string mainClass, EngineOptions o) {
  * 启动命令 `java ... -cp <bin/bootstrap.jar> org.apache.catalina.startup.Bootstrap start`。
  */
 void createDist(EngineOptions o) {
-  o.requireSingle("basctl engine tomcat-dist --base=<dir> --entry=<war|dir> --entry-out=<file> "
+  o.requireSingle("basctl make tomcat-dist --base=<dir> --entry=<war|dir> --entry-out=<file> "
     ~ "[--dist=<tomcat.zip>] [--engine-classpath-file=<file>] [--app-classpath-file=<file>] "
     ~ "[--app-jvm-arg=<opt>...] [--port=<n>] [--path=<ctx>] [--jsp=true|false] "
     ~ "[--listener=<class[:k=v;...]>]...");
@@ -547,7 +552,8 @@ void createDist(EngineOptions o) {
   auto docBase = prepareWebapp(o);
   auto zip = resolveDist(o, engineClasspath);
   auto home = prepareDist(o.base, zip, o.jspSupport, engineClasspath);
-  installEngineJars(home, engineClasspath);
+  auto juliJar = juliFromClasspath(engineClasspath);
+  installEngineJars(home, engineClasspath, juliJar);
   writeConf(home, o, [ContextSpec(normalizePath(o.path), docBase, "")]);
 
   string[] argv = [javaExecutable()];
@@ -561,7 +567,7 @@ void createDist(EngineOptions o) {
   argv ~= "-Dcatalina.base=" ~ absolutePath(home);
   argv ~= "-Dcatalina.home=" ~ absolutePath(home);
   argv ~= "-cp";
-  argv ~= bootstrapClasspath(home, appClasspath);
+  argv ~= bootstrapClasspath(home, appClasspath, juliJar);
   argv ~= tomcatDistMain;
   argv ~= "start";
 
@@ -582,7 +588,8 @@ void createDistMulti(EngineOptions o) {
   auto engineClasspath = o.engineClasspath();
   auto zip = resolveDist(o, engineClasspath);
   auto home = prepareDist(o.base, zip, o.jspSupport, engineClasspath);
-  installEngineJars(home, engineClasspath);
+  auto juliJar = juliFromClasspath(engineClasspath);
+  installEngineJars(home, engineClasspath, juliJar);
   auto contexts = prepareSubappContexts(o, apps);
   writeConf(home, o, contexts);
 
@@ -597,7 +604,7 @@ void createDistMulti(EngineOptions o) {
   argv ~= "-Dcatalina.base=" ~ absolutePath(home);
   argv ~= "-Dcatalina.home=" ~ absolutePath(home);
   argv ~= "-cp";
-  argv ~= bootstrapClasspath(home, "");
+  argv ~= bootstrapClasspath(home, "", juliJar);
   argv ~= tomcatDistMain;
   argv ~= "start";
 
@@ -658,12 +665,24 @@ private string findTomcatHome(string enginesDir) {
   return "";
 }
 
-/** 把引擎 classpath 上的 jar 复制进 tomcat `lib/`（缺失才复制），供 common.loader 加载。 */
-private void installEngineJars(string engineHome, string engineClasspath) {
+/**
+ * 把引擎 classpath 上的 jar 复制进 tomcat `lib/`（缺失才复制），供 common.loader 加载。
+ *
+ * juli 只放 Catalina 的系统 classpath，**不进 `lib/`**；旧版 juli 自带的
+ * `META-INF/beangle/dependencies` 若进了 `lib/` 会被 webapp 的 DependencyClassLoader
+ * 当成引擎清单读走，把 juli 自身的依赖误当应用依赖解析。
+ */
+private void installEngineJars(string engineHome, string engineClasspath, string juliJar = "") {
   auto lib = buildPath(engineHome, "lib");
   mkdirRecurse(lib);
   foreach (p; engineClasspath.split(pathSeparator)) {
     if (!p.toLower.endsWith(".jar") || !fileHere(p))
+      continue;
+    // juli 是 Catalina 系统 classpath 专用：无 deps 文件时由 juliJar 顶替 tomcat-juli.jar，
+    // 有 deps 文件时（<=0.13.16）也不能进 lib/，否则同样会污染 DependencyClassLoader。
+    if (baseName(p).startsWith("beangle-sas-juli"))
+      continue;
+    if (juliJar.length && absolutePath(p) == absolutePath(juliJar))
       continue;
     auto target = buildPath(lib, baseName(p));
     if (!exists(target))
@@ -673,18 +692,7 @@ private void installEngineJars(string engineHome, string engineClasspath) {
 
 /** 引擎 classpath 是否已含 juli 实现（`beangle-sas-juli` 把 commons-logging 重命名到其下）。 */
 private bool engineClasspathProvidesJuli(string engineClasspath) {
-  foreach (p; engineClasspath.split(pathSeparator)) {
-    if (!p.toLower.endsWith(".jar") || !fileHere(p))
-      continue;
-    try {
-      auto zip = new ZipArchive(cast(ubyte[]) read(p));
-      if ("org/apache/juli/logging/Log.class" in zip.directory)
-        return true;
-    } catch (Exception) {
-      // 忽略读不了的 jar
-    }
-  }
-  return false;
+  return juliFromClasspath(engineClasspath).length > 0;
 }
 
 /**
@@ -970,16 +978,52 @@ private string xml(string s) {
   return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;");
 }
 
-/** catalina 启动 classpath：`bin/bootstrap.jar[:bin/tomcat-juli.jar][:应用依赖]`。 */
-private string bootstrapClasspath(string engineHome, string appClasspath) {
+/**
+ * catalina 启动 classpath：`bin/bootstrap.jar[:juli][:应用依赖]`。
+ *
+ * Catalina 的 Bootstrap 在静态初始化里就要用 `org.apache.juli.logging.LogFactory`，
+ * 因此 juli 实现必须在**系统 classpath**（而不是 common.loader 的 `lib/`）上。引擎
+ * classpath 自带 juli（beangle-sas-juli）时用它顶替 `bin/tomcat-juli.jar`，否则保留
+ * 发行包自带的 `bin/tomcat-juli.jar`。
+ */
+private string bootstrapClasspath(string engineHome, string appClasspath, string juliJar = "") {
   string[] paths;
   paths ~= absolutePath(buildPath(engineHome, "bin", "bootstrap.jar"));
-  auto juli = buildPath(engineHome, "bin", "tomcat-juli.jar");
-  if (fileHere(juli))
-    paths ~= absolutePath(juli);
+  if (juliJar.length)
+    paths ~= absolutePath(juliJar);
+  else {
+    auto juli = buildPath(engineHome, "bin", "tomcat-juli.jar");
+    if (fileHere(juli))
+      paths ~= absolutePath(juli);
+  }
   if (appClasspath.length)
     paths ~= appClasspath;
   return paths.join(pathSeparator);
+}
+
+/**
+ * 引擎 classpath 上可用的 juli jar；没有则返回空串。
+ *
+ * 判定条件：含有 `org/apache/juli/logging/Log.class`，且**不带**
+ * `META-INF/beangle/dependencies`。后者是随包生成的引擎清单，一旦跟着 juli 上了系统
+ * classpath，会被 webapp 的 DependencyClassLoader 当成引擎依赖读走。<= 0.13.16 的
+ * beangle-sas-juli 就带这个文件，此时视为不可用、退回发行包自带的 `bin/tomcat-juli.jar`
+ * （日志不做桥接，但能正常启动）；0.13.17 起该文件已从打包中剔除。
+ */
+private string juliFromClasspath(string engineClasspath) {
+  foreach (p; engineClasspath.split(pathSeparator)) {
+    if (!p.toLower.endsWith(".jar") || !fileHere(p))
+      continue;
+    try {
+      auto zip = new ZipArchive(cast(ubyte[]) read(p));
+      if ("org/apache/juli/logging/Log.class" in zip.directory
+          && !("META-INF/beangle/dependencies" in zip.directory))
+        return p;
+    } catch (Exception) {
+      // 忽略读不了的 jar
+    }
+  }
+  return "";
 }
 
 /** 发行包主版本号：目录名形如 `apache-tomcat-11.0.24` 得到 `"11"`。 */
@@ -1011,12 +1055,12 @@ private int freePort() {
 }
 
 /**
- * `basctl engine <tomcat-embed|undertow-embed|tomcat-dist> [协议参数...]`：
- * 引擎入口（creator），供 jstart 的 `[engine] init` 脚本委托。
+ * `basctl make <tomcat-embed|undertow-embed|tomcat-dist> [协议参数...]`：
+ * 容器入口（creator），供 jstart 的 `[engine] init` 委托。
  */
 int runEngineCreator(string[] args) {
   if (args.length == 0) {
-    stderr.writeln("Usage: basctl engine <tomcat-embed|undertow-embed|tomcat-dist> [options]");
+    stderr.writeln("Usage: basctl make <tomcat-embed|undertow-embed|tomcat-dist> [options]");
     return 1;
   }
   auto type = args[0];

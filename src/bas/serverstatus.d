@@ -15,55 +15,16 @@
  */
 
 /**
- * 实例存活探测与日志滚动。
+ * 实例进程存活判断与日志滚动。
  */
 module bas.serverstatus;
 
 import bas.config : Server;
 
-import std.conv : to;
 import std.datetime.systime : Clock;
 import std.file;
 import std.format : format;
 import std.path : buildPath;
-import std.string : empty, split, strip;
-import std.typecons : Nullable, nullable;
-
-/** 一个实例进程的描述。 */
-struct ServerStatus {
-  int processId;
-  string processDesc;
-}
-
-/**
- * 通过 `lsof -i :<http>` 探测实例进程；未运行时返回空。
- *
- * `lsof` 不存在或输出异常时返回空，调用方据此认为「未运行」。
- */
-Nullable!ServerStatus detectExecution(Server server) {
-  import std.process : Config, execute;
-
-  if (server.http <= 0)
-    return Nullable!ServerStatus.init;
-
-  auto lsof = execute(["lsof", "-i", ":" ~ server.http.to!string], null, Config.none);
-  if (lsof.status != 0 || lsof.output.empty)
-    return Nullable!ServerStatus.init;
-
-  auto lines = lsof.output.split("\n");
-  if (lines.length < 2)
-    return Nullable!ServerStatus.init;
-
-  auto elems = split(strip(lines[1]));
-  if (elems.length < 2)
-    return Nullable!ServerStatus.init;
-
-  ServerStatus status;
-  status.processId = to!int(elems[1]);
-  auto ps = execute(["ps", "-f", "-p", elems[1]], null, Config.none);
-  status.processDesc = ps.output;
-  return nullable(status);
-}
 
 /** 判断 pid 对应的进程是否存活（POSIX `kill(pid,0)` / Windows `OpenProcess`）。 */
 bool processRunning(int pid) @trusted {

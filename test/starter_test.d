@@ -32,23 +32,6 @@ import std.algorithm : canFind;
   assert(subappId("/portal", ["portal", "portal-2"]) == "portal-3");
 }
 
-@("renderLaunchSpec writes engine, runtime, args and one section per subapp") unittest {
-  auto text = renderLaunchSpec("/srv/sas/servers", "platform.server1", "/srv/sas",
-      "/srv/sas/bin/basctl-tomcat-dist-init.sh",
-      ["org.apache.tomcat:tomcat:zip:11.0.18", "org.beangle.sas:beangle-sas-engine:0.13.16"],
-      ["-Xmx300M", "-Dems.profile=local"], ["--port=8081"],
-      [SubappSpec("cas", "/r/cas.war", "/cas", "org.postgresql:postgresql:42.7.9"),
-       SubappSpec("portal", "/r/portal.war", "/portal", "")]);
-  assert(text.canFind("[app]\nbase = /srv/sas/servers\ninstance = platform.server1\n"));
-  assert(text.canFind("working_dir = /srv/sas\n"));
-  assert(text.canFind("init = /srv/sas/bin/basctl-tomcat-dist-init.sh\n"));
-  assert(text.canFind("\n[runtime]\n-Xmx300M\n-Dems.profile=local\n"));
-  assert(text.canFind("\n[args]\n--port=8081\n"));
-  assert(text.canFind("\n[subapp cas]\nentry = /r/cas.war\npath = /cas\nlibs = org.postgresql:postgresql:42.7.9\n"));
-  assert(text.canFind("\n[subapp portal]\nentry = /r/portal.war\npath = /portal\n"));
-  assert(!text.canFind("libs = \n"));
-}
-
 @("runtimeArgsFor adds sas defaults and farm options") unittest {
   auto cfg = parseServerXml(`<Sas version="1"><Engines><Engine name="tomcat" type="tomcat"
       version="11.0.18"/></Engines><Farms><Farm name="f" engine="tomcat" maxHeapSize="512M">
@@ -65,7 +48,24 @@ import std.algorithm : canFind;
   assert(appArgsFor(server) == ["--port=8080"]);
 }
 
-@("shellQuote escapes single quotes") unittest {
-  assert(shellQuote("/a/b") == "'/a/b'");
-  assert(shellQuote("a'b") == `'a'\''b'`);
+@("repoArgs passes release and snapshot repositories through to jstart") unittest {
+  auto cfg = parseServerXml(`<Sas version="0.13.16">
+      <Repository local="/m2" remote="http://r1,http://r2"/>
+      <SnapshotRepo remote="http://snap"/>
+      <Engines><Engine name="tomcat" type="tomcat" version="11.0.18"/></Engines>
+      <Hosts><Host name="local" ip="127.0.0.1"/></Hosts>
+      <Farms><Farm name="f" engine="tomcat"><Server name="s" http="8080"/></Farm></Farms>
+      <Webapps><Webapp uri="gav://g:a:1" runAt="f" path="/"/></Webapps></Sas>`);
+  assert(repoArgs(cfg) == ["--local=/m2", "--remote=http://r1,http://r2",
+      "--snapshot-remote=http://snap"]);
+}
+
+@("repoArgs falls back to the snapshot local and omits empty repositories") unittest {
+  auto cfg = parseServerXml(`<Sas version="0.13.16">
+      <SnapshotRepo local="/m2snap"/>
+      <Engines><Engine name="tomcat" type="tomcat" version="11.0.18"/></Engines>
+      <Hosts><Host name="local" ip="127.0.0.1"/></Hosts>
+      <Farms><Farm name="f" engine="tomcat"><Server name="s" http="8080"/></Farm></Farms>
+      <Webapps><Webapp uri="gav://g:a:1" runAt="f" path="/"/></Webapps></Sas>`);
+  assert(repoArgs(cfg) == ["--local=/m2snap"]);
 }

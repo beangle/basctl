@@ -30,7 +30,6 @@ import std.array : array, join, split;
 import std.conv : to;
 import std.exception : enforce;
 import std.format : format;
-import std.path : buildPath;
 import std.process : environment;
 import std.string : empty, indexOf, lastIndexOf, replace, split, strip;
 import std.typecons : Nullable, nullable;
@@ -138,13 +137,52 @@ class Engine {
     this.version_ = version_;
   }
 
-  /** Engine home directory under `SAS_HOME`. */
-  string path(string sasHome) const {
-    return buildPath(sasHome, "engines", name ~ "-" ~ version_);
-  }
-
   override string toString() const {
     return name;
+  }
+}
+
+/**
+ * 把 sas 对 Tomcat 引擎的默认要求补进配置模型（幂等，可重复调用）。
+ *
+ * 补三类东西：Server 级 Listener、Context 的 `ExtendableWebappLoader` /
+ * `DependencyClassLoader` 与全关闭的 JarScanner，以及引擎自身所需的 jar
+ * （`beangle-sas-engine` 与容器日志桥接 `beangle-sas-juli`）。
+ */
+void applyEngineDefault(Container container, Engine engine) {
+  if (!engine.listeners.length) {
+    engine.listeners ~= new Listener("org.apache.catalina.core.JreMemoryLeakPreventionListener");
+    engine.listeners ~= new Listener("org.apache.catalina.core.ThreadLocalLeakPreventionListener");
+  }
+
+  if (engine.context is null)
+    engine.context = new Context();
+
+  auto context = engine.context;
+  if (context.loader is null) {
+    context.loader = new Loader("org.beangle.sas.engine.tomcat.ExtendableWebappLoader");
+    context.loader.properties["loaderClass"] = "org.beangle.sas.engine.tomcat.DependencyClassLoader";
+  }
+  if (context.jarScanner is null) {
+    auto scanner = new JarScanner();
+    scanner.properties["scanBootstrapClassPath"] = "false";
+    scanner.properties["scanAllDirectories"] = "false";
+    scanner.properties["scanAllFiles"] = "false";
+    scanner.properties["scanClassPath"] = "false";
+    scanner.properties["scanManifest"] = "false";
+    context.jarScanner = scanner;
+  }
+  engine.jars ~= Jar.gav("org.beangle.sas:beangle-sas-engine:" ~ container.version_);
+  // 容器日志桥接：beangle-sas-juli 把 commons-logging / slf4j / logback 打包改名后再提供
+  // `org.apache.juli.logging.LogFactory`，顶替 tomcat 自带的 bin/tomcat-juli.jar。
+  if (engine.typ == engineTomcat) {
+    auto juli = Jar.gav("org.beangle.sas:beangle-sas-juli:" ~ container.version_);
+    bool hasJuli;
+    foreach (jar; engine.jars)
+      if (jar.uri == juli.uri)
+        hasJuli = true;
+    if (!hasJuli)
+      engine.jars ~= juli;
   }
 }
 

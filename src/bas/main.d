@@ -15,16 +15,18 @@
  */
 
 /**
- * basctl 命令行入口：`version` / `status` / `make` / `resolve` / `start` / `engine` / `firewall`。
+ * basctl 命令行入口：`version` / `status` / `make` / `resolve` / `start` / `stop` /
+ * `run` / `firewall` / `pull`。
  */
 module bas.main;
 
 import bas.banner;
 import bas.config;
+import bas.embed : runEmbedded;
 import bas.enginecreator;
 import bas.firewall;
-import bas.maker;
 import bas.net;
+import bas.pull;
 import bas.resolver;
 import bas.serverstatus;
 import bas.starter;
@@ -56,11 +58,7 @@ version (unittest) {
     case "status":
       return cmdStatus();
     case "make":
-      if (args.length < 4) {
-        stderr.writeln("Usage: basctl make /path/to/conf/server.xml <farm|server|all>");
-        return 1;
-      }
-      return runMaker(args[2], args[3]);
+      return cmdMake(args[2 .. $]);
     case "resolve":
       return cmdResolve(args[2 .. $]);
     case "start":
@@ -70,10 +68,19 @@ version (unittest) {
         return runStart(args[2], args[3]);
       stderr.writeln("Usage: basctl start [server.xml] <farm|server|all>");
       return 1;
-    case "engine":
-      return runEngineCreator(args[2 .. $]);
+    case "stop":
+      if (args.length == 3)
+        return runStop(buildPath(resolveSasHome(), "conf", "server.xml"), args[2 .. $]);
+      if (args.length >= 4)
+        return runStop(args[2], args[3 .. $]);
+      stderr.writeln("Usage: basctl stop [server.xml] <farm|server|all> [--force] [--timeout=<sec>]");
+      return 1;
+    case "run":
+      return runEmbedded(args[2 .. $]);
     case "firewall":
       return runFirewall(args[1 .. $]);
+    case "pull":
+      return runPull(args[2 .. $]);
     case "help", "-h", "--help":
       printUsage();
       return 0;
@@ -93,11 +100,45 @@ void printUsage() {
   stderr.writeln("Commands:");
   stderr.writeln("  version                       Show logo and local hosts");
   stderr.writeln("  status                        Show running servers under $SAS_HOME/servers");
-  stderr.writeln("  make <server.xml> <pattern>   Resolve webapps and build engines/servers");
+  stderr.writeln("  make [server.xml] <pattern>   Generate specs and resolve dependencies (no start)");
+  stderr.writeln("  make <type> [options]         Prepare a container for jstart `[engine] init` (creator)");
   stderr.writeln("  resolve <server.xml> [pattern...]  Resolve webapps only");
   stderr.writeln("  start [server.xml] <pattern>  Generate a jstart spec per server and start it");
-  stderr.writeln("  engine <type> [options]       Engine entry (creator) for [engine] init scripts");
+  stderr.writeln("  stop [server.xml] <pattern>   Stop the jstart instances started by `start`");
+  stderr.writeln("  run [options] <app>           Run a single webapp (war/gav/url) in embedded mode");
   stderr.writeln("  firewall [workdir]            Configure firewalld ports from conf/server.xml");
+  stderr.writeln("  pull [--remote=<url>] [workdir]  Fetch conf/server.xml from the control endpoint");
+}
+
+/**
+ * `make`：两种输入，同一种「准备」语义——
+ *
+ *  - `make <tomcat-dist|tomcat-embed|undertow-embed> [协议参数]`：jstart `[engine] init`
+ *    的回调（creator），准备容器环境并写出最终启动命令；
+ *  - `make [server.xml] <farm|server|all>`：按配置只准备不启动，生成 spec 并
+ *    `jstart resolve`（预取依赖）。
+ */
+private int cmdMake(string[] args) {
+  if (!args.length) {
+    makeUsage();
+    return 1;
+  }
+  if (isContainerType(args[0]))
+    return runEngineCreator(args);
+  if (args.length == 1)
+    return runMake(buildPath(resolveSasHome(), "conf", "server.xml"), args[0]);
+  if (args.length == 2)
+    return runMake(args[0], args[1]);
+  makeUsage();
+  return 1;
+}
+
+/** `make` 的用法（creator 模式与只准备模式）。 */
+private void makeUsage() {
+  stderr.writeln("Usage: basctl make <tomcat-dist|tomcat-embed|undertow-embed> [options]");
+  stderr.writeln("       basctl make [server.xml] <farm|server|all>");
+  stderr.writeln("  <type> mode is the jstart `[engine] init` callback; the <pattern> mode only");
+  stderr.writeln("  generates specs and resolves dependencies, start them with `basctl start`.");
 }
 
 /** `version`：打印 logo 与本机地址。 */

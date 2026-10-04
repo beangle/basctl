@@ -18,8 +18,8 @@
 | `daemon/ServerStatus.scala` | `serverstatus.d` | 完成 |
 | `tool/Jstart.scala` | `jstart.d` | 完成 |
 | `tool/Resolver.scala` | `resolver.d` | 完成 |
-| `tool/Maker.scala` | `maker.d` | 完成 |
-| `maker/TomcatMaker.scala` | `tomcatmaker.d` | 完成 |
+| `tool/Maker.scala` | `main.d`（`make`/`start`/`stop` 编排）+ `starter.d` | 完成 |
+| `maker/TomcatMaker.scala` | `enginecreator.d`（`tomcat-dist` 精简与渲染） | 完成 |
 | `tool/SasTool.scala`（`download`/`rollLog`/`detectExecution`） | `download.d`、`serverstatus.d` | 完成 |
 | `tool/Aes.scala` | — | 不迁移（`aes` 子命令已移除） |
 | `tool/Firewall.scala` | `firewall.d`、`shellenv.d` | 完成 |
@@ -33,9 +33,9 @@ Scala 用 Freemarker 模板渲染；basctl 用 D 代码直接渲染，输出等�
 
 | 模板 | 替代 |
 |---|---|
-| `tomcat/conf/server.xml.ftl` | `render.d` `renderServerXml` |
-| `tomcat/conf/web.xml.ftl` | `render.d` `renderWebXml` + `mimetypes.d` |
-| `sas/setenv.sh.ftl` | `render.d` `renderSetenvSh` |
+| `tomcat/conf/server.xml.ftl` | `enginecreator.d` `serverXml` |
+| `tomcat/conf/web.xml.ftl` | `enginecreator.d` `webXml` + `mimetypes.d` |
+| `sas/setenv.sh.ftl` | 不再生成（JVM 参数直接写进 creator 的最终启动命令） |
 | `sas/firewall.ftl` | `render.d` `renderFirewallConf` |
 | `tomcat/conf/catalina.properties` | 内嵌资源（`resources/tomcat/conf/`） |
 | `sas/mime.types` | 内嵌资源（`resources/sas/`） |
@@ -46,24 +46,27 @@ Scala 用 Freemarker 模板渲染；basctl 用 D 代码直接渲染，输出等�
 |---|---|
 | `basctl version` | `tool.Version.main` |
 | `basctl status` | `daemon.ServerStatus` + `sas.sh status` |
-| `basctl make <server.xml> <farm\|server\|all>` | `tool.Maker.main` |
+| `basctl make [server.xml] <farm\|server\|all>` | `tool.Maker.main`（只生成 spec 并 `jstart resolve`，不启动） |
 | `basctl resolve <server.xml> [pattern...]` | `tool.Resolver.main` |
 | `basctl start [server.xml] <farm\|server\|all>` | `start.sh` + `tool.Maker.main`（改为生成 jstart spec 并委托 jstart 启动，见 [start.md](start.md)） |
-| `basctl engine <type> [options]` | `engine`（Java）的 `EngineCreator` / `tomcat.EmbedCreator` / `undertow.EmbedCreator` / `tomcat.ServerCreator` |
+| `basctl stop [server.xml] <farm\|server\|all>` | `stop.sh`（改为逐个 `jstart stop` 对应 spec） |
+| `basctl run [options] <app>` | `launch.sh`（改为生成单应用 jstart spec 并前台委托 `jstart run`，见 [run.md](run.md)） |
+| `basctl make <type> [options]` | `engine`（Java）的 `EngineCreator` / `tomcat.EmbedCreator` / `undertow.EmbedCreator` / `tomcat.ServerCreator` |
 | `basctl firewall [workdir]` | `tool.Firewall.main` |
+| `basctl pull [--remote=<url>] [workdir]` | `sas.sh pull`（从发行脚本移入） |
 
-## engine 模块的引擎入口（creator）迁移
+## engine 模块的容器入口（creator）迁移
 
-`beangle-sas` 的 `engine` 模块（Java，配合 jstart 的 war 运行协议）里的**引擎入口**也用 D
+`beangle-sas` 的 `engine` 模块（Java，配合 jstart 的 war 运行协议）里的**容器入口**也用 D
 重写进 basctl，运行入口因此不再需要启动一个 JVM。映射与差异见
 [engine-creator.md](engine-creator.md)：
 
 | Java（engine/src/main/java/org/beangle/sas/engine） | basctl（src/bas） | 状态 |
 |---|---|---|
 | `EngineCreator`（协议解析 / docBase / 解压 / argv） | `enginecreator.d` 的公共函数 | 完成 |
-| `tomcat.EmbedCreator` | `basctl engine tomcat-embed` | 完成 |
-| `undertow.EmbedCreator` | `basctl engine undertow-embed` | 完成 |
-| `tomcat.ServerCreator` | `basctl engine tomcat-dist`（复用 `tomcatmaker.d` 的精简规则与 `render.d` 资源） | 完成（单/多应用） |
+| `tomcat.EmbedCreator` | `basctl make tomcat-embed` | 完成 |
+| `undertow.EmbedCreator` | `basctl make undertow-embed` | 完成 |
+| `tomcat.ServerCreator` | `basctl make tomcat-dist`（精简规则与渲染资源内联在 `enginecreator.d` / `render.d`） | 完成（单/多应用） |
 
 已知差异：
 
@@ -99,7 +102,7 @@ Scala 用 Freemarker 模板渲染；basctl 用 D 代码直接渲染，输出等�
 | `<Webapp libs>` | `libs="org.postgresql:postgresql:42.7.9"` | 逐个 `jstart fetch`，失败仅告警不阻断（与 Scala 一致） |
 
 多应用（`[subapp <id>]`）也做过真实端到端验证：用上述 `jstart` 跑一个声明两个 subapp 的
-spec（`portal` → `/portal`、`admin` → `/admin`），`basctl engine tomcat-dist` 生成带两个
+spec（`portal` → `/portal`、`admin` → `/admin`），`basctl make tomcat-dist` 生成带两个
 `<Context>` 的 `server.xml` 并启动成功，两个上下文各自返回本应用的首页。两个 war 的
 `WEB-INF/classes/META-INF/beangle/dependencies` 各写一条不同的 gav、再给 `portal` 加
 `libs = org.slf4j:slf4j-api:2.0.19`：日志显示 `admin` 上下文只追加自己的 1 个 jar、
@@ -108,7 +111,8 @@ spec（`portal` → `/portal`、`admin` → `/admin`），`basctl engine tomcat-
 
 `basctl start` 的整链路也做过真实端到端验证：用一份含 `<ServerOptions>` / `maxHeapSize` /
 两个 `<Webapp>`（其中一个带 `libs`）的 `server.xml` 执行 `basctl start <xml> <farm>`，
-生成的 spec 依次带上 tomcat 发行包、引擎 jar、引擎 jar 清单里的 scala、farm 的 `<Jar>`、
-`[runtime]` 与两段 `[subapp]`；`jstart resolve` 通过后后台启动成功，两个上下文各自返回
-本应用首页，`SERVER_PID` 与 `servers/<name>/logs` 软链就位，`basctl status` 能列出
-pid 与端口（详见 [start.md](start.md)）。
+生成的 spec 依次带上 tomcat 发行包、引擎 jar、`beangle-sas-juli`（容器日志桥接）、
+引擎 jar 清单里的 scala、farm 的 `<Jar>`、`[runtime]` 与两段 `[subapp]`；`jstart resolve`
+通过后后台启动成功，两个上下文各自返回本应用首页，`SERVER_PID` 与 `servers/<name>/logs`
+软链就位，`basctl status` 能列出 pid 与端口，`basctl stop` 能停掉并清理（详见
+[start.md](start.md)）。

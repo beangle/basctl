@@ -24,37 +24,39 @@
  *     launch spec `conf/<farm.server>.jstart`——一个 `<Server>` 一个 JVM，内部每个
  *     webapp 一段 `[subapp <id>]`（各自 docBase 与 `libs`，依赖互不串味）；
  *  3. `jstart resolve <spec>` 校验 spec 与依赖齐备；
- *  4. 后台 `jstart run <spec>`：jstart 先运行 `[engine] init` 脚本（本命令生成的
- *     wrapper）→ `basctl engine tomcat-dist` 准备容器环境并写出最终启动命令，
- *     jstart 再 exec 它。
+ *  4. 后台 `jstart run <spec>`：jstart 先运行 `[engine] init`（写成本 basctl 的
+ *     `make tomcat-dist` 命令行）→ 它准备容器环境并写出最终启动命令，jstart 再 exec。
  *
  * 实例目录沿用 `servers/<farm.server>`——spec 里写 `[app] base = $SAS_HOME/servers`
  * 加 `[app] instance = <farm.server>`，jstart 的直接组件目录就是它；`SERVER_PID` 与
- * `logs/console.out` 也与既有 `status`/`make` 的布局一致。
+ * `logs/console.out` 也与既有布局一致。
+ *
+ * `basctl make <pattern>` 复用同一套准备流程（{@link prepareServer}），只生成 spec 并
+ * `jstart resolve`，不起进程。
  */
 module bas.starter;
 
 import bas.artifact : gavProtocol, isGav, isRemote, parseArtifact, toArtifact;
 import bas.config;
-import bas.fsutil : linkIfMissing, setExecutable;
+import bas.fsutil : linkIfMissing;
 import bas.jstart : fetch, jstartCommand;
 import bas.net : localAddresses;
 import bas.resolver : resolveArtifact, resolveWebapps;
 import bas.serverstatus : processRunning, rollLog;
-import bas.tomcatmaker : applyEngineDefault;
+import bas.spec : SubappSpec, engineInitCommand, renderLaunchSpec, shellQuote;
 
 import core.thread : Thread;
 import core.time : msecs;
 
 import std.algorithm : canFind;
-import std.array : appender, join, split;
+import std.array : join, split;
 import std.conv : to;
-import std.file : exists, mkdirRecurse, read, readLink, readText, remove, write;
+import std.file : exists, mkdirRecurse, read, readText, remove, write;
 import std.format : format;
 import std.path : absolutePath, buildPath, dirName;
 import std.process : Config, environment, execute;
 import std.stdio : stderr, writeln;
-import std.string : replace, startsWith, strip;
+import std.string : startsWith, strip;
 import std.typecons : Nullable, nullable;
 import std.zip : ZipArchive;
 
@@ -73,30 +75,13 @@ int runStart(string configFile, string pattern) {
   }
   auto container = parseServerXmlFile(configFile);
   auto sasHome = dirName(dirName(absolutePath(configFile)));
-  auto ips = localAddresses();
-
-  Server[] servers;
-  foreach (farm; container.farms) {
-    foreach (server; farm.servers) {
-      if (!ips.canFind(server.host.ip))
-        continue;
-      if (pattern == "all" || pattern == farm.name || pattern == server.qualifiedName)
-        servers ~= server;
-    }
-  }
+  auto servers = localServers(container, pattern);
   if (!servers.length) {
     stderr.writeln("No local server matches " ~ pattern);
     return 1;
   }
 
-  // 补齐 sas 对 tomcat 的默认要求（Loader/JarScanner/引擎 jar），每个引擎只补一次
-  Engine[] engines;
-  foreach (farm; container.farms)
-    foreach (server; farm.servers)
-      if (servers.canFind(server) && !engines.canFind(farm.engine))
-        engines ~= farm.engine;
-  foreach (engine; engines)
-    applyEngineDefault(container, engine);
+  applyEngineDefaults(container, servers);
 
   // 1. 先准备（生成 spec + resolve），失败不启动；这样多个实例不会半启动
   PreparedServer[] prepared;
@@ -125,7 +110,7 @@ int runStart(string configFile, string pattern) {
   int[] pids;
   foreach (ref p; prepared) {
     prepareLog(sasHome, p.server);
-    pids ~= launchBackground(p.spec, consoleLog(sasHome, p.server));
+    pids ~= launchBackground(p.spec, consoleLog(sasHome, p.server), repoArgs(container));
   }
 
   Thread.sleep(msecs(startupProbeMs));
@@ -146,6 +131,128 @@ int runStart(string configFile, string pattern) {
   return started == prepared.length ? 0 : 1;
 }
 
+/**
+ * `basctl make [server.xml] <farm|server|all>`：只准备不启动。
+ *
+ * 与 `start` 共用选实例、引擎默认与 {@link prepareServer}，逐个生成
+ * `conf/<name>.jstart` 并 `jstart resolve`（把依赖抓到本地库）；不写 pid、不起进程，
+ * 启动交给 `start`。适合离线预取与启动前巡检。
+ */
+int runMake(string configFile, string pattern) {
+  if (!exists(configFile)) {
+    stderr.writeln("Cannot find config file " ~ configFile);
+    return 1;
+  }
+  auto container = parseServerXmlFile(configFile);
+  auto sasHome = dirName(dirName(absolutePath(configFile)));
+  auto servers = localServers(container, pattern);
+  if (!servers.length) {
+    stderr.writeln("No local server matches " ~ pattern);
+    return 1;
+  }
+  applyEngineDefaults(container, servers);
+
+  int prepared, failed;
+  foreach (server; servers) {
+    if (prepareServer(sasHome, container, server).isNull)
+      failed++;
+    else
+      prepared++;
+  }
+  writeln(prepared, " servers prepared", failed ? format!", %s failed"(failed) : "", ".");
+  return failed ? 1 : 0;
+}
+
+/** 给选中的 server 所引用的引擎补齐 sas 默认（每个引擎一次）。 */
+private void applyEngineDefaults(Container container, const(Server)[] servers) {
+  Engine[] engines;
+  foreach (farm; container.farms)
+    foreach (server; farm.servers)
+      if (servers.canFind(server) && !engines.canFind(farm.engine))
+        engines ~= farm.engine;
+  foreach (engine; engines)
+    applyEngineDefault(container, engine);
+}
+
+/**
+ * `basctl stop [server.xml] <farm|server|all> [--force] [--timeout=<sec>]`：
+ * 逐个 `jstart stop conf/<name>.jstart`，与 `start` 生成/使用同一份 spec。
+ *
+ * 实例由 jstart 记录 pid；本命令不直接杀进程，`--force`/`--timeout` 原样交给 jstart。
+ */
+int runStop(string configFile, string[] rest) {
+  if (!rest.length) {
+    stderr.writeln("Usage: basctl stop [server.xml] <farm|server|all> [--force] [--timeout=<sec>]");
+    return 1;
+  }
+  if (!exists(configFile)) {
+    stderr.writeln("Cannot find config file " ~ configFile);
+    return 1;
+  }
+  auto container = parseServerXmlFile(configFile);
+  auto sasHome = dirName(dirName(absolutePath(configFile)));
+  auto servers = localServers(container, rest[0]);
+  if (!servers.length) {
+    stderr.writeln("No local server matches " ~ rest[0]);
+    return 1;
+  }
+  auto extra = rest[1 .. $];
+
+  int stopped, skipped;
+  foreach (server; servers) {
+    auto spec = buildPath(sasHome, "conf", server.qualifiedName ~ ".jstart");
+    if (!exists(spec)) {
+      stderr.writeln(server.qualifiedName ~ ": no spec " ~ spec
+          ~ " (started outside basctl? use the legacy stop.sh)");
+      skipped++;
+      continue;
+    }
+    auto res = execute([jstartCommand(), "stop", spec] ~ extra, null,
+        Config.stderrPassThrough);
+    if (res.status != 0) {
+      stderr.writeln(server.qualifiedName ~ ": jstart stop failed with exit code "
+          ~ res.status.to!string);
+      skipped++;
+      continue;
+    }
+    writeln(server.qualifiedName ~ ": stopped");
+    removeStalePid(sasHome, server);
+    stopped++;
+  }
+  writeln(stopped, " servers stopped.",
+      skipped ? format!"(%s skipped)"(skipped) : "");
+  return skipped ? 1 : 0;
+}
+
+/** 选择部署在本机、且匹配 pattern（`all` / farm 名 / `farm.server`）的 server。 */
+Server[] localServers(Container container, string pattern) {
+  auto ips = localAddresses();
+  Server[] servers;
+  foreach (farm; container.farms) {
+    foreach (server; farm.servers) {
+      if (!ips.canFind(server.host.ip))
+        continue;
+      if (pattern == "all" || pattern == farm.name || pattern == server.qualifiedName)
+        servers ~= server;
+    }
+  }
+  return servers;
+}
+
+/** 停止后清理残留 `SERVER_PID`（进程已不在时）。 */
+private void removeStalePid(string sasHome, Server server) {
+  auto path = buildPath(sasHome, "servers", server.qualifiedName, "SERVER_PID");
+  if (!exists(path))
+    return;
+  try {
+    auto pid = strip(readText(path)).to!int;
+    if (!processRunning(pid))
+      remove(path);
+  } catch (Exception) {
+    // 内容非法时保留，交给 status/用户排查
+  }
+}
+
 /** 一个已备好 spec 的实例。 */
 private struct PreparedServer {
   Server server;
@@ -153,7 +260,7 @@ private struct PreparedServer {
 }
 
 /**
- * 为单个 `<Server>` 生成 spec：解析 webapp、确保引擎依赖本地齐备、写出入口 wrapper
+ * 为单个 `<Server>` 生成 spec：解析 webapp、确保引擎依赖本地齐备、写出 `[engine] init` 命令行
  * 与 `conf/<name>.jstart`。成功返回 spec 路径，失败返回空。
  */
 private Nullable!string prepareServer(string sasHome, Container container, Server server) {
@@ -186,23 +293,15 @@ private Nullable!string prepareServer(string sasHome, Container container, Serve
   if (!collectEngineDeps(container, engine, container.repository, container.snapshotRepo, engineDeps))
     return Nullable!string.init;
 
-  auto initScript = writeInitWrapper(sasHome, engine.typ);
+  auto initCommand = engineInitCommand();
   auto spec = buildPath(sasHome, "conf", server.qualifiedName ~ ".jstart");
   mkdirRecurse(dirName(spec));
   write(spec, renderLaunchSpec(buildPath(sasHome, "servers"), server.qualifiedName, sasHome,
-      initScript, engineDeps, runtimeArgsFor(server), appArgsFor(server), subappSpecs(webapps)));
+      initCommand, engineDeps, runtimeArgsFor(server), appArgsFor(server), subappSpecs(webapps)));
   writeln(server.qualifiedName ~ ": wrote " ~ spec);
-  if (!resolveSpec(spec))
+  if (!resolveSpec(spec, repoArgs(container)))
     return Nullable!string.init;
   return nullable(spec);
-}
-
-/** 一个 `[subapp <id>]` 段：webapp 的本地入口、上下文路径与扩展依赖。 */
-struct SubappSpec {
-  string id;
-  string entry;
-  string path;
-  string libs;
 }
 
 /** 把 server 的 webapp 列表转成 spec 的 `[subapp]` 段（id 由 context path 推导并去重）。 */
@@ -240,47 +339,6 @@ string subappId(string contextPath, const(string)[] used) {
   return id;
 }
 
-/**
- * 渲染 jstart launch spec：`[app] base` 是 base 根（`$SAS_HOME/servers`），
- * `[app] instance = <farm.server>` 让 jstart 把组件目录直接定为 `servers/<farm.server>`；
- * `[engine] init` 是本命令生成的 wrapper，每个 webapp 一段 `[subapp <id>]`。依赖（引擎/容器
- * jar）与 JVM 参数分别写进 `[engine]` 与 `[runtime]`，端口等透传参数进 `[args]`。
- */
-string renderLaunchSpec(string baseRoot, string instance, string workingDir, string initScript,
-    const(string)[] engineDeps, const(string)[] runtimeArgs, const(string)[] appArgs,
-    const(SubappSpec)[] subapps) {
-  auto sb = appender!string;
-  sb.put("# Generated by basctl start. Do not edit.\n\n");
-  sb.put("[app]\n");
-  sb.put("base = " ~ baseRoot ~ "\n");
-  if (instance.length)
-    sb.put("instance = " ~ instance ~ "\n");
-  if (workingDir.length)
-    sb.put("working_dir = " ~ workingDir ~ "\n");
-  sb.put("\n[engine]\n");
-  sb.put("init = " ~ initScript ~ "\n");
-  foreach (dep; engineDeps)
-    sb.put(dep ~ "\n");
-  if (runtimeArgs.length) {
-    sb.put("\n[runtime]\n");
-    foreach (arg; runtimeArgs)
-      sb.put(arg ~ "\n");
-  }
-  if (appArgs.length) {
-    sb.put("\n[args]\n");
-    foreach (arg; appArgs)
-      sb.put(arg ~ "\n");
-  }
-  foreach (app; subapps) {
-    sb.put("\n[subapp " ~ app.id ~ "]\n");
-    sb.put("entry = " ~ app.entry ~ "\n");
-    sb.put("path = " ~ (app.path.length ? app.path : "/") ~ "\n");
-    if (app.libs.length)
-      sb.put("libs = " ~ app.libs ~ "\n");
-  }
-  return sb.data;
-}
-
 /** `[runtime]`：sas 的 JVM 默认参数 + `<Farm><ServerOptions>`。 */
 string[] runtimeArgsFor(Server server) {
   auto farm = server.farm;
@@ -297,7 +355,7 @@ string[] runtimeArgsFor(Server server) {
   return args;
 }
 
-/** `[args]`：透传给引擎入口的参数（端口、JSP 开关）。 */
+/** `[args]`：透传给容器入口的参数（端口、JSP 开关）。 */
 string[] appArgsFor(Server server) {
   string[] args;
   if (server.http > 0)
@@ -375,45 +433,37 @@ string readZipEntry(string zipPath, string entry) {
   return "";
 }
 
+/** 把 argv 拼成一条 shell 命令（每个参数单独加引号）。 */
+private string shellJoin(const(string)[] args) {
+  string[] quoted;
+  foreach (arg; args)
+    quoted ~= shellQuote(arg);
+  return quoted.join(" ");
+}
+
 /**
- * 写出（或刷新）引擎入口 wrapper：jstart 的 `[engine] init` 脚本，转发给
- * `basctl engine tomcat-dist`（jstart 只认脚本文件路径，不认 java 类）。
+ * 调用 jstart（`resolve` / `run`）时的仓库参数：本地库取 `<Repository local>`，
+ * 缺省退回 `<SnapshotRepo local>`；上游分别是 `<Repository remote>` 与
+ * `<SnapshotRepo remote>`（快照仓库走独立的 `--snapshot-remote=`）。
+ * 都没配时不传，交给 jstart 的内置默认。
  */
-string writeInitWrapper(string sasHome, string engineType) {
-  auto binDir = buildPath(sasHome, "bin");
-  mkdirRecurse(binDir);
-  auto wrapper = buildPath(binDir, "basctl-" ~ engineType ~ "-dist-init.sh");
-  auto lines = "#!/usr/bin/env bash\n"
-    ~ "# Generated by basctl start: jstart [engine] init entry for the " ~ engineType ~ " dist engine.\n"
-    ~ "exec " ~ shellQuote(basctlExecutable()) ~ " engine tomcat-dist \"$@\"\n";
-  write(wrapper, lines);
-  setExecutable(wrapper);
-  return wrapper;
+string[] repoArgs(Container container) {
+  string[] args;
+  auto local = container.repository.local;
+  if ((local.isNull || !strip(local.get).length) && !container.snapshotRepo.local.isNull)
+    local = container.snapshotRepo.local;
+  if (!local.isNull && strip(local.get).length)
+    args ~= "--local=" ~ strip(local.get);
+  if (container.repository.remotes.length)
+    args ~= "--remote=" ~ container.repository.remotes.join(",");
+  if (container.snapshotRepo.remotes.length)
+    args ~= "--snapshot-remote=" ~ container.snapshotRepo.remotes.join(",");
+  return args;
 }
 
-/** 运行中的 basctl 可执行文件路径（`/proc/self/exe`）；不可得时退回 PATH 上的 `basctl`。 */
-string basctlExecutable() {
-  version (linux) {
-    try {
-      auto self = readLink("/proc/self/exe");
-      if (self.length)
-        return self;
-    } catch (Exception) {
-      // 忽略：退回 PATH 查找
-    }
-  }
-  auto fromEnv = strip(environment.get("sas_basctl", ""));
-  return fromEnv.length ? fromEnv : "basctl";
-}
-
-/** 单引号包裹 shell 参数（内嵌单引号按 `'\''` 转义）。 */
-string shellQuote(string s) {
-  return "'" ~ s.replace("'", "'\\''") ~ "'";
-}
-
-/** `jstart resolve <spec>`：校验 spec 与各 webapp 的依赖是否齐备。 */
-private bool resolveSpec(string spec) {
-  auto res = execute([jstartCommand(), "resolve", spec], null, Config.stderrPassThrough);
+/** `jstart [repo] resolve <spec>`：校验 spec 与各 webapp 的依赖是否齐备。 */
+private bool resolveSpec(string spec, const(string)[] repos) {
+  auto res = execute([jstartCommand()] ~ repos ~ ["resolve", spec], null, Config.stderrPassThrough);
   if (res.status != 0) {
     stderr.writeln("jstart resolve " ~ spec ~ " failed with exit code " ~ res.status.to!string);
     return false;
@@ -422,9 +472,9 @@ private bool resolveSpec(string spec) {
 }
 
 /** 后台启动：`nohup jstart run <spec>` 并把控制台输出写进日志，返回进程 pid（0 表示失败）。 */
-private int launchBackground(string spec, string log) {
+private int launchBackground(string spec, string log, const(string)[] repos) {
   mkdirRecurse(dirName(log));
-  auto cmd = "nohup " ~ shellQuote(jstartCommand()) ~ " run " ~ shellQuote(spec)
+  auto cmd = "nohup " ~ shellJoin([jstartCommand()] ~ repos ~ ["run", spec])
     ~ " >> " ~ shellQuote(log) ~ " 2>&1 < /dev/null & echo $!";
   auto res = execute(["/bin/sh", "-c", cmd]);
   if (res.status != 0)

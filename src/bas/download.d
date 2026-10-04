@@ -28,8 +28,10 @@ import std.stdio : stderr, writeln;
  *
  * 先下载到同目录的 `.名字.part`，成功后再改名，避免跨设备 rename 与半个文件。
  * 失败时不创建目标目录之外的东西，返回 false。
+ *
+ * `headers` 逐条作为 `curl -H` 传入（如 `ip:10.0.0.1 10.0.0.2`）。
  */
-bool curlDownload(string url, string local) {
+bool curlDownload(string url, string local, string[] headers = null) {
   mkdirRecurse(dirName(local));
   auto tmpPath = dirName(local) ~ "/." ~ baseName(local) ~ ".part";
   scope (exit) {
@@ -37,10 +39,15 @@ bool curlDownload(string url, string local) {
       remove(tmpPath);
   }
 
-  auto cmd = execute(["curl", "--fail", "--silent", "--show-error", "-L",
+  string[] args = ["curl", "--fail", "--silent", "--show-error", "-L",
       "--connect-timeout", "10", "--max-time", "300",
-      "--speed-time", "30", "--speed-limit", "1024",
-      "-o", tmpPath, url]);
+      "--speed-time", "30", "--speed-limit", "1024"];
+  foreach (header; headers) {
+    args ~= "-H";
+    args ~= header;
+  }
+  args ~= ["-o", tmpPath, url];
+  auto cmd = execute(args);
   if (cmd.status != 0 || !exists(tmpPath)) {
     auto detail = strip(cmd.output);
     if (detail.length)

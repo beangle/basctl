@@ -35,7 +35,6 @@ import std.format : format;
   assert(cfg.engines[0].jars.length == 1);
   assert(cfg.engines[0].jars[0].uri == "gav://org.postgresql:postgresql:42.7.9");
   assert(cfg.engines[0].jars[0].name() == "postgresql-42.7.9.jar");
-  assert(cfg.engines[0].path("/sas") == "/sas/engines/tomcat-11.0.18");
 
   assert(cfg.hosts.length == 1);
   assert(cfg.hosts[0].name == "localhost" && cfg.hosts[0].ip == "127.0.0.1");
@@ -136,4 +135,21 @@ import std.format : format;
 
   auto xml = `<Sas version="1"><Engines/><Farms><Farm name="f" engine="nope"/></Farms></Sas>`;
   assertThrown!ServerXmlException(parseServerXml(xml));
+}
+
+@("applyEngineDefault fills tomcat defaults once") unittest {
+  auto cfg = parseServerXml(`<Sas version="0.13.9">
+      <Engines><Engine name="tomcat" type="tomcat" version="11.0.5"/></Engines>
+      <Farms><Farm name="f" engine="tomcat"><Server name="s" http="8080"/></Farm></Farms>
+    </Sas>`);
+  auto engine = cfg.engines[0];
+  applyEngineDefault(cfg, engine);
+  assert(engine.listeners.length == 2);
+  assert(engine.context !is null);
+  assert(engine.context.loader.className == "org.beangle.sas.engine.tomcat.ExtendableWebappLoader");
+  assert(engine.context.jarScanner.properties["scanClassPath"] == "false");
+  // 引擎 jar + 容器日志桥接 juli
+  assert(engine.jars.length == 2);
+  assert(engine.jars[0].uri == "gav://org.beangle.sas:beangle-sas-engine:0.13.9");
+  assert(engine.jars[1].uri == "gav://org.beangle.sas:beangle-sas-juli:0.13.9");
 }
