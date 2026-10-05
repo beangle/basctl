@@ -53,10 +53,10 @@ import std.string : endsWith, indexOf, lastIndexOf, replace, startsWith, strip, 
 import std.zip : ZipArchive;
 
 /** 嵌入式 tomcat 的容器入口 main。 */
-enum tomcatEmbedMain = "org.beangle.sas.engine.tomcat.Bootstrap";
+enum tomcatEmbedMain = "org.beangle.bas.engine.tomcat.Bootstrap";
 
 /** 嵌入式 undertow 的容器入口 main。 */
-enum undertowEmbedMain = "org.beangle.sas.engine.undertow.Bootstrap";
+enum undertowEmbedMain = "org.beangle.bas.engine.undertow.Bootstrap";
 
 /** 全量 tomcat 发行包的容器入口 main。 */
 enum tomcatDistMain = "org.apache.catalina.startup.Bootstrap";
@@ -680,7 +680,7 @@ private void installEngineJars(string engineHome, string engineClasspath, string
       continue;
     // juli 是 Catalina 系统 classpath 专用：无 deps 文件时由 juliJar 顶替 tomcat-juli.jar，
     // 有 deps 文件时（<=0.13.16）也不能进 lib/，否则同样会污染 DependencyClassLoader。
-    if (baseName(p).startsWith("beangle-sas-juli"))
+    if (baseName(p).startsWith("beangle-bas-juli"))
       continue;
     if (juliJar.length && absolutePath(p) == absolutePath(juliJar))
       continue;
@@ -690,7 +690,7 @@ private void installEngineJars(string engineHome, string engineClasspath, string
   }
 }
 
-/** 引擎 classpath 是否已含 juli 实现（`beangle-sas-juli` 把 commons-logging 重命名到其下）。 */
+/** 引擎 classpath 是否已含 juli 实现（`beangle-bas-juli` 把 commons-logging 重命名到其下）。 */
 private bool engineClasspathProvidesJuli(string engineClasspath) {
   return juliFromClasspath(engineClasspath).length > 0;
 }
@@ -767,7 +767,7 @@ string serverXml(string port, ContextSpec[] contexts, string major, string[] lis
   sb.put("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
   sb.put("<Server port=\"-1\" shutdown=\"SHUTDOWN\">\n");
   // 引擎 jar 会被装进 lib/，该类一定可加载；应用全部启动失败时退出以释放端口
-  sb.put("  <Listener className=\"org.beangle.sas.engine.tomcat.WebappFailFastListener\"/>\n");
+  sb.put("  <Listener className=\"org.beangle.bas.engine.tomcat.WebappFailFastListener\"/>\n");
   if (listeners.length == 0) {
     sb.put("  <Listener className=\"org.apache.catalina.core.JreMemoryLeakPreventionListener\"/>\n");
     sb.put("  <Listener className=\"org.apache.catalina.core.ThreadLocalLeakPreventionListener\"/>\n");
@@ -784,7 +784,7 @@ string serverXml(string port, ContextSpec[] contexts, string major, string[] lis
   // deployOnStartup=false：只启动 server.xml 里这个 <Context>，不部署发行包自带的 webapps
   sb.put("      <Host name=\"localhost\" appBase=\"webapps\" unpackWARs=\"true\""
       ~ " autoDeploy=\"false\" deployOnStartup=\"false\" startStopThreads=\"0\""
-      ~ " errorReportValveClass=\"org.beangle.sas.engine.tomcat.SwallowErrorValve\">\n");
+      ~ " errorReportValveClass=\"org.beangle.bas.engine.tomcat.SwallowErrorValve\">\n");
   foreach (c; contexts)
     sb.put(contextXml(c));
   sb.put("      </Host>\n");
@@ -800,8 +800,8 @@ private string contextXml(ContextSpec c) {
   sb.put("        <Context path=\"" ~ xml(c.path) ~ "\" docBase=\"" ~ xml(c.docBase) ~ "\">\n");
   sb.put("          <JarScanner scanBootstrapClassPath=\"false\" scanAllDirectories=\"false\""
       ~ " scanAllFiles=\"false\" scanClassPath=\"false\" scanManifest=\"false\"/>\n");
-  sb.put("          <Loader className=\"org.beangle.sas.engine.tomcat.ExtendableWebappLoader\""
-      ~ " loaderClass=\"org.beangle.sas.engine.tomcat.DependencyClassLoader\"");
+  sb.put("          <Loader className=\"org.beangle.bas.engine.tomcat.ExtendableWebappLoader\""
+      ~ " loaderClass=\"org.beangle.bas.engine.tomcat.DependencyClassLoader\"");
   if (c.libs.length)
     sb.put(" libs=\"" ~ xml(c.libs) ~ "\"");
   sb.put("/>\n");
@@ -831,7 +831,7 @@ private string listenerXml(string spec) {
 
 /**
  * 生成 `conf/web.xml`：UTF-8 请求/响应编码、`listings=false`、JSP 开关与 mime 映射。
- * 映射表来自内嵌的 `sas/mime.types`（解析语义对齐 beangle-commons 的 `MediaTypes.build`）。
+ * 映射表来自内嵌的 `bas/mime.types`（解析语义对齐 beangle-commons 的 `MediaTypes.build`）。
  */
 private string webXml(bool jspSupport, string major) {
   auto sb = appender!string;
@@ -907,7 +907,7 @@ private string webXml(bool jspSupport, string major) {
 }
 
 /**
- * 解析 `sas/mime.types`：全名与每个扩展名都映射到同一个 mime 串（对齐 `MediaTypes.build`）。
+ * 解析 `bas/mime.types`：全名与每个扩展名都映射到同一个 mime 串（对齐 `MediaTypes.build`）。
  * 同名键以先出现者为准，末尾补一条通配 mime。
  */
 private EngineProperty[] mimeTypes() {
@@ -983,7 +983,7 @@ private string xml(string s) {
  *
  * Catalina 的 Bootstrap 在静态初始化里就要用 `org.apache.juli.logging.LogFactory`，
  * 因此 juli 实现必须在**系统 classpath**（而不是 common.loader 的 `lib/`）上。引擎
- * classpath 自带 juli（beangle-sas-juli）时用它顶替 `bin/tomcat-juli.jar`，否则保留
+ * classpath 自带 juli（beangle-bas-juli）时用它顶替 `bin/tomcat-juli.jar`，否则保留
  * 发行包自带的 `bin/tomcat-juli.jar`。
  */
 private string bootstrapClasspath(string engineHome, string appClasspath, string juliJar = "") {
@@ -1007,7 +1007,7 @@ private string bootstrapClasspath(string engineHome, string appClasspath, string
  * 判定条件：含有 `org/apache/juli/logging/Log.class`，且**不带**
  * `META-INF/beangle/dependencies`。后者是随包生成的引擎清单，一旦跟着 juli 上了系统
  * classpath，会被 webapp 的 DependencyClassLoader 当成引擎依赖读走。<= 0.13.16 的
- * beangle-sas-juli 就带这个文件，此时视为不可用、退回发行包自带的 `bin/tomcat-juli.jar`
+ * beangle-bas-juli 就带这个文件，此时视为不可用、退回发行包自带的 `bin/tomcat-juli.jar`
  * （日志不做桥接，但能正常启动）；0.13.17 起该文件已从打包中剔除。
  */
 private string juliFromClasspath(string engineClasspath) {

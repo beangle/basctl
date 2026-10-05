@@ -8,15 +8,15 @@
 取值；与 `make [server.xml] <pattern>`（只生成持久部署布局与 spec，不启动）的对照见
 [README](README.md)。
 
-它由原 `beangle-sas` 的 `engine` 模块（Java）迁移而来，用 D 重写并复用 basctl 的
+它由原 `engine` 模块（Java）迁移而来，用 D 重写并复用 basctl 的
 解压/渲染/文件能力，因此运行入口不再需要启动一个 JVM：
 
 | 原 Java 入口 | basctl 命令 |
 |---|---|
-| `org.beangle.sas.engine.EngineCreator`（公共解析/解压/argv） | `bas.enginecreator` 的公共函数 |
-| `org.beangle.sas.engine.tomcat.EmbedCreator` | `basctl make tomcat-embed` |
-| `org.beangle.sas.engine.undertow.EmbedCreator` | `basctl make undertow-embed` |
-| `org.beangle.sas.engine.tomcat.ServerCreator` | `basctl make tomcat-dist` |
+| `org.beangle.bas.engine.EngineCreator`（公共解析/解压/argv） | `bas.enginecreator` 的公共函数 |
+| `org.beangle.bas.engine.tomcat.EmbedCreator` | `basctl make tomcat-embed` |
+| `org.beangle.bas.engine.undertow.EmbedCreator` | `basctl make undertow-embed` |
+| `org.beangle.bas.engine.tomcat.ServerCreator` | `basctl make tomcat-dist` |
 
 ## jstart 协议
 
@@ -32,7 +32,8 @@
 - `--entry`：war 文件或已解压 webapp 目录；
 - `--engine-classpath-file`：jstart 写出的引擎依赖 classpath 文件（避免命令行过长）；
   `tomcat-dist` 据此找发行包 zip，并把引擎 jar 复制进 `lib/`（提供 juli 实现的
-  `beangle-sas-juli` 除外——它放 Catalina 系统 classpath 并顶替 `bin/tomcat-juli.jar`）；
+  `beangle-bas-juli` 除外——它放 Catalina 系统 classpath 并顶替 `bin/tomcat-juli.jar`；
+  只有 `tomcat-dist` 需要 juli，`*-embed` 的日志由应用自带）；
 - `--app-classpath-file`：jstart 写出的应用依赖 classpath 文件，**只在单应用模式出现**
   （`*-embed`，以及 `[app] entry` 的单应用 `tomcat-dist`）；入口把它和解压后的
   `WEB-INF` 一起拼进最终 classpath；
@@ -62,9 +63,9 @@ entry = org.beangle.otk:beangle-otk-ws:war:0.0.29
 init = basctl make tomcat-embed       # 路径含空格时写 '/opt/my dir/basctl' make tomcat-embed
 # init 之外的行是引擎 jar 清单（同 [libs] 语法）；jstart 解析后写成
 # <base>/engine-deps.classpath，并以 --engine-classpath-file= 交给 creator
-org.beangle.sas:beangle-sas-engine:0.13.17
-org.apache.tomcat.embed:tomcat-embed-core:11.0.21
-org.apache.tomcat.embed:tomcat-embed-websocket:11.0.21
+org.apache.tomcat.embed:tomcat-embed-core:11.0.26
+org.apache.tomcat.embed:tomcat-embed-websocket:11.0.26
+org.beangle.bas:beangle-bas-engine:0.14.0
 
 [args]
 --port=8080
@@ -75,6 +76,12 @@ org.apache.tomcat.embed:tomcat-embed-websocket:11.0.21
 `--engine-classpath-file`；入口据此拼 classpath，**不需要**把引擎 jar 放在 basctl 自己的
 classpath 上。
 
+这些行由 `basctl start` 按 [resources/engines.ini](../resources/engines.ini) 的默认集
+（`{version}` / `{bas}` 分别由 `<engine version>` / `<bas version>` 展开）与
+`<engine><jar>` 合并而成：GA（`groupId:artifactId`）相同则覆盖，否则追加。例如
+`<engine>` 里写 `<jar uri="gav://ch.qos.logback:logback-core:1.6.3"/>` 可给 embed 容器
+补上应用日志实现。手工写 spec 时把合并结果原样列出即可。
+
 ### 运行与确认
 
 ```sh
@@ -82,8 +89,9 @@ jstart run app.jstart            # 运行：init 准备环境 → jstart exec �
 jstart run --print app.jstart    # 只打印最终启动命令，不 exec
 ```
 
-`basctl start` 会自动按 `server.xml` 生成 spec（`[engine] init` 固定为当前 basctl 的
-`make tomcat-dist` 命令行，可用 `bas_basctl` 覆盖路径），再委托 `jstart run`。
+`basctl start` 会自动按 `server.xml` 生成 spec（`[engine] init` 按 `<engine mode>` 写成
+当前 basctl 的 `make tomcat-dist` / `make tomcat-embed` / `make undertow-embed`，可用
+`bas_basctl` 覆盖路径），再委托 `jstart run`。
 
 ### 必要参数
 
@@ -122,8 +130,8 @@ entry = /repo/…/app.war
 [engine]
 init = basctl make tomcat-dist
 org.apache.tomcat:tomcat:zip:11.0.26          # 发行包（creator 取 classpath 上的 .zip）
-org.beangle.sas:beangle-sas-engine:0.13.17
-org.scala-lang:scala-library:3.9.0
+org.beangle.bas:beangle-bas-engine:0.14.0
+org.beangle.bas:beangle-bas-juli:0.14.0       # 容器日志桥接（dist 专用）
 
 [args]
 --port=8081
@@ -135,12 +143,13 @@ org.scala-lang:scala-library:3.9.0
 
 ```ini
 [app]
-base = /opt/sas/servers/platform.server1
+base = /opt/bas/servers/platform.server1
 
 [engine]
 init = basctl make tomcat-dist
 org.apache.tomcat:tomcat:zip:11.0.26
-org.beangle.sas:beangle-sas-engine:0.13.17
+org.beangle.bas:beangle-bas-engine:0.14.0
+org.beangle.bas:beangle-bas-juli:0.14.0
 
 [args]
 --port=8081
@@ -162,10 +171,10 @@ libs = org.postgresql:postgresql:42.7.9
 
 ```sh
 basctl make tomcat-embed \
-  --base=/opt/sas/servers/platform.server1 \
+  --base=/opt/bas/servers/platform.server1 \
   --entry=/repo/org/beangle/otk/beangle-otk-ws/0.0.29/beangle-otk-ws-0.0.29.war \
-  --engine-classpath-file=/opt/sas/servers/platform.server1/engine-deps.classpath \
-  --app-classpath-file=/opt/sas/servers/platform.server1/engine-app.classpath \
+  --engine-classpath-file=/opt/bas/servers/platform.server1/engine-deps.classpath \
+  --app-classpath-file=/opt/bas/servers/platform.server1/engine-app.classpath \
   --local-repo=$HOME/.m2/repository \
   --entry-out=/tmp/entry.argv \
   --port=8080 --path=/
@@ -177,13 +186,13 @@ sed 's/\x00/\n/g' /tmp/entry.argv     # 查看写出的最终启动命令
 
 | 类型 | 容器来源 | 最终命令 |
 |---|---|---|
-| `tomcat-embed` | spec 里的 `tomcat-embed-*` jar | `java ... -cp <引擎+应用+WEB-INF> org.beangle.sas.engine.tomcat.Bootstrap --base= --docBase= ...` |
-| `undertow-embed` | spec 里的 `undertow-*` jar | 同构，容器入口为 `org.beangle.sas.engine.undertow.Bootstrap` |
+| `tomcat-embed` | spec 里的 `tomcat-embed-*` jar | `java ... -cp <引擎+应用+WEB-INF> org.beangle.bas.engine.tomcat.Bootstrap --base= --docBase= ...` |
+| `undertow-embed` | spec 里的 `undertow-*` jar | 同构，容器入口为 `org.beangle.bas.engine.undertow.Bootstrap` |
 | `tomcat-dist` | `--dist=<tomcat.zip>` 或引擎 classpath 上的 `.zip` | `java ... -Dcatalina.base=... -cp <bin/bootstrap.jar[:juli]> org.apache.catalina.startup.Bootstrap start` |
 
 - 嵌入式模式（`*-embed`）一个实例跑一个 webapp；容器入口类可用 `--main=` 覆盖。
 - `tomcat-dist` 解压并**精简**发行包到 `<base>/engines/`（`.dist` 记录 zip 名 + 精简规则，
-  未变则复用），把引擎 jar 复制进 `lib/`（`beangle-sas-juli` 除外：它上系统 classpath 并
+  未变则复用），把引擎 jar 复制进 `lib/`（`beangle-bas-juli` 除外：它上系统 classpath 并
   让发行包自带的 `bin/tomcat-juli.jar` 被删），生成
   `conf/{catalina.properties,web.xml,server.xml}`，再输出标准 catalina 启动命令。
   `--jsp=true|false` 控制 jasper/ecj 的保留，`--listener=class[:k=v;...]` 追加 Server 级

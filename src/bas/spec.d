@@ -17,10 +17,10 @@
 /**
  * jstart launch spec 的渲染与共用小工具。
  *
- * `basctl start`（按 `conf/server.xml` 的 farm 启动，多实例/多 webapp）与
- * `basctl run`（嵌入式运行单个 webapp）生成的是同一种 spec：`[app]` 声明入口与
- * 组件目录，`[engine]` 声明 init 命令行与容器依赖，可选的 `[runtime]` / `[args]`
- * 分别承载 JVM 参数与应用参数；多 webapp 时再用若干 `[subapp <id>]` 段。
+ * `basctl start`（按 farm）与 `basctl run`（单应用快速运行）生成的是同一种 spec：
+ * `[app]` 声明入口（单应用）与组件目录，`[engine]` 声明 init 命令行与容器依赖，
+ * 可选的 `[runtime]` / `[args]` 分别承载 JVM 参数与应用参数；多 webapp
+ * （`mode="container"`）时再用若干 `[subapp <id>]` 段。
  *
  * 本模块只负责拼文本与转义，不做 IO，也不调用 jstart。
  */

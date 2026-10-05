@@ -10,7 +10,7 @@
     发布副本：http://beangle.github.io/schema/bas-1.0.0.xsd
     解析实现：basctl/src/bas/config.d（parseServerXml）
 
-    版本策略：schema 版本独立于 basctl / sas 的发行号。**发布后的文件冻结、不再改动**；
+    版本策略：schema 版本独立于 basctl / bas 的发行号。**发布后的文件冻结、不再改动**；
     遇到不兼容改动（元素或属性改名、删除、收紧约束）时新增 bas-<新版本>.xsd，
     旧文件原样保留——使用者配置里的 xsi:noNamespaceSchemaLocation 不必改动。
     仅新增可选元素 / 属性的兼容改动，可直接更新当前最新版本文件。
@@ -19,7 +19,7 @@
     - 根元素为 <bas>；元素与属性一律小写连字符（kebab-case）。
     - 标注 anyAttribute 的元素会原样保留未声明属性（透传给 Tomcat 的
       Context/Loader/JarScanner/Resource/Realm），其余元素上的未声明项被忽略。
-    - <proxy> 及其子节点供反代侧使用，basctl 不消费，仅为兼容 sashub 生成的配置而收录。
+    - <proxy> 及其子节点供反代侧使用，basctl 不消费，仅为兼容 bashub 生成的配置而收录。
   -->
 
   <!-- ================= 基础类型 ================= -->
@@ -62,7 +62,8 @@
       </xs:all>
       <xs:attribute name="version" type="xs:string" use="required">
         <xs:annotation>
-          <xs:documentation>sas/basctl 版本；basctl 据此解析引擎与 juli 构件。</xs:documentation>
+          <xs:documentation>beangle-bas-engine（及 beangle-bas-juli）版本；basctl 据此解析引擎构件。
+            容器版本在 &lt;engine version&gt; 上声明，二者互相独立。</xs:documentation>
         </xs:annotation>
       </xs:attribute>
     </xs:complexType>
@@ -108,14 +109,29 @@
     <xs:attribute name="name" type="xs:string" use="required"/>
     <xs:attribute name="type" type="xs:string" use="required">
       <xs:annotation>
-        <xs:documentation>tomcat / undertow / jetty / any</xs:documentation>
+        <xs:documentation>容器类型：tomcat / undertow。jetty / any 为保留值，basctl 暂不支持。</xs:documentation>
       </xs:annotation>
     </xs:attribute>
-    <xs:attribute name="version" type="xs:string" use="required"/>
+    <xs:attribute name="version" type="xs:string" use="required">
+      <xs:annotation>
+        <xs:documentation>容器版本：tomcat 为发行包版本，undertow 为 io.undertow.ee:undertow-servlet 版本。</xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+    <xs:attribute name="mode" default="container">
+      <xs:annotation>
+        <xs:documentation>container：跑全量发行包（多应用，仅 tomcat）；standalone：嵌入单应用（tomcat/undertow）。缺省 container。</xs:documentation>
+      </xs:annotation>
+      <xs:simpleType>
+        <xs:restriction base="xs:string">
+          <xs:enumeration value="container"/>
+          <xs:enumeration value="standalone"/>
+        </xs:restriction>
+      </xs:simpleType>
+    </xs:attribute>
     <xs:attribute name="jsp-support" type="boolType"/>
     <xs:attribute name="websocket-support" type="boolType">
       <xs:annotation>
-        <xs:documentation>由 sashub 生成；basctl 当前不消费。</xs:documentation>
+        <xs:documentation>由 bashub 生成；basctl 当前不消费。</xs:documentation>
       </xs:annotation>
     </xs:attribute>
   </xs:complexType>
@@ -152,7 +168,8 @@
 
   <xs:complexType name="jarType">
     <xs:annotation>
-      <xs:documentation>引擎 jar；uri 为 gav:// / http(s):// 或本地路径。</xs:documentation>
+      <xs:documentation>引擎 jar；uri 为 gav:// / http(s):// 或本地路径。与 engines.ini 的
+        默认集合并：GA（groupId:artifactId）相同则覆盖，否则追加（可加自定义依赖）。</xs:documentation>
     </xs:annotation>
     <xs:attribute name="uri" type="xs:string" use="required"/>
   </xs:complexType>
@@ -259,12 +276,12 @@
     </xs:attribute>
     <xs:attribute name="proxy-http-port" type="xs:nonNegativeInteger">
       <xs:annotation>
-        <xs:documentation>由 sashub 生成；basctl 不消费。</xs:documentation>
+        <xs:documentation>由 bashub 生成；basctl 不消费。</xs:documentation>
       </xs:annotation>
     </xs:attribute>
     <xs:attribute name="proxy-options" type="xs:string">
       <xs:annotation>
-        <xs:documentation>由 sashub 生成；basctl 不消费。</xs:documentation>
+        <xs:documentation>由 bashub 生成；basctl 不消费。</xs:documentation>
       </xs:annotation>
     </xs:attribute>
   </xs:complexType>

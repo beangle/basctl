@@ -20,19 +20,37 @@ module test.embed_test;
 import bas.embed;
 
 import std.algorithm : canFind;
-import std.process : environment;
+
+@("EngineRef parses type-version pairs") unittest {
+  auto tomcat = EngineRef.parse("tomcat-11.0.25");
+  assert(tomcat.typ == "tomcat");
+  assert(tomcat.version_ == "11.0.25");
+
+  auto undertow = EngineRef.parse("undertow-2.0.3.Final");
+  assert(undertow.typ == "undertow");
+  assert(undertow.version_ == "2.0.3.Final");
+
+  // 版本里可以带 `-`
+  assert(EngineRef.parse("tomcat-11.0.0-M1").version_ == "11.0.0-M1");
+  // 缺版本 / 未知类型 / 缺分隔符都算非法
+  assert(EngineRef.parse("tomcat").typ.length == 0);
+  assert(EngineRef.parse("tomcat-").typ.length == 0);
+  assert(EngineRef.parse("-11.0.25").typ.length == 0);
+  assert(EngineRef.parse("jetty-11").typ.length == 0);
+}
 
 @("parseRunArgs splits the entry, app args, jvm args and options") unittest {
   auto opts = parseRunArgs(["-Xmx512M", "/tmp/app.war", "--port=8080", "--path=/app",
-      "extra", "-Dfoo=bar", "--engine=undertow", "--base=/srv", "--instance=portal.1",
-      "--workdir=/srv/sas", "--local=/m2", "--remote=http://r1,http://r2", "--offline",
-      "--print", "--spec=/tmp/x.jstart"]);
+      "extra", "-Dfoo=bar", "--engine=tomcat-11.0.25", "--bas=9.9.9",
+      "--base=/srv", "--instance=portal.1", "--workdir=/srv/bas", "--local=/m2",
+      "--remote=http://r1,http://r2", "--offline", "--print", "--spec=/tmp/x.jstart"]);
   assert(opts.error.length == 0);
   assert(opts.entry == "/tmp/app.war");
-  assert(opts.engine == "undertow");
+  assert(opts.engine.typ == "tomcat" && opts.engine.version_ == "11.0.25");
+  assert(opts.bas == "9.9.9");
   assert(opts.base == "/srv");
   assert(opts.instance == "portal.1");
-  assert(opts.workdir == "/srv/sas");
+  assert(opts.workdir == "/srv/bas");
   assert(opts.local == "/m2");
   assert(opts.remote == "http://r1,http://r2");
   assert(opts.spec == "/tmp/x.jstart");
@@ -42,22 +60,41 @@ import std.process : environment;
   assert(opts.appArgs == ["--port=8080", "--path=/app", "extra"]);
 }
 
-@("parseRunArgs defaults to tomcat at /tmp/sas") unittest {
-  auto opts = parseRunArgs(["app.war"]);
+@("parseRunArgs defaults bas to the built-in value") unittest {
+  auto opts = parseRunArgs(["--engine=tomcat-11.0.25", "app.war"]);
   assert(opts.error.length == 0);
-  assert(opts.engine == "tomcat");
+  assert(opts.bas == defaultBasVersion);
   assert(opts.base == "/tmp");
-  assert(opts.instance == "sas");
-  assert(opts.entry == "app.war");
+  assert(opts.instance == "bas");
 }
 
-@("parseRunArgs reports invalid engine and instance names") unittest {
-  assert(parseRunArgs(["--engine=jetty", "app.war"]).error.canFind("Unknown engine"));
-  assert(parseRunArgs(["--instance=../etc", "app.war"]).error.canFind("Invalid --instance"));
-  assert(parseRunArgs(["--instance=.", "app.war"]).error.canFind("Invalid --instance"));
-  assert(parseRunArgs(["--base=", "app.war"]).error.canFind("--base"));
+@("parseRunArgs requires a well-formed --engine") unittest {
+  assert(parseRunArgs(["app.war"]).error.canFind("Missing --engine"));
+  assert(parseRunArgs(["--engine=jetty-11", "app.war"]).error.canFind("Invalid --engine"));
+  assert(parseRunArgs(["--engine=tomcat-11.0.25", "--instance=../etc", "app.war"])
+      .error.canFind("Invalid --instance"));
+  assert(parseRunArgs(["--engine=tomcat-11.0.25", "--instance=.", "app.war"])
+      .error.canFind("Invalid --instance"));
+  assert(parseRunArgs(["--engine=tomcat-11.0.25", "--base=", "app.war"]).error.canFind("--base"));
+  assert(parseRunArgs(["--engine=tomcat-11.0.25", "--help", "app.war"]).help);
   assert(!isSafeInstance("a/b"));
   assert(isSafeInstance("portal-1.2_x"));
+}
+
+@("planRun picks the embed container and engines.ini deps") unittest {
+  auto opts = parseRunArgs(["--engine=tomcat-11.0.25", "app.war"]);
+  auto tomcat = planRun(opts);
+  assert(tomcat.containerType == "tomcat-embed");
+  assert(tomcat.deps.canFind("org.apache.tomcat.embed:tomcat-embed-core:11.0.25"));
+  assert(tomcat.deps.canFind("org.beangle.bas:beangle-bas-engine:" ~ defaultBasVersion));
+  assert(!tomcat.deps.canFind("org.apache.tomcat:tomcat:zip:"));
+
+  opts = parseRunArgs(["--engine=undertow-2.0.3.Final", "--bas=1.2.3", "app.war"]);
+  auto undertow = planRun(opts);
+  assert(undertow.containerType == "undertow-embed");
+  assert(undertow.deps.canFind("io.undertow.ee:undertow-servlet:2.0.3.Final"));
+  assert(undertow.deps.canFind("org.beangle.bas:beangle-bas-engine:1.2.3"));
+  assert(!undertow.deps.canFind("beangle-bas-juli"));
 }
 
 @("warTarget rewrites a 3-part gav to war packaging only") unittest {
@@ -66,30 +103,4 @@ import std.process : environment;
   assert(warTarget("http://host:8080/app.war") == "http://host:8080/app.war");
   assert(warTarget("/tmp/app.war") == "/tmp/app.war");
   assert(warTarget("gav://org.beangle:app:1.0") == "gav://org.beangle:app:1.0");
-}
-
-@("embedEngineDeps lists the engine plus the selected container") unittest {
-  EmbedVersions v;
-  auto tomcat = embedEngineDeps("tomcat", v);
-  assert(tomcat.canFind("org.beangle.sas:beangle-sas-engine:" ~ v.engine));
-  assert(tomcat.canFind("org.scala-lang:scala3-library_3:" ~ v.scala));
-  assert(tomcat.canFind("org.apache.tomcat.embed:tomcat-embed-core:" ~ v.tomcat));
-  assert(!tomcat.canFind("io.undertow:undertow-core:"));
-
-  auto undertow = embedEngineDeps("undertow", v);
-  assert(undertow.canFind("io.undertow:undertow-core:" ~ v.undertow));
-  assert(undertow.canFind("io.undertow.ee:undertow-servlet:" ~ v.undertowEe));
-  assert(!undertow.canFind("org.apache.tomcat.embed:tomcat-embed-core:"));
-}
-
-@("embedVersions can be overridden per artifact") unittest {
-  auto previous = environment.get("bas_engine_version", "");
-  environment["bas_engine_version"] = "9.9.9";
-  scope (exit) {
-    if (previous.length)
-      environment["bas_engine_version"] = previous;
-    else
-      environment.remove("bas_engine_version");
-  }
-  assert(embedVersions().engine == "9.9.9");
 }

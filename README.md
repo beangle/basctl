@@ -1,14 +1,30 @@
 # basctl
 
-`basctl` 是 Beangle SAS（Simple Application Server）的控制面命令行工具，用 D 语言实现。
+`basctl` 是 Beangle Bas Server 的控制面命令行工具，用 D 语言实现。
 它把 `conf/server.xml` 解析成可运行的 Tomcat 实例：解析 webapp（`gav://` /
 `http(s)://` / 本地路径）、生成实例目录与 jstart launch spec，并渲染容器所需的
-`server.xml`、`web.xml`；也可按 farm 直接拉起实例，或以嵌入式模式运行单个 webapp
-（war / Maven 坐标 / url），同时提供实例状态与防火墙等工具。
+`server.xml`、`web.xml`；也可按 farm 直接拉起实例，同时提供实例状态与防火墙等工具。
 
 `engine` 模块的**容器入口**（creator，配合 jstart 的 war 运行协议）也由 basctl 提供，
 见 [docs/engine-creator.md](docs/engine-creator.md)；`start` 的流程与生成的 spec 见
-[docs/start.md](docs/start.md)，嵌入式 `run` 见 [docs/run.md](docs/run.md)。
+[docs/start.md](docs/start.md)。
+
+## 版本语义
+
+三个 `version` 互相独立，各自的来源唯一：
+
+| 版本 | 声明位置 | 含义 |
+|---|---|---|
+| basctl | 编译期常量（`basctl version` 输出） | 本工具的发行号，与 bas 引擎无关 |
+| bas | `conf/server.xml` 的 `<bas version>` | `beangle-bas-engine`（及 `beangle-bas-juli`）的版本 |
+| 容器 | `<engine version>` | 容器版本：tomcat 为发行包版本，undertow 为 `io.undertow.ee:undertow-servlet` 版本 |
+
+`<engine mode="container|standalone">`（缺省 `container`）决定运行方式：`container` 走全量
+发行包（多应用，仅 tomcat），`standalone` 走嵌入式单应用（tomcat / undertow）。
+
+各容器类型的默认依赖集固定在编译期内嵌的 [resources/engines.ini](resources/engines.ini)：
+`{version}` / `{bas}` 分别由上述两个 version 展开；`<engine><jar>` 与默认集合并——GA
+（`groupId:artifactId`）相同则覆盖，否则追加（用于自定义依赖或本地覆盖）。
 
 ## 配置格式
 
@@ -42,7 +58,7 @@ dub test --compiler=ldc2
 | `basctl resolve <server.xml> [pattern...]` | 只解析 webapp，不生成实例 |
 | `basctl start [server.xml] <farm\|server\|all>` | 按 farm 生成 jstart spec、resolve 并后台启动实例 |
 | `basctl stop [server.xml] <farm\|server\|all> [--force] [--timeout=<sec>]` | 停止 `start` 启动的实例（逐个 `jstart stop`） |
-| `basctl run [options] <app>` | 嵌入式运行单个 webapp（war / Maven 坐标 / url）：生成单应用 spec 后前台 `jstart run` |
+| `basctl run --engine=<type>-<version> <app>` | 嵌入式运行单个 webapp：`--engine=tomcat-11.0.25` 同时给出容器类型与版本，生成单应用 spec 后前台 `jstart run` |
 | `basctl make <type> [options]` | 容器入口（creator）：把 jstart 的 `[engine] init` 协议翻译成容器启动命令 |
 | `basctl firewall [workdir]` | 按配置交互式配置 firewalld 端口 |
 | `basctl pull [--remote=<url>] [workdir]` | 从控制端拉取 `conf/server.xml`（请求带 `ip:` 头，旧配置备份为 `server_old.xml`） |
@@ -50,13 +66,13 @@ dub test --compiler=ldc2
 ## 组件目录初始化
 
 `basctl init [workdir]` 把控制脚本（`env.sh`、`bas.sh`、`start.sh`、`stop.sh`、
-`restart.sh`）铺到 `<workdir>/bin` 并建好 `conf/`，用于从零搭建一个 sas 组件目录。
+`restart.sh`）铺到 `<workdir>/bin` 并建好 `conf/`，用于从零搭建一个 bas 组件目录。
 脚本内嵌在 basctl 里，随 basctl 版本发布，不再依赖单独的发行包：
 
 ```sh
-basctl init /opt/sas          # 写入 /opt/sas/bin/*.sh（已存在的脚本保留）
-basctl init --force /opt/sas  # 覆盖为当前 basctl 内置的脚本
-basctl init --dry-run /opt/sas
+basctl init /opt/bas          # 写入 /opt/bas/bin/*.sh（已存在的脚本保留）
+basctl init --force /opt/bas  # 覆盖为当前 basctl 内置的脚本
+basctl init --dry-run /opt/bas
 ```
 
 `bin/setenv.sh` 与 `conf/server.xml` 是用户配置（分别由用户与 `basctl pull` 维护），
@@ -83,7 +99,7 @@ $BAS_HOME/
 | 调用 | 驱动与输入 | 产物 | 用途 |
 |---|---|---|---|
 | `make [server.xml] <pattern>` | `conf/server.xml`，批量选 Server | **持久**布局：`engines/<name>-<ver>/` + `servers/<name>/` + 按 server 生成一份 launch spec | 面向运维与启动前预取：只写 spec 并 `jstart resolve`，不起进程；随后 `basctl start` |
-| `make <type> [options]` | jstart 的 `[engine] init` 协议，单次运行计划 | jstart base 下的 `engines/`、各 webapp 的 docBase，以及 `--entry-out` 里的**容器启动命令** | `start` / `run` / jstart 运行时的回调，用户一般不直接调用 |
+| `make <type> [options]` | jstart 的 `[engine] init` 协议，单次运行计划 | jstart base 下的 `engines/`、各 webapp 的 docBase，以及 `--entry-out` 里的**容器启动命令** | `start` / jstart 运行时的回调，用户一般不直接调用 |
 
 `<type>` 取 `tomcat-dist`、`tomcat-embed` 或 `undertow-embed`，分别对应全量 Tomcat 发行包与
 两种嵌入式容器。
@@ -95,7 +111,7 @@ $BAS_HOME/
 
 运行 war 时，jstart 按 `[engine] init` 协议调用 basctl 的 `make <type>` 并把 war 交给它：它准备
 webapp、写出最终启动命令，jstart 再 exec。`basctl make tomcat-embed` /
-`undertow-embed` / `tomcat-dist` 承接原 `beangle-sas` `engine` 模块的 `EmbedCreator` /
+`undertow-embed` / `tomcat-dist` 承接原 `engine` 模块的 `EmbedCreator` /
 `ServerCreator`（如何调用、spec 示例、必要参数、docBase 布局与 classpath 拼装见
 [docs/engine-creator.md](docs/engine-creator.md)）：
 
@@ -104,13 +120,14 @@ webapp、写出最终启动命令，jstart 再 exec。`basctl make tomcat-embed`
 init = basctl make tomcat-embed
 ```
 
-`basctl start` 会自动把 `[engine] init` 写成本 basctl 的 `make tomcat-dist`
-命令行，再 `jstart resolve` 校验依赖、`jstart run` 后台启动；详见
-[docs/start.md](docs/start.md)。
+`basctl start` 会根据 `<engine mode>` 自动把 `[engine] init` 写成对应 creator 的
+`make <container|standalone>-*` 命令行（`container` 多应用走 `make tomcat-dist`，
+`standalone` 单应用走 `make tomcat-embed` / `make undertow-embed`），再
+`jstart resolve` 校验依赖、`jstart run` 后台启动；详见 [docs/start.md](docs/start.md)。
 
-`basctl run` 则面向单应用：它把目标写成单应用 spec（`[app] entry` +
-`make <tomcat|undertow>-embed`），再前台 `jstart run` 并把终端与退出码透传给调用者；
-引擎/容器版本内置在 basctl，可用 `bas_*_version` 覆盖。详见 [docs/run.md](docs/run.md)。
+`basctl run` 面向单应用快速运行：一个 `--engine=<type>-<version>`（如
+`tomcat-11.0.25`）同时给出容器类型与版本，bas 引擎版本取 basctl 内置默认
+（`--bas=` 可覆盖），依赖集与 `start` 共用 `engines.ini`；详见 [docs/run.md](docs/run.md)。
 
 `server.xml` 中 `<repository>` / `<snapshot-repo>` 的 `local` / `remote` / `token` 原样透传给
 `jstart`；`remote` 里的 `${bas_remote_url}`、`token` 里的 `${bas_remote_token}` 在解析阶段

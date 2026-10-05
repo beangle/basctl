@@ -32,7 +32,19 @@ import std.algorithm : canFind;
   assert(subappId("/portal", ["portal", "portal-2"]) == "portal-3");
 }
 
-@("runtimeArgsFor adds sas defaults and farm options") unittest {
+@("standaloneWebappError restricts standalone engines to one webapp") unittest {
+  auto standalone = new Engine("tomcat", engineTomcat, "11.0.26");
+  standalone.mode = engineModeStandalone;
+  assert(standaloneWebappError(standalone, 1) == "");
+  auto err = standaloneWebappError(standalone, 3);
+  assert(err.canFind("single webapp"));
+  assert(err.canFind("use mode=\"container\""));
+
+  auto container = new Engine("tomcat", engineTomcat, "11.0.26");
+  assert(standaloneWebappError(container, 3) == "");
+}
+
+@("runtimeArgsFor adds bas defaults and farm options") unittest {
   auto cfg = parseServerXml(`<bas version="1"><engines><engine name="tomcat" type="tomcat"
       version="11.0.18"/></engines><farms><farm name="f" engine="tomcat" max-heap-size="512M">
       <server-options>-Dems.profile=local

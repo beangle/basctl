@@ -3,8 +3,8 @@
 #
 # 控制面 basctl 与运行器 jstart 都取 PATH 上的同名命令，可分别用 bas_basctl /
 # bas_jstart 覆盖（例如指向未安装到 PATH 的本地构建产物）。
-# 嵌入式运行（basctl run）的构件版本由 basctl 内置，可用 bas_*_version 覆盖；
-# 多实例模式的引擎版本取自 conf/server.xml，二者都不在本文件里维护。
+# 引擎与容器版本取自 conf/server.xml（<bas version> / <engine version>），
+# 不在本文件里维护。
 
 if [ "$(id -u)" = 0 ]; then
   echo -e "\033[31m Please run this command in a non root environment. \033[0m"

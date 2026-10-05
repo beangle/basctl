@@ -29,8 +29,8 @@ import std.conv : to;
 /** 随二进制内嵌的资源：Tomcat 的 `catalina.properties`。 */
 enum catalinaProperties = import("tomcat/conf/catalina.properties");
 
-/** 随二进制内嵌的资源：`sas/mime.types`。 */
-enum mimeTypesResource = import("sas/mime.types");
+/** 随二进制内嵌的资源：`bas/mime.types`。 */
+enum mimeTypesResource = import("bas/mime.types");
 
 /** 渲染 firewalld zone 片段。 */
 string renderFirewallConf(const(int)[] ports) {

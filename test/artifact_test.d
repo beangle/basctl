@@ -20,35 +20,35 @@ module test.artifact_test;
 import bas.artifact;
 
 @("parse 3 part gav") unittest {
-  auto a = parseArtifact("org.beangle.sas:demo:1.0.4");
-  assert(a.groupId == "org.beangle.sas");
+  auto a = parseArtifact("org.beangle.bas:demo:1.0.4");
+  assert(a.groupId == "org.beangle.bas");
   assert(a.artifactId == "demo");
   assert(a.version_ == "1.0.4");
   assert(a.classifier == "");
   assert(a.packaging == "jar");
-  assert(a.asGav() == "org.beangle.sas:demo:1.0.4");
+  assert(a.asGav() == "org.beangle.bas:demo:1.0.4");
 }
 
 @("parse 4 part gav with packaging") unittest {
-  auto a = parseArtifact("org.beangle.sas:demo:war:1.0.4");
+  auto a = parseArtifact("org.beangle.bas:demo:war:1.0.4");
   assert(a.packaging == "war" && a.classifier == "");
-  assert(a.asGav() == "org.beangle.sas:demo:war:1.0.4");
+  assert(a.asGav() == "org.beangle.bas:demo:war:1.0.4");
   assert(a.fileName() == "demo-1.0.4.war");
-  assert(a.dirPath() == "/org/beangle/sas/demo/1.0.4");
-  assert(a.layoutPath() == "/org/beangle/sas/demo/1.0.4/demo-1.0.4.war");
+  assert(a.dirPath() == "/org/beangle/bas/demo/1.0.4");
+  assert(a.layoutPath() == "/org/beangle/bas/demo/1.0.4/demo-1.0.4.war");
 }
 
 @("parse 4 part gav with classifier") unittest {
-  auto a = parseArtifact("org.beangle.sas:demo:sources:1.0.4");
+  auto a = parseArtifact("org.beangle.bas:demo:sources:1.0.4");
   assert(a.packaging == "jar" && a.classifier == "sources");
   assert(a.fileName() == "demo-1.0.4-sources.jar");
-  assert(a.asGav() == "org.beangle.sas:demo:jar:sources:1.0.4");
+  assert(a.asGav() == "org.beangle.bas:demo:jar:sources:1.0.4");
 }
 
 @("parse 5 part gav") unittest {
-  auto a = parseArtifact("org.beangle.sas:demo:war:sources:1.0.4");
+  auto a = parseArtifact("org.beangle.bas:demo:war:sources:1.0.4");
   assert(a.packaging == "war" && a.classifier == "sources");
-  assert(a.asGav() == "org.beangle.sas:demo:war:sources:1.0.4");
+  assert(a.asGav() == "org.beangle.bas:demo:war:sources:1.0.4");
 }
 
 @("snapshot and packaging helpers") unittest {
@@ -62,4 +62,27 @@ import bas.artifact;
   assert(isRemote("https://host/a.jar"));
   assert(!isGav("https://host/a.jar"));
   assert(toArtifact("gav://g:a:1").artifactId == "a");
+}
+
+@("isMavenCoord accepts coordinates and rejects urls or paths") unittest {
+  // 3 段及以上视为坐标；gav:// 前缀不影响
+  assert(isMavenCoord("g:a:1"));
+  assert(isMavenCoord("org.apache.tomcat:tomcat:zip:11.0.26"));
+  assert(isMavenCoord("gav://org.beangle.bas:beangle-bas-engine:0.14.0"));
+  // 少于 3 段不是坐标
+  assert(!isMavenCoord("g:a"));
+  // url 与本地路径不是坐标
+  assert(!isMavenCoord("https://host/a.jar"));
+  assert(!isMavenCoord("http://host/a.jar"));
+  assert(!isMavenCoord("/opt/libs/extra.jar"));
+  assert(!isMavenCoord("~/libs/extra.jar"));
+  assert(!isMavenCoord("./extra.jar"));
+}
+
+@("gaOf extracts groupId:artifactId from coordinates only") unittest {
+  assert(gaOf("org.apache.tomcat:tomcat:zip:11.0.26") == "org.apache.tomcat:tomcat");
+  assert(gaOf("gav://org.beangle.bas:beangle-bas-engine:0.14.0")
+      == "org.beangle.bas:beangle-bas-engine");
+  assert(gaOf("https://host/a.jar") == "");
+  assert(gaOf("/opt/libs/extra.jar") == "");
 }

@@ -22,7 +22,7 @@ module bas.main;
 
 import bas.banner;
 import bas.config;
-import bas.embed : runEmbedded;
+import bas.embed : defaultBasVersion, runEmbedded;
 import bas.enginecreator;
 import bas.firewall;
 import bas.init;
@@ -66,14 +66,14 @@ version (unittest) {
       return cmdResolve(args[2 .. $]);
     case "start":
       if (args.length == 3)
-        return runStart(buildPath(resolveSasHome(), "conf", "server.xml"), args[2]);
+        return runStart(buildPath(resolveBasHome(), "conf", "server.xml"), args[2]);
       if (args.length >= 4)
         return runStart(args[2], args[3]);
       stderr.writeln("Usage: basctl start [server.xml] <farm|server|all>");
       return 1;
     case "stop":
       if (args.length == 3)
-        return runStop(buildPath(resolveSasHome(), "conf", "server.xml"), args[2 .. $]);
+        return runStop(buildPath(resolveBasHome(), "conf", "server.xml"), args[2 .. $]);
       if (args.length >= 4)
         return runStop(args[2], args[3 .. $]);
       stderr.writeln("Usage: basctl stop [server.xml] <farm|server|all> [--force] [--timeout=<sec>]");
@@ -109,7 +109,9 @@ void printUsage() {
   stderr.writeln("  resolve <server.xml> [pattern...]  Resolve webapps only");
   stderr.writeln("  start [server.xml] <pattern>  Generate a jstart spec per server and start it");
   stderr.writeln("  stop [server.xml] <pattern>   Stop the jstart instances started by `start`");
-  stderr.writeln("  run [options] <app>           Run a single webapp (war/gav/url) in embedded mode");
+  stderr.writeln("  run [options] <app>           Run one webapp in embedded mode");
+  stderr.writeln("                                (--engine=<type>-<version>, e.g. tomcat-11.0.25;");
+  stderr.writeln("                                bas engine version defaults to " ~ defaultBasVersion ~ ")");
   stderr.writeln("  firewall [workdir]            Configure firewalld ports from conf/server.xml");
   stderr.writeln("  pull [--remote=<url>] [workdir]  Fetch conf/server.xml from the control endpoint");
 }
@@ -130,7 +132,7 @@ private int cmdMake(string[] args) {
   if (isContainerType(args[0]))
     return runEngineCreator(args);
   if (args.length == 1)
-    return runMake(buildPath(resolveSasHome(), "conf", "server.xml"), args[0]);
+    return runMake(buildPath(resolveBasHome(), "conf", "server.xml"), args[0]);
   if (args.length == 2)
     return runMake(args[0], args[1]);
   makeUsage();
@@ -200,7 +202,7 @@ int cmdResolve(string[] args) {
 }
 
 /** `BAS_HOME` 有值时取其指向目录，否则取当前工作目录。 */
-string resolveSasHome() @trusted {
+string resolveBasHome() @trusted {
   import std.file : getcwd;
 
   auto fromEnv = strip(environment.get("BAS_HOME", ""));
@@ -213,7 +215,7 @@ string resolveSasHome() @trusted {
 int cmdStatus() {
   writeln(logo(basctlVersion));
   stdout.flush();
-  auto basHome = resolveSasHome();
+  auto basHome = resolveBasHome();
   auto serversDir = buildPath(basHome, "servers");
 
   if (!exists(serversDir) || !isDir(serversDir)) {

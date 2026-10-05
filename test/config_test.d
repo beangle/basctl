@@ -24,14 +24,16 @@ import std.format : format;
 
 @("parse repo server.xml sample") unittest {
   auto cfg = parseServerXml(readText("server.xml"));
-  assert(cfg.version_ == "0.13.9");
+  assert(cfg.version_ == "0.14.0");
   assert(cfg.repository !is null);
   assert(cfg.snapshotRepo !is null);
 
   assert(cfg.engines.length == 1);
   assert(cfg.engines[0].name == "tomcat");
   assert(cfg.engines[0].typ == "tomcat");
-  assert(cfg.engines[0].version_ == "11.0.18");
+  assert(cfg.engines[0].version_ == "11.0.26");
+  assert(cfg.engines[0].mode == engineModeContainer);
+  assert(!cfg.engines[0].standalone());
   assert(cfg.engines[0].jars.length == 1);
   assert(cfg.engines[0].jars[0].uri == "gav://org.postgresql:postgresql:42.7.9");
   assert(cfg.engines[0].jars[0].name() == "postgresql-42.7.9.jar");
@@ -145,10 +147,91 @@ import std.format : format;
   applyEngineDefault(cfg, engine);
   assert(engine.listeners.length == 2);
   assert(engine.context !is null);
-  assert(engine.context.loader.className == "org.beangle.sas.engine.tomcat.ExtendableWebappLoader");
+  assert(engine.context.loader.className == "org.beangle.bas.engine.tomcat.ExtendableWebappLoader");
   assert(engine.context.jarScanner.properties["scanClassPath"] == "false");
-  // 引擎 jar + 容器日志桥接 juli
-  assert(engine.jars.length == 2);
-  assert(engine.jars[0].uri == "gav://org.beangle.sas:beangle-sas-engine:0.13.9");
-  assert(engine.jars[1].uri == "gav://org.beangle.sas:beangle-sas-juli:0.13.9");
+  // 引擎依赖不再由默认值累加，而是由 resolveEngineDeps 从 engines.ini + <jar> 计算
+  assert(engine.jars.length == 0);
+}
+
+@("containerTypeOf maps type and mode to creator types") unittest {
+  import std.exception : assertThrown;
+
+  auto cfg = parseServerXml(`<bas version="0.14.0">
+      <engines>
+        <engine name="t" type="tomcat" version="11.0.26"/>
+        <engine name="te" type="tomcat" version="11.0.26" mode="standalone"/>
+        <engine name="u" type="undertow" version="2.0.3.Final" mode="standalone"/>
+      </engines>
+    </bas>`);
+  assert(cfg.engines[0].mode == engineModeContainer);
+  assert(containerTypeOf(cfg.engines[0]) == containerTypeTomcatDist);
+  assert(containerTypeOf(cfg.engines[1]) == containerTypeTomcatEmbed);
+  assert(containerTypeOf(cfg.engines[2]) == containerTypeUndertowEmbed);
+
+  auto undertowContainer = new Engine("u2", engineUndertow, "2.0.3.Final");
+  assertThrown!ServerXmlException(containerTypeOf(undertowContainer));
+  auto jetty = new Engine("j", engineJetty, "12.0.0");
+  assertThrown!ServerXmlException(containerTypeOf(jetty));
+  assertThrown!ServerXmlException(parseServerXml(
+      `<bas version="1"><engines><engine name="x" type="tomcat" version="1" mode="weird"/></engines></bas>`));
+}
+
+@("engineDefaultDeps reads the engines.ini section") unittest {
+  auto dist = engineDefaultDeps(containerTypeTomcatDist);
+  assert(dist.canFind("org.apache.tomcat:tomcat:zip:{version}"));
+  assert(dist.canFind("org.beangle.bas:beangle-bas-engine:{bas}"));
+  assert(dist.canFind("org.beangle.bas:beangle-bas-juli:{bas}"));
+
+  auto embed = engineDefaultDeps(containerTypeTomcatEmbed);
+  assert(embed.canFind("org.apache.tomcat.embed:tomcat-embed-core:{version}"));
+  assert(embed.canFind("org.beangle.bas:beangle-bas-engine:{bas}"));
+  // embed 不引入 juli，日志由应用自带
+  assert(!embed.canFind("beangle-bas-juli"));
+
+  auto undertow = engineDefaultDeps(containerTypeUndertowEmbed);
+  assert(undertow.canFind("io.undertow.ee:undertow-servlet:{version}"));
+  assert(undertow.canFind("io.undertow:undertow-core:2.4.4.Final"));
+  assert(!undertow.canFind("beangle-bas-juli"));
+}
+
+@("resolveEngineDeps expands placeholders and merges <jar> by GA") unittest {
+  auto cfg = parseServerXml(`<bas version="0.14.0">
+      <engines>
+        <engine name="tomcat" type="tomcat" version="11.0.26">
+          <jar uri="gav://org.apache.tomcat:tomcat:zip:11.0.24"/>
+          <jar uri="gav://org.postgresql:postgresql:42.7.13"/>
+          <jar uri="/opt/local/extra.jar"/>
+        </engine>
+      </engines>
+    </bas>`);
+  auto deps = resolveEngineDeps(cfg, cfg.engines[0], containerTypeTomcatDist);
+  // 引擎与 juli 版本来自 <bas version>
+  assert(deps.canFind("org.beangle.bas:beangle-bas-engine:0.14.0"));
+  assert(deps.canFind("org.beangle.bas:beangle-bas-juli:0.14.0"));
+  // GA 相同的默认项被 <jar> 覆盖（zip 仍在，版本换成 11.0.24）
+  assert(deps.canFind("org.apache.tomcat:tomcat:zip:11.0.24"));
+  assert(!deps.canFind("org.apache.tomcat:tomcat:zip:11.0.26"));
+  // 自定义 GA 与本地路径追加
+  assert(deps.canFind("org.postgresql:postgresql:42.7.13"));
+  assert(deps.canFind("/opt/local/extra.jar"));
+  // 覆盖发生在原位：tomcat zip 仍是第一行
+  assert(deps[0] == "org.apache.tomcat:tomcat:zip:11.0.24");
+}
+
+@("resolveEngineDeps lets a <jar> override the bas engine version for embed") unittest {
+  auto cfg = parseServerXml(`<bas version="0.14.0">
+      <engines>
+        <engine name="tomcat" type="tomcat" version="11.0.26" mode="standalone">
+          <jar uri="gav://org.beangle.bas:beangle-bas-engine:0.13.16"/>
+          <jar uri="gav://ch.qos.logback:logback-core:1.6.3"/>
+        </engine>
+      </engines>
+    </bas>`);
+  auto deps = resolveEngineDeps(cfg, cfg.engines[0], containerTypeTomcatEmbed);
+  // <jar> 覆盖默认的引擎版本，且不引入 juli
+  assert(deps.canFind("org.beangle.bas:beangle-bas-engine:0.13.16"));
+  assert(!deps.canFind("org.beangle.bas:beangle-bas-engine:0.14.0"));
+  assert(!deps.canFind("beangle-bas-juli"));
+  // 应用自带日志实现由 <jar> 追加
+  assert(deps.canFind("ch.qos.logback:logback-core:1.6.3"));
 }

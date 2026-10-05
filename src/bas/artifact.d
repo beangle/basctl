@@ -30,9 +30,9 @@ enum gavProtocol = "gav://";
  * jstart 命令（见 `bas.jstart`）。
  */
 struct Artifact {
-  /** Maven 组织标识，如 `org.beangle.sas`。 */
+  /** Maven 组织标识，如 `org.beangle.bas`。 */
   string groupId;
-  /** 构件标识，如 `beangle-sas-engine`。 */
+  /** 构件标识，如 `beangle-bas-engine`。 */
   string artifactId;
   /** 版本；`version` 是 D 关键字，故加下划线后缀。 */
   string version_;
@@ -61,12 +61,12 @@ struct Artifact {
     return name ~ "." ~ packaging;
   }
 
-  /** maven2 布局下的版本目录，如 `/org/beangle/sas/demo/1.0.4`。 */
+  /** maven2 布局下的版本目录，如 `/org/beangle/bas/demo/1.0.4`。 */
   string dirPath() const {
     return "/" ~ groupId.replace(".", "/") ~ "/" ~ artifactId ~ "/" ~ version_;
   }
 
-  /** maven2 布局下的构件路径，如 `/org/beangle/sas/demo/1.0.4/demo-1.0.4.jar`。 */
+  /** maven2 布局下的构件路径，如 `/org/beangle/bas/demo/1.0.4/demo-1.0.4.jar`。 */
   string layoutPath() const {
     return dirPath() ~ "/" ~ fileName();
   }
@@ -135,4 +135,33 @@ Artifact toArtifact(string gav) {
   if (!isGav(gav))
     throw new Exception(gav ~ " is not starts with " ~ gavProtocol);
   return parseArtifact(strip(gav[gavProtocol.length .. $]));
+}
+
+/** 去掉 `gav://` 前缀后的坐标正文。 */
+private string coordBody(string uri) {
+  return isGav(uri) ? strip(uri[gavProtocol.length .. $]) : uri;
+}
+
+/**
+ * 是否为 maven 坐标（可带 `gav://` 前缀）：至少 `group:artifact:version` 三段，
+ * 且不是 http(s) 直链或本地路径。
+ */
+bool isMavenCoord(string uri) {
+  auto body = coordBody(uri);
+  if (isRemote(body))
+    return false;
+  if (body.startsWith("~") || body.startsWith("/") || body.startsWith("."))
+    return false;
+  return body.split(":").length >= 3;
+}
+
+/**
+ * 依赖的 GA（`groupId:artifactId`），用于 `<engine><jar>` 覆盖 engines.ini 默认项；
+ * 非 maven 坐标（url / 本地路径）返回空串。
+ */
+string gaOf(string uri) {
+  if (!isMavenCoord(uri))
+    return "";
+  auto parts = coordBody(uri).split(":");
+  return parts[0] ~ ":" ~ parts[1];
 }

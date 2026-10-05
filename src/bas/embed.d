@@ -17,19 +17,19 @@
 /**
  * `basctl run`：嵌入式运行单个 webapp（war / Maven 坐标 / http url）。
  *
- * 不读 `conf/server.xml`：把目标写成一份单应用 launch spec（`[app] entry` +
- * `[engine] init = basctl make <tomcat|undertow>-embed` + 容器依赖），再前台
- * `jstart run` —— jstart 先跑 init 准备容器环境，随后 exec 容器进程，本命令等待
- * 其退出并返回同一退出码。
+ * 不读 `conf/server.xml`：一个参数 `--engine=<type>-<version>`（如 `tomcat-11.0.25`、
+ * `undertow-2.0.3.Final`）同时给出容器类型与版本；bas 引擎版本取 basctl 的默认值
+ * {@link defaultBasVersion}（`--bas=` 可覆盖）。依赖集与 `start` 共用 `engines.ini`
+ * （见 {@link bas.config.resolveEngineDeps}，这里没有 `<engine><jar>`，就用默认集）。
  *
- * 与多实例模式的差别只有输入来源：`start` 从 `conf/server.xml` 取引擎版本与实例
- * 清单，`run` 用 basctl 内置的缺省版本（可用 `bas_*_version` 环境变量覆盖），并固定
- * 一个组件目录（`--base` / `--instance`，缺省 `/tmp/sas`）。两者的 spec 渲染与
- * `make <type>` 回调完全共用（见 {@link bas.spec}）。
+ * 据此写出单应用 launch spec（`[app] entry` + `[engine] init = basctl make <type>-embed`），
+ * 再前台 `jstart run` —— jstart 先跑 init 准备容器环境，随后 exec 容器进程；本命令等待
+ * 其退出并返回同一退出码。
  */
 module bas.embed;
 
 import bas.artifact : isRemote;
+import bas.config : Container, Engine, containerTypeOf, engineModeStandalone, resolveEngineDeps;
 import bas.jstart : jstartCommand;
 import bas.spec : engineInitCommand, renderLaunchSpec;
 
@@ -38,29 +38,45 @@ import std.file : getcwd, mkdirRecurse, write;
 import std.path : absolutePath, buildPath, dirName;
 import std.process : ProcessException, environment, spawnProcess, wait;
 import std.stdio : stderr, stdout, writeln;
-import std.string : startsWith, strip;
+import std.string : indexOf, startsWith, strip;
 
-/** 嵌入式运行构件的缺省版本；每项可用 `bas_*_version` 环境变量覆盖。 */
-struct EmbedVersions {
-  string engine = "0.13.16";
-  string scala = "3.9.0";
-  string commons = "6.3.7";
-  string slf4j = "2.0.19";
-  string logback = "1.6.3";
-  string tomcat = "11.0.26";
-  string undertow = "2.4.3.Final";
-  string undertowEe = "2.0.2.Final";
+/**
+ * `run` 的 beangle-bas-engine 默认版本。
+ *
+ * 这是 basctl 为便捷运行维护的唯一默认值：只作用于 `run`（用 `--bas=` 覆盖）；
+ * `conf/server.xml` 的多实例部署一律以 `<bas version>` 为准。
+ */
+enum defaultBasVersion = "0.14.0";
+
+/** `<type>-<version>` 形式的嵌入式容器（如 `tomcat-11.0.25`）。 */
+struct EngineRef {
+  string typ;
+  string version_;
+
+  /** 解析 `tomcat-11.0.25` / `undertow-2.0.3.Final`；类型未知或缺少版本时返回空 `typ`。 */
+  static EngineRef parse(string value) {
+    auto s = strip(value);
+    auto dash = s.indexOf('-');
+    if (dash <= 0 || dash + 1 >= s.length)
+      return EngineRef.init;
+    auto typ = strip(s[0 .. dash]);
+    if (typ != "tomcat" && typ != "undertow")
+      return EngineRef.init;
+    return EngineRef(typ, strip(s[dash + 1 .. $]));
+  }
 }
 
 /** `basctl run` 的解析结果；`error` 非空表示参数有误。 */
 struct RunOptions {
-  string engine = "tomcat";
+  EngineRef engine;
+  string bas = defaultBasVersion;
   string base = "/tmp";
-  string instance = "sas";
+  string instance = "bas";
   string workdir;
   string local;
   string remote;
   string spec;
+  bool help;
   bool offline;
   bool printOnly;
   string entry;
@@ -69,9 +85,32 @@ struct RunOptions {
   string error;
 }
 
+/** run 的 creator 类型与引擎依赖（`engines.ini` 默认集 + bas 默认版本）。 */
+struct RunPlan {
+  string containerType;
+  string[] deps;
+}
+
+/** 由 `--engine` / `--bas` 推导 creator 类型与引擎依赖。 */
+RunPlan planRun(RunOptions opts) {
+  auto container = new Container;
+  container.version_ = opts.bas;
+  auto engine = new Engine(opts.engine.typ, opts.engine.typ, opts.engine.version_);
+  engine.mode = engineModeStandalone;
+
+  RunPlan plan;
+  plan.containerType = containerTypeOf(engine);
+  plan.deps = resolveEngineDeps(container, engine, plan.containerType);
+  return plan;
+}
+
 /** `basctl run [options] <app> [app args...]`：生成 spec 后前台委托 jstart。 */
 int runEmbedded(string[] args) {
   auto opts = parseRunArgs(args);
+  if (opts.help) {
+    runUsage();
+    return 0;
+  }
   if (opts.error.length) {
     stderr.writeln(opts.error);
     runUsage();
@@ -82,15 +121,14 @@ int runEmbedded(string[] args) {
     return 1;
   }
 
-  auto containerType = opts.engine == "undertow" ? "undertow-embed" : "tomcat-embed";
+  auto plan = planRun(opts);
   auto base = absolutePath(opts.base);
   auto workdir = opts.workdir.length ? absolutePath(opts.workdir) : getcwd();
   auto spec = opts.spec.length ? absolutePath(opts.spec) : buildPath(base, opts.instance, "run.jstart");
 
   mkdirRecurse(dirName(spec));
-  write(spec, renderLaunchSpec(base, opts.instance, workdir, engineInitCommand(containerType),
-      embedEngineDeps(opts.engine, embedVersions()), opts.runtimeArgs, opts.appArgs, [],
-      warTarget(opts.entry)));
+  write(spec, renderLaunchSpec(base, opts.instance, workdir, engineInitCommand(plan.containerType),
+      plan.deps, opts.runtimeArgs, opts.appArgs, [], warTarget(opts.entry)));
   writeln("spec: " ~ spec);
 
   auto jstartArgs = commonJstartArgs(opts);
@@ -106,9 +144,10 @@ void runUsage() {
   stderr.writeln("Usage: basctl run [options] <app> [app args...]");
   stderr.writeln("  <app>                         war / 解压目录，g:a:v（按 war），或 http(s) url");
   stderr.writeln("Options:");
-  stderr.writeln("  --engine=<tomcat|undertow>    Embedded container (default tomcat)");
+  stderr.writeln("  --engine=<type>-<version>     Embedded container, e.g. tomcat-11.0.25 (required)");
+  stderr.writeln("  --bas=<version>               beangle-bas-engine version (default " ~ defaultBasVersion ~ ")");
   stderr.writeln("  --base=<dir>                  Base root of the component (default /tmp)");
-  stderr.writeln("  --instance=<name>             Component directory name (default sas)");
+  stderr.writeln("  --instance=<name>             Component directory name (default bas)");
   stderr.writeln("  --workdir=<dir>               Working directory (default: current dir)");
   stderr.writeln("  --local=<dir>                 Local repository (default: $M2_REPO)");
   stderr.writeln("  --remote=<urls>               Upstream repositories (default: $M2_REMOTE_REPO)");
@@ -123,7 +162,14 @@ void runUsage() {
 RunOptions parseRunArgs(string[] args) {
   RunOptions opts;
   foreach (arg; args) {
-    if (assignValue(arg, "--engine=", opts.engine))
+    if (arg.startsWith("--engine=")) {
+      auto raw = strip(arg["--engine=".length .. $]);
+      opts.engine = EngineRef.parse(raw);
+      if (!opts.engine.typ.length)
+        opts.error = "Invalid --engine " ~ raw ~ ", expected <type>-<version> (e.g. tomcat-11.0.25).";
+      continue;
+    }
+    if (assignValue(arg, "--bas=", opts.bas))
       continue;
     if (assignValue(arg, "--base=", opts.base))
       continue;
@@ -137,6 +183,10 @@ RunOptions parseRunArgs(string[] args) {
       continue;
     if (assignValue(arg, "--spec=", opts.spec))
       continue;
+    if (arg == "--help" || arg == "-h") {
+      opts.help = true;
+      continue;
+    }
     if (arg == "--offline") {
       opts.offline = true;
       continue;
@@ -159,13 +209,15 @@ RunOptions parseRunArgs(string[] args) {
       opts.appArgs ~= arg;
   }
 
-  if (opts.engine != "tomcat" && opts.engine != "undertow")
-    opts.error = "Unknown engine " ~ opts.engine ~ ", expected tomcat or undertow.";
-  else if (!opts.base.length)
-    opts.error = "--base must not be empty.";
-  else if (!isSafeInstance(opts.instance))
-    opts.error = "Invalid --instance " ~ opts.instance
-      ~ ": expected a single path segment of [A-Za-z0-9._-].";
+  if (!opts.error.length && !opts.engine.typ.length)
+    opts.error = "Missing --engine=<type>-<version> (e.g. tomcat-11.0.25).";
+  else if (!opts.error.length) {
+    if (!opts.base.length)
+      opts.error = "--base must not be empty.";
+    else if (!isSafeInstance(opts.instance))
+      opts.error = "Invalid --instance " ~ opts.instance
+        ~ ": expected a single path segment of [A-Za-z0-9._-].";
+  }
   return opts;
 }
 
@@ -230,78 +282,6 @@ int execJstart(string[] args) {
     stderr.writeln("Cannot run " ~ jstartCommand() ~ ", install jstart or set bas_jstart to its path.");
     return 1;
   }
-}
-
-/** 嵌入式运行的 `[engine]` 依赖：引擎 jar + scala / 日志 + 选定的容器 jar。 */
-string[] embedEngineDeps(string engine, EmbedVersions v) {
-  string[] deps = [
-    "org.beangle.sas:beangle-sas-engine:" ~ v.engine,
-    "org.scala-lang:scala-library:" ~ v.scala,
-    "org.scala-lang:scala3-library_3:" ~ v.scala,
-    "org.beangle.commons:beangle-commons:" ~ v.commons,
-    "org.slf4j:slf4j-api:" ~ v.slf4j,
-    "org.slf4j:jul-to-slf4j:" ~ v.slf4j,
-    "ch.qos.logback:logback-core:" ~ v.logback,
-    "ch.qos.logback:logback-classic:" ~ v.logback,
-  ];
-  if (engine == "undertow")
-    deps ~= undertowDeps(v);
-  else
-    deps ~= [
-      "org.apache.tomcat.embed:tomcat-embed-core:" ~ v.tomcat,
-      "org.apache.tomcat.embed:tomcat-embed-websocket:" ~ v.tomcat,
-    ];
-  return deps;
-}
-
-/**
- * 嵌入式 undertow 的容器依赖。jstart 不解析传递依赖，必须写全；版本跟随
- * `EmbedVersions`（与当前发布版引擎的编译期依赖一致），升级引擎时同步调整。
- */
-string[] undertowDeps(EmbedVersions v) {
-  return [
-    "io.undertow:undertow-core:" ~ v.undertow,
-    "io.undertow.ee:undertow-servlet:" ~ v.undertowEe,
-    "io.undertow.ee:undertow-websockets:" ~ v.undertowEe,
-    "org.jboss.logging:jboss-logging:3.6.3.Final",
-    "org.jboss.threads:jboss-threads:3.9.2",
-    "org.jboss.xnio:xnio-api:3.8.16.Final",
-    "org.jboss.xnio:xnio-nio:3.8.16.Final",
-    "jakarta.annotation:jakarta.annotation-api:2.1.1",
-    "jakarta.servlet:jakarta.servlet-api:6.1.0",
-    "jakarta.websocket:jakarta.websocket-api:2.2.0",
-    "jakarta.websocket:jakarta.websocket-client-api:2.2.0",
-    "org.wildfly.client:wildfly-client-config:1.0.1.Final",
-    "org.wildfly.common:wildfly-common:2.0.1",
-    "io.smallrye.common:smallrye-common-annotation:2.14.0",
-    "io.smallrye.common:smallrye-common-constraint:2.12.0",
-    "io.smallrye.common:smallrye-common-cpu:2.14.0",
-    "io.smallrye.common:smallrye-common-expression:2.4.0",
-    "io.smallrye.common:smallrye-common-function:2.14.0",
-    "io.smallrye.common:smallrye-common-net:2.12.0",
-    "io.smallrye.common:smallrye-common-os:2.4.0",
-    "io.smallrye.common:smallrye-common-ref:2.4.0",
-  ];
-}
-
-/** 内置版本，逐项用 `bas_*_version` 环境变量覆盖。 */
-EmbedVersions embedVersions() @trusted {
-  EmbedVersions v;
-  v.engine = envOr("bas_engine_version", v.engine);
-  v.scala = envOr("bas_scala_version", v.scala);
-  v.commons = envOr("bas_commons_version", v.commons);
-  v.slf4j = envOr("bas_slf4j_version", v.slf4j);
-  v.logback = envOr("bas_logback_version", v.logback);
-  v.tomcat = envOr("bas_tomcat_version", v.tomcat);
-  v.undertow = envOr("bas_undertow_version", v.undertow);
-  v.undertowEe = envOr("bas_undertow_ee_version", v.undertowEe);
-  return v;
-}
-
-/** 环境变量有非空值则取它，否则用内置缺省。 */
-private string envOr(string key, string fallback) @trusted {
-  auto value = strip(environment.get(key, ""));
-  return value.length ? value : fallback;
 }
 
 /** `--key=value` 形式：匹配时写入 `target` 并返回 true。 */

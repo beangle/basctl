@@ -1,9 +1,9 @@
 <?xml version='1.0' encoding='utf-8'?>
 <bas xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
      xsi:noNamespaceSchemaLocation="http://beangle.github.io/schema/bas-1.0.0.xsd"
-     version="0.13.9">
+     version="0.14.0">
   <engines>
-    <engine name="tomcat" type="tomcat" version="11.0.18">
+    <engine name="tomcat" type="tomcat" version="11.0.26" mode="container">
       <jar uri="gav://org.postgresql:postgresql:42.7.9"/>
     </engine>
   </engines>

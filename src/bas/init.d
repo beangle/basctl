@@ -15,9 +15,9 @@
  */
 
 /**
- * `init`：把控制脚本铺到 `<workdir>/bin/`，初始化一个 sas 组件目录。
+ * `init`：把控制脚本铺到 `<workdir>/bin/`，初始化一个 bas 组件目录。
  *
- * 脚本内嵌在本二进制里（`resources/sas/bin/`），随 basctl 版本发布，避免发行包与
+ * 脚本内嵌在本二进制里（`resources/bas/bin/`），随 basctl 版本发布，避免发行包与
  * basctl 版本错配。已存在的脚本默认保留（用户可能改过），`--force` 才覆盖；
  * `bin/setenv.sh` 与 `conf/server.xml` 属用户配置，本命令不生成也不改动。
  */
@@ -39,15 +39,15 @@ private immutable string[] scriptNames = ["env.sh", "bas.sh", "start.sh", "stop.
 string scriptBody(string name) {
   switch (name) {
   case "env.sh":
-    return import("sas/bin/env.sh");
+    return import("bas/bin/env.sh");
   case "bas.sh":
-    return import("sas/bin/bas.sh");
+    return import("bas/bin/bas.sh");
   case "start.sh":
-    return import("sas/bin/start.sh");
+    return import("bas/bin/start.sh");
   case "stop.sh":
-    return import("sas/bin/stop.sh");
+    return import("bas/bin/stop.sh");
   case "restart.sh":
-    return import("sas/bin/restart.sh");
+    return import("bas/bin/restart.sh");
   default:
     return "";
   }

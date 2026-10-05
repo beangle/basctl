@@ -30,6 +30,7 @@ import std.array : array, join, split;
 import std.conv : to;
 import std.exception : enforce;
 import std.format : format;
+import std.path : absolutePath;
 import std.process : environment;
 import std.string : empty, indexOf, lastIndexOf, replace, split, strip;
 import std.typecons : Nullable, nullable;
@@ -51,6 +52,15 @@ enum engineTomcat = "tomcat";
 enum engineUndertow = "undertow";
 enum engineJetty = "jetty";
 enum engineAny = "any";
+
+/** `<engine mode>`：容器发行包（多应用）或嵌入式单应用。 */
+enum engineModeContainer = "container";
+enum engineModeStandalone = "standalone";
+
+/** creator 类型常量（与 `bas.enginecreator.isContainerType` 一致）。 */
+enum containerTypeTomcatDist = "tomcat-dist";
+enum containerTypeTomcatEmbed = "tomcat-embed";
+enum containerTypeUndertowEmbed = "undertow-embed";
 
 /** A `<listener>` under `<engine>`：类名加任意属性。 */
 class Listener {
@@ -125,7 +135,10 @@ private string baseNameOf(string path) {
 class Engine {
   string name;
   string typ;
+  /** 容器版本：tomcat 为发行包版本，undertow 为 undertow-servlet 版本。 */
   string version_;
+  /** `container`（发行包多应用）或 `standalone`（嵌入式单应用），缺省 `container`。 */
+  string mode = engineModeContainer;
   bool jspSupport;
   Listener[] listeners;
   Jar[] jars;
@@ -140,14 +153,19 @@ class Engine {
   override string toString() const {
     return name;
   }
+
+  /** 是否以嵌入式（单应用）方式运行。 */
+  bool standalone() const {
+    return mode == engineModeStandalone;
+  }
 }
 
 /**
- * 把 sas 对 Tomcat 引擎的默认要求补进配置模型（幂等，可重复调用）。
+ * 把 bas 对 Tomcat 引擎的默认要求补进配置模型（幂等，可重复调用）。
  *
- * 补三类东西：Server 级 Listener、Context 的 `ExtendableWebappLoader` /
- * `DependencyClassLoader` 与全关闭的 JarScanner，以及引擎自身所需的 jar
- * （`beangle-sas-engine` 与容器日志桥接 `beangle-sas-juli`）。
+ * 补 Server 级 Listener 与 Context 的 `ExtendableWebappLoader` /
+ * `DependencyClassLoader`、全关闭的 JarScanner。引擎依赖由
+ * {@link resolveEngineDeps} 从 `engines.ini` + `<engine><jar>` 计算，不在这里累加。
  */
 void applyEngineDefault(Container container, Engine engine) {
   if (!engine.listeners.length) {
@@ -160,8 +178,8 @@ void applyEngineDefault(Container container, Engine engine) {
 
   auto context = engine.context;
   if (context.loader is null) {
-    context.loader = new Loader("org.beangle.sas.engine.tomcat.ExtendableWebappLoader");
-    context.loader.properties["loaderClass"] = "org.beangle.sas.engine.tomcat.DependencyClassLoader";
+    context.loader = new Loader("org.beangle.bas.engine.tomcat.ExtendableWebappLoader");
+    context.loader.properties["loaderClass"] = "org.beangle.bas.engine.tomcat.DependencyClassLoader";
   }
   if (context.jarScanner is null) {
     auto scanner = new JarScanner();
@@ -172,18 +190,95 @@ void applyEngineDefault(Container container, Engine engine) {
     scanner.properties["scanManifest"] = "false";
     context.jarScanner = scanner;
   }
-  engine.jars ~= Jar.gav("org.beangle.sas:beangle-sas-engine:" ~ container.version_);
-  // 容器日志桥接：beangle-sas-juli 把 commons-logging / slf4j / logback 打包改名后再提供
-  // `org.apache.juli.logging.LogFactory`，顶替 tomcat 自带的 bin/tomcat-juli.jar。
-  if (engine.typ == engineTomcat) {
-    auto juli = Jar.gav("org.beangle.sas:beangle-sas-juli:" ~ container.version_);
-    bool hasJuli;
-    foreach (jar; engine.jars)
-      if (jar.uri == juli.uri)
-        hasJuli = true;
-    if (!hasJuli)
-      engine.jars ~= juli;
+}
+
+/** 编译期内嵌的容器默认依赖集（`resources/engines.ini`）。 */
+private enum enginesIniResource = import("engines.ini");
+
+/**
+ * 读取 `engines.ini` 中 `section` 的依赖行（原样，未展开占位符）。
+ * 空行与 `#` / `;` 注释跳过；分节之外的行不参与。
+ */
+string[] engineDefaultDeps(string section) {
+  string[] deps;
+  bool inSection;
+  foreach (raw; enginesIniResource.split("\n")) {
+    auto line = strip(raw);
+    if (!line.length || line.startsWith("#") || line.startsWith(";"))
+      continue;
+    if (line.startsWith("[")) {
+      auto close = line.indexOf(']');
+      if (close > 0)
+        inSection = strip(line[1 .. close]) == section;
+      continue;
+    }
+    if (inSection)
+      deps ~= line;
   }
+  return deps;
+}
+
+/**
+ * 由引擎的 `type` 与 `mode` 推导 creator 类型。
+ *
+ * `container` + tomcat 走全量发行包（多应用），`standalone` + tomcat/undertow 走嵌入式
+ * 单应用；undertow 没有发行包，只支持 `standalone`。其余组合抛 `ServerXmlException`。
+ */
+string containerTypeOf(Engine engine) {
+  if (engine.typ == engineTomcat)
+    return engine.standalone ? containerTypeTomcatEmbed : containerTypeTomcatDist;
+  if (engine.typ == engineUndertow) {
+    if (!engine.standalone)
+      throw new ServerXmlException("engine " ~ engine.name
+          ~ " (undertow) requires mode=\"" ~ engineModeStandalone ~ "\"");
+    return containerTypeUndertowEmbed;
+  }
+  throw new ServerXmlException("engine " ~ engine.name ~ " type " ~ engine.typ ~ " is not supported");
+}
+
+/** `<engine><jar>` 归一化成 jstart `[engine]` 依赖行（gav 去掉前缀，其余原样）。 */
+private string jarDepLine(Jar jar) {
+  if (isGav(jar.uri))
+    return toArtifact(jar.uri).asGav();
+  if (!isRemote(jar.uri))
+    return absolutePath(jar.uri);
+  return jar.uri;
+}
+
+/**
+ * 计算引擎依赖：`engines.ini` 的默认集（展开 `{version}` / `{bas}`）与
+ * `<engine><jar>` 合并——GA 相同则就地覆盖（保持默认项顺序），否则追加；
+ * url / 本地路径直接追加，重复项只保留一次。
+ */
+string[] resolveEngineDeps(Container container, Engine engine, string containerType) {
+  string[] deps;
+  int[string] gaPos;
+
+  foreach (raw; engineDefaultDeps(containerType)) {
+    auto dep = raw.replace("{version}", engine.version_).replace("{bas}", container.version_);
+    auto ga = gaOf(dep);
+    if (ga.length && (ga in gaPos))
+      deps[gaPos[ga]] = dep;
+    else {
+      if (ga.length)
+        gaPos[ga] = cast(int) deps.length;
+      deps ~= dep;
+    }
+  }
+
+  foreach (jar; engine.jars) {
+    auto dep = jarDepLine(jar);
+    auto ga = gaOf(dep);
+    if (ga.length && (ga in gaPos))
+      deps[gaPos[ga]] = dep;
+    else {
+      if (ga.length)
+        gaPos[ga] = cast(int) deps.length;
+      if (!deps.canFind(dep))
+        deps ~= dep;
+    }
+  }
+  return deps;
 }
 
 /** A named host mapping（`<hosts><host>`）。 */
@@ -658,7 +753,7 @@ Repository parseRepository(XmlElem elem) {
 /** 解析开发版 `<snapshot-repo>`：`remote` 先展开 `${bas_remote_url}`。 */
 SnapshotRepo parseSnapshotRepo(XmlElem elem) {
   auto local = nonBlankAttr(elem, "local");
-  auto remote = expandSasRemoteUrl(nonBlankAttr(elem, "remote"));
+  auto remote = expandBasRemoteUrl(nonBlankAttr(elem, "remote"));
   auto token = resolveToken(optAttr(elem, "token"));
   return new SnapshotRepo(local, remote, token);
 }
@@ -681,7 +776,7 @@ Nullable!string resolveToken(Nullable!string token) {
 }
 
 /** 展开 `${bas_remote_url}`，取到 `/api/` 之前；离线时返回空。 */
-Nullable!string expandSasRemoteUrl(Nullable!string remote) {
+Nullable!string expandBasRemoteUrl(Nullable!string remote) {
   if (remote.isNull)
     return Nullable!string.init;
   enum marker = "${bas_remote_url}";
@@ -704,6 +799,13 @@ Engine parseEngine(XmlElem elem) {
       requireAttr(elem, "version", "<engine>"));
   auto jsp = optAttr(elem, "jsp-support");
   e.jspSupport = !jsp.isNull && jsp.get == "true";
+
+  auto mode = nonBlankAttr(elem, "mode");
+  if (!mode.isNull) {
+    enforce!ServerXmlException(mode.get == engineModeContainer || mode.get == engineModeStandalone,
+        format!"Invalid mode '%s' on <engine %s> (expected container or standalone)"(mode.get, e.name));
+    e.mode = mode.get;
+  }
 
   foreach (c; elementChildren(elem)) {
     switch (c.name) {

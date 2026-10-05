@@ -17,15 +17,17 @@
 /**
  * `basctl start`：按 farm 生成 jstart 启动 spec 并拉起实例。
  *
- * 沿用 sas「按 farm 启动」的语义，启动本身交给 jstart：
+ * 沿用 bas「按 farm 启动」的语义，启动本身交给 jstart：
  *
  *  1. 从 `conf/server.xml` 选出匹配的本机 `<server>`（farm 名 / `farm.server` / `all`）；
  *  2. 逐个解析 webapp（沿用 `make`/`resolve` 的语义），为每个 `<server>` 生成一份
- *     launch spec `conf/<farm.server>.jstart`——一个 `<server>` 一个 JVM，内部每个
- *     webapp 一段 `[subapp <id>]`（各自 docBase 与 `libs`，依赖互不串味）；
+ *     launch spec `conf/<farm.server>.jstart`——一个 `<server>` 一个 JVM：`mode="container"`
+ *     时每个 webapp 一段 `[subapp <id>]`（各自 docBase 与 `libs`，依赖互不串味），
+ *     `mode="standalone"` 时写单应用 `[app] entry`（该 server 只允许一个 webapp）；
  *  3. `jstart resolve <spec>` 校验 spec 与依赖齐备；
- *  4. 后台 `jstart run <spec>`：jstart 先运行 `[engine] init`（写成本 basctl 的
- *     `make tomcat-dist` 命令行）→ 它准备容器环境并写出最终启动命令，jstart 再 exec。
+ *  4. 后台 `jstart run <spec>`：jstart 先运行 `[engine] init`（按引擎 `type`/`mode` 写成
+ *     对应的 `make tomcat-dist` / `make tomcat-embed` / `make undertow-embed`）→ 它准备
+ *     容器环境并写出最终启动命令，jstart 再 exec。
  *
  * 实例目录沿用 `servers/<farm.server>`——spec 里写 `[app] base = $BAS_HOME/servers`
  * 加 `[app] instance = <farm.server>`，jstart 的直接组件目录就是它；`SERVER_PID` 与
@@ -36,10 +38,10 @@
  */
 module bas.starter;
 
-import bas.artifact : gavProtocol, isGav, isRemote, parseArtifact, toArtifact;
+import bas.artifact : isMavenCoord, parseArtifact;
 import bas.config;
 import bas.fsutil : linkIfMissing;
-import bas.jstart : fetch, jstartCommand;
+import bas.jstart : jstartCommand;
 import bas.net : localAddresses;
 import bas.resolver : resolveArtifact, resolveWebapps;
 import bas.serverstatus : processRunning, rollLog;
@@ -51,14 +53,13 @@ import core.time : msecs;
 import std.algorithm : canFind;
 import std.array : join, split;
 import std.conv : to;
-import std.file : exists, mkdirRecurse, read, readText, remove, write;
+import std.file : exists, mkdirRecurse, readText, remove, write;
 import std.format : format;
 import std.path : absolutePath, buildPath, dirName;
 import std.process : Config, environment, execute;
 import std.stdio : stderr, writeln;
-import std.string : startsWith, strip;
+import std.string : strip;
 import std.typecons : Nullable, nullable;
-import std.zip : ZipArchive;
 
 /** 启动后等待多久（毫秒）再确认进程存活，用于 Webapp 启动失败/依赖缺失的快速反馈。 */
 private enum startupProbeMs = 2000;
@@ -163,7 +164,7 @@ int runMake(string configFile, string pattern) {
   return failed ? 1 : 0;
 }
 
-/** 给选中的 server 所引用的引擎补齐 sas 默认（每个引擎一次）。 */
+/** 给选中的 server 所引用的引擎补齐 bas 默认（每个引擎一次）。 */
 private void applyEngineDefaults(Container container, const(Server)[] servers) {
   Engine[] engines;
   foreach (farm; container.farms)
@@ -271,9 +272,17 @@ private Nullable!string prepareServer(string basHome, Container container, Serve
   }
 
   auto engine = server.farm.engine;
-  if (engine.typ != engineTomcat) {
-    stderr.writeln(server.qualifiedName ~ ": engine type " ~ engine.typ
-        ~ " is not supported by start (use a tomcat farm)");
+  string containerType;
+  try {
+    containerType = containerTypeOf(engine);
+  } catch (ServerXmlException e) {
+    stderr.writeln(server.qualifiedName ~ ": " ~ e.msg);
+    return Nullable!string.init;
+  }
+  bool standalone = containerType != containerTypeTomcatDist;
+  auto standaloneError = standaloneWebappError(engine, webapps.length);
+  if (standaloneError.length) {
+    stderr.writeln(server.qualifiedName ~ ": " ~ standaloneError);
     return Nullable!string.init;
   }
 
@@ -290,18 +299,40 @@ private Nullable!string prepareServer(string basHome, Container container, Serve
     remove(errorFile);
 
   string[] engineDeps;
-  if (!collectEngineDeps(container, engine, container.repository, container.snapshotRepo, engineDeps))
+  if (!collectEngineDeps(container, engine, containerType, container.repository, container.snapshotRepo,
+      engineDeps))
     return Nullable!string.init;
 
-  auto initCommand = engineInitCommand();
+  auto appArgs = appArgsFor(server);
+  string entry;
+  const(SubappSpec)[] subapps;
+  if (standalone) {
+    entry = webapps[0].docBase;
+    if (webapps[0].contextPath.length)
+      appArgs ~= "--path=" ~ webapps[0].contextPath;
+  } else {
+    subapps = subappSpecs(webapps);
+  }
+
+  auto initCommand = engineInitCommand(containerType);
   auto spec = buildPath(basHome, "conf", server.qualifiedName ~ ".jstart");
   mkdirRecurse(dirName(spec));
   write(spec, renderLaunchSpec(buildPath(basHome, "servers"), server.qualifiedName, basHome,
-      initCommand, engineDeps, runtimeArgsFor(server), appArgsFor(server), subappSpecs(webapps)));
+      initCommand, engineDeps, runtimeArgsFor(server), appArgs, subapps, entry));
   writeln(server.qualifiedName ~ ": wrote " ~ spec);
   if (!resolveSpec(spec, repoArgs(container)))
     return Nullable!string.init;
   return nullable(spec);
+}
+
+/**
+ * standalone 引擎只运行一个 webapp；部署多个时返回给运维看的错误信息，合法时返回空串。
+ */
+string standaloneWebappError(Engine engine, size_t webappCount) {
+  if (engine.standalone && webappCount > 1)
+    return "engine " ~ engine.name ~ " runs mode=\"" ~ engine.mode ~ "\" (single webapp), but "
+      ~ webappCount.to!string ~ " are deployed; use mode=\"" ~ engineModeContainer ~ "\"";
+  return "";
 }
 
 /** 把 server 的 webapp 列表转成 spec 的 `[subapp]` 段（id 由 context path 推导并去重）。 */
@@ -339,7 +370,7 @@ string subappId(string contextPath, const(string)[] used) {
   return id;
 }
 
-/** `[runtime]`：sas 的 JVM 默认参数 + `<farm><server-options>`。 */
+/** `[runtime]`：bas 的 JVM 默认参数 + `<farm><server-options>`。 */
 string[] runtimeArgsFor(Server server) {
   auto farm = server.farm;
   auto heap = server.maxHeapSize.length ? server.maxHeapSize : "300M";
@@ -366,71 +397,24 @@ string[] appArgsFor(Server server) {
 }
 
 /**
- * `[engine]` 依赖行：tomcat 发行包 + `<engine><jar>`（`applyEngineDefault` 已把引擎 jar
- * 加进去）+ 引擎 jar 随包发布的 `META-INF/beangle/dependencies`（引擎运行时依赖）。
+ * `[engine]` 依赖行：`engines.ini` 中该容器类型的默认集（展开 `{version}` / `{bas}`）
+ * 与 `<engine><jar>` 合并的结果——GA 相同覆盖，其余追加（见 {@link resolveEngineDeps}）。
  *
  * 逐条校验确保本地齐备（gav 走 jstart fetch），缺失即失败——避免 `run` 阶段才发现。
  */
-bool collectEngineDeps(Container container, Engine engine, Repository repo,
+bool collectEngineDeps(Container container, Engine engine, string containerType, Repository repo,
     SnapshotRepo snapshotRepo, ref string[] deps) {
-  deps ~= "org.apache.tomcat:tomcat:zip:" ~ engine.version_;
-  foreach (jar; engine.jars) {
-    string dep;
-    if (isGav(jar.uri))
-      dep = toArtifact(jar.uri).asGav();
-    else if (isRemote(jar.uri))
-      dep = jar.uri;
-    else
-      dep = absolutePath(jar.uri);
-    if (!deps.canFind(dep))
-      deps ~= dep;
-  }
-
-  auto engineGav = "org.beangle.sas:beangle-sas-engine:" ~ container.version_;
-  auto engineJar = fetch(engineGav, repo);
-  if (engineJar.isNull) {
-    stderr.writeln("Cannot fetch " ~ engineGav);
-    return false;
-  }
-  foreach (line; readZipEntry(engineJar.get, "META-INF/beangle/dependencies").split("\n")) {
-    auto dep = strip(line);
-    if (dep.length && !deps.canFind(dep))
-      deps ~= dep;
-  }
-
+  deps ~= resolveEngineDeps(container, engine, containerType);
   foreach (dep; deps) {
-    if (!looksLikeGav(dep))
+    if (!isMavenCoord(dep))
       continue;
-    auto artifact = dep.startsWith(gavProtocol) ? toArtifact(dep) : parseArtifact(dep);
+    auto artifact = parseArtifact(dep);
     if (resolveArtifact(repo, snapshotRepo, artifact).isNull) {
       stderr.writeln("Cannot resolve engine dependency " ~ dep);
       return false;
     }
   }
   return true;
-}
-
-/** 一行是 maven 坐标（而不是本地路径 / http url）。 */
-private bool looksLikeGav(string line) {
-  if (isGav(line))
-    return true;
-  if (isRemote(line))
-    return false;
-  if (line.startsWith("~") || line.startsWith("/") || line.startsWith("."))
-    return false;
-  return line.split(":").length >= 3;
-}
-
-/** 读取 jar/zip 内某个条目为文本；缺失或读不了时返回空串。 */
-string readZipEntry(string zipPath, string entry) {
-  try {
-    auto zip = new ZipArchive(cast(ubyte[]) read(zipPath));
-    if (auto member = entry in zip.directory)
-      return cast(string) zip.expand(*member);
-  } catch (Exception) {
-    // 忽略：读不了就当没有清单
-  }
-  return "";
 }
 
 /** 把 argv 拼成一条 shell 命令（每个参数单独加引号）。 */
