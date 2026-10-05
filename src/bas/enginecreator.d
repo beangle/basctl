@@ -26,14 +26,14 @@
  * [--app-jvm-arg=<opt>]... [args...]`
  *
  * jstart 的 `[engine] init` 可直接写成本命令（jstart 支持“程序 + 参数”），无需 wrapper：
- * `init = basctl make tomcat-embed`
+ * `init = basctl make tomcat`
  *
  * 多 webapp（jstart 的 `[subapp <id>]`）不再传 `--entry`，改为把每个 webapp 的
- * entry/path/libs 写进 `<base>/engine-subapps.jstart`；`tomcat-dist` 逐段准备 docBase 并
+ * entry/path/libs 写进 `<base>/engine-subapps.jstart`；`tomcat-server` 逐段准备 docBase 并
  * 在同一 JVM 里建多个 `<Context>`（各 Context 用自己的 `DependencyClassLoader` 解析依赖）。
  *
- * 支持的类型见 {@link runEngineCreator}：嵌入式 tomcat / undertow，以及全量 tomcat
- * 发行包（dist）。docBase 布局与 war 解压归入口负责（jstart 不镜像容器布局）。
+ * 支持的类型见 {@link runEngineCreator}：嵌入式 tomcat / undertow / jetty，以及全量
+ * tomcat 发行包（tomcat-server）。docBase 布局与 war 解压归入口负责（jstart 不镜像容器布局）。
  */
 module bas.enginecreator;
 
@@ -58,12 +58,15 @@ enum tomcatEmbedMain = "org.beangle.bas.engine.tomcat.Bootstrap";
 /** 嵌入式 undertow 的容器入口 main。 */
 enum undertowEmbedMain = "org.beangle.bas.engine.undertow.Bootstrap";
 
+/** 嵌入式 jetty 的容器入口 main。 */
+enum jettyEmbedMain = "org.beangle.bas.engine.jetty.Bootstrap";
+
 /** 全量 tomcat 发行包的容器入口 main。 */
 enum tomcatDistMain = "org.apache.catalina.startup.Bootstrap";
 
 /** jstart `[engine] init` 支持的容器类型（`make` 的 creator 模式）。 */
 bool isContainerType(string type) @safe nothrow {
-  return type == "tomcat-dist" || type == "tomcat-embed" || type == "undertow-embed";
+  return type == "tomcat-server" || type == "tomcat" || type == "undertow" || type == "jetty";
 }
 
 /** 精简规则变更时递增，令旧的解压目录重新解压。 */
@@ -508,7 +511,7 @@ void explodeZip(string zipPath, string dest) {
  * `java <jvm-args> -cp <引擎 + 应用 + WEB-INF> <Bootstrap> --base= --docBase= ...`。
  */
 void createEmbed(string mainClass, EngineOptions o) {
-  o.requireSingle("basctl make <tomcat-embed|undertow-embed> --base=<dir> --entry=<war|dir> "
+  o.requireSingle("basctl make <tomcat|undertow|jetty> --base=<dir> --entry=<war|dir> "
     ~ "--engine-classpath-file=<file> --entry-out=<file> [--app-classpath-file=<file>] "
     ~ "[--app-jvm-arg=<opt>...] [args...]");
   auto docBase = prepareWebapp(o);
@@ -542,7 +545,7 @@ void createEmbed(string mainClass, EngineOptions o) {
  * 启动命令 `java ... -cp <bin/bootstrap.jar> org.apache.catalina.startup.Bootstrap start`。
  */
 void createDist(EngineOptions o) {
-  o.requireSingle("basctl make tomcat-dist --base=<dir> --entry=<war|dir> --entry-out=<file> "
+  o.requireSingle("basctl make tomcat-server --base=<dir> --entry=<war|dir> --entry-out=<file> "
     ~ "[--dist=<tomcat.zip>] [--engine-classpath-file=<file>] [--app-classpath-file=<file>] "
     ~ "[--app-jvm-arg=<opt>...] [--port=<n>] [--path=<ctx>] [--jsp=true|false] "
     ~ "[--listener=<class[:k=v;...]>]...");
@@ -755,14 +758,16 @@ private void writeConf(string engineHome, EngineOptions o, ContextSpec[] context
   auto major = tomcatMajor(engineHome);
   write(buildPath(conf, "web.xml"), webXml(o.jspSupport, major));
   auto port = o.port.length ? o.port : freePort().to!string;
-  write(buildPath(conf, "server.xml"), serverXml(port, contexts, major, o.listeners));
+  write(buildPath(conf, "server.xml"), serverXml(port, contexts, major, o.listeners, o.properties));
 }
 
 /**
  * server.xml：一个 Connector + 一个 Host + 每个 webapp 一个 Context（docBase 为解压目录）。
- * Context 上挂 `ExtendableWebappLoader`/`DependencyClassLoader` 与全关闭的 JarScanner。
+ * Context 上挂 `ExtendableWebappLoader`/`DependencyClassLoader` 与全关闭的 JarScanner；
+ * Connector 上渲染 `<http>` 转来的 `connector.*` 引擎属性。
  */
-string serverXml(string port, ContextSpec[] contexts, string major, string[] listeners) {
+string serverXml(string port, ContextSpec[] contexts, string major, string[] listeners,
+    const EngineProperty[] properties = []) {
   auto sb = appender!string;
   sb.put("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
   sb.put("<Server port=\"-1\" shutdown=\"SHUTDOWN\">\n");
@@ -779,6 +784,17 @@ string serverXml(string port, ContextSpec[] contexts, string major, string[] lis
   sb.put("    <Connector port=\"" ~ port ~ "\" protocol=\"HTTP/1.1\" URIEncoding=\"UTF-8\"");
   if (major.startsWith("11"))
     sb.put(" useVirtualThreads=\"true\"");
+  sb.put(" enableLookups=\"" ~ engineProperty(properties, "connector.enableLookups", "false") ~ "\"");
+  sb.put(" disableUploadTimeout=\"" ~ engineProperty(properties, "connector.disableUploadTimeout", "true") ~ "\"");
+  auto acceptCount = engineProperty(properties, "connector.acceptCount");
+  if (acceptCount.length)
+    sb.put(" acceptCount=\"" ~ acceptCount ~ "\"");
+  auto maxConnections = engineProperty(properties, "connector.maxConnections");
+  if (maxConnections.length)
+    sb.put(" maxConnections=\"" ~ maxConnections ~ "\"");
+  auto connectionTimeout = engineProperty(properties, "connector.connectionTimeout");
+  if (connectionTimeout.length)
+    sb.put(" connectionTimeout=\"" ~ connectionTimeout ~ "\"");
   sb.put("/>\n");
   sb.put("    <Engine name=\"Catalina\" defaultHost=\"localhost\">\n");
   // deployOnStartup=false：只启动 server.xml 里这个 <Context>，不部署发行包自带的 webapps
@@ -792,6 +808,14 @@ string serverXml(string port, ContextSpec[] contexts, string major, string[] lis
   sb.put("  </Service>\n");
   sb.put("</Server>\n");
   return sb.data;
+}
+
+/** 取引擎属性（`--Dkey=value`）中 key 的值；未给出时返回 fallback。 */
+private string engineProperty(const EngineProperty[] properties, string key, string fallback = "") {
+  foreach (p; properties)
+    if (p.key == key)
+      return p.value;
+  return fallback;
 }
 
 /** 一个 `<Context>`：Loader 挂 DependencyClassLoader，`libs` 存在时作为 Loader 属性透传。 */
@@ -1055,27 +1079,31 @@ private int freePort() {
 }
 
 /**
- * `basctl make <tomcat-embed|undertow-embed|tomcat-dist> [协议参数...]`：
+ * `basctl make <tomcat-server|tomcat|undertow|jetty> [协议参数...]`：
  * 容器入口（creator），供 jstart 的 `[engine] init` 委托。
  */
 int runEngineCreator(string[] args) {
   if (args.length == 0) {
-    stderr.writeln("Usage: basctl make <tomcat-embed|undertow-embed|tomcat-dist> [options]");
+    stderr.writeln("Usage: basctl make <tomcat-server|tomcat|undertow|jetty> [options]");
     return 1;
   }
   auto type = args[0];
   auto o = parseEngineArgs(args[1 .. $]);
   try {
     switch (type) {
-    case "tomcat-embed":
+    case "tomcat":
       rejectMultiApp(type, o);
       createEmbed(o.mainClass.length ? o.mainClass : tomcatEmbedMain, o);
       return 0;
-    case "undertow-embed":
+    case "undertow":
       rejectMultiApp(type, o);
       createEmbed(o.mainClass.length ? o.mainClass : undertowEmbedMain, o);
       return 0;
-    case "tomcat-dist":
+    case "jetty":
+      rejectMultiApp(type, o);
+      createEmbed(o.mainClass.length ? o.mainClass : jettyEmbedMain, o);
+      return 0;
+    case "tomcat-server":
       if (isMultiApp(o))
         createDistMulti(o);
       else
@@ -1102,8 +1130,8 @@ bool isMultiApp(EngineOptions o) {
   return fileHere(buildPath(o.base, subappsPlanFile));
 }
 
-/** 嵌入式容器入口的容器 main 只接受单个 docBase，多应用交由 tomcat-dist。 */
+/** 嵌入式容器入口的容器 main 只接受单个 docBase，多应用交由 tomcat-server。 */
 private void rejectMultiApp(string type, EngineOptions o) {
   if (isMultiApp(o))
-    throw new Exception(type ~ " does not support multi-webapp; use tomcat-dist");
+    throw new Exception(type ~ " does not support multi-webapp; use tomcat-server");
 }

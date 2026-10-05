@@ -109,29 +109,29 @@
     <xs:attribute name="name" type="xs:string" use="required"/>
     <xs:attribute name="type" type="xs:string" use="required">
       <xs:annotation>
-        <xs:documentation>容器类型：tomcat / undertow。jetty / any 为保留值，basctl 暂不支持。</xs:documentation>
+        <xs:documentation>容器的运行形态，与 basctl 的 creator 同名：
+          tomcat-server（全量 Tomcat 发行包，多应用）/ tomcat / undertow / jetty（嵌入式单应用）。</xs:documentation>
       </xs:annotation>
     </xs:attribute>
     <xs:attribute name="version" type="xs:string" use="required">
       <xs:annotation>
-        <xs:documentation>容器版本：tomcat 为发行包版本，undertow 为 io.undertow.ee:undertow-servlet 版本。</xs:documentation>
+        <xs:documentation>容器版本：tomcat 为发行包版本，undertow 为 io.undertow.ee:undertow-servlet 版本，
+          jetty 为 org.eclipse.jetty.ee10:jetty-ee10-webapp 版本。</xs:documentation>
       </xs:annotation>
     </xs:attribute>
-    <xs:attribute name="mode" default="container">
+    <xs:attribute name="jsp-support" type="boolType">
       <xs:annotation>
-        <xs:documentation>container：跑全量发行包（多应用，仅 tomcat）；standalone：嵌入单应用（tomcat/undertow）。缺省 container。</xs:documentation>
+        <xs:documentation>仅 tomcat-server 生效（缺省 false）：开启时保留 jasper 并在
+          conf/web.xml 注册 JSP servlet；关闭时精简掉 jasper/ecj。嵌入式引擎固定屏蔽
+          Jasper SCI，本属性对它们无效果。</xs:documentation>
       </xs:annotation>
-      <xs:simpleType>
-        <xs:restriction base="xs:string">
-          <xs:enumeration value="container"/>
-          <xs:enumeration value="standalone"/>
-        </xs:restriction>
-      </xs:simpleType>
     </xs:attribute>
-    <xs:attribute name="jsp-support" type="boolType"/>
     <xs:attribute name="websocket-support" type="boolType">
       <xs:annotation>
-        <xs:documentation>由 bashub 生成；basctl 当前不消费。</xs:documentation>
+        <xs:documentation>是否引入 WebSocket 构件（缺省 true）。false 时 basctl 跳过
+          engines.ini 中 &lt;type&gt;.websocket 分节，不再下载 tomcat-embed-websocket /
+          undertow-websockets / jetty websocket 等依赖。tomcat-server 的 WebSocket 随
+          发行包提供，本属性对它无效果。</xs:documentation>
       </xs:annotation>
     </xs:attribute>
   </xs:complexType>
@@ -244,7 +244,10 @@
 
   <xs:complexType name="httpType">
     <xs:annotation>
-      <xs:documentation>HTTP Connector 参数；只覆盖显式给出的项。</xs:documentation>
+      <xs:documentation>HTTP Connector 参数，按项转成容器的 connector 调优：嵌入式的 tomcat/undertow/jetty
+读 --Dconnector.*，tomcat-server 渲染进 conf/server.xml 的 Connector。Tomcat 全部生效；Jetty 只用
+accept-count/connection-timeout；Undertow 只用 accept-count/connection-timeout，max-connections 忽略。
+未显式给出的项取 basctl 缺省（connection-timeout 缺省 60000，accept-count/max-connections 不下发）。</xs:documentation>
     </xs:annotation>
     <xs:attribute name="enable-lookups" type="boolType"/>
     <xs:attribute name="accept-count" type="xs:nonNegativeInteger"/>
@@ -252,7 +255,7 @@
     <xs:attribute name="disable-upload-timeout" type="boolType"/>
     <xs:attribute name="connection-timeout" type="xs:nonNegativeInteger">
       <xs:annotation>
-        <xs:documentation>毫秒；缺省 20000。</xs:documentation>
+        <xs:documentation>毫秒；缺省 60000。</xs:documentation>
       </xs:annotation>
     </xs:attribute>
   </xs:complexType>

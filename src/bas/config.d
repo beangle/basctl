@@ -47,20 +47,24 @@ class ServerXmlException : Exception {
   }
 }
 
-/** Tomcat / Undertow / Jetty 引擎类型常量。 */
-enum engineTomcat = "tomcat";
-enum engineUndertow = "undertow";
-enum engineJetty = "jetty";
-enum engineAny = "any";
+/**
+ * `<engine type>`：直接给出容器的运行形态，与 creator 名一一对应
+ * （`basctl make <type>` / `engines.ini` 分节同名）。
+ *
+ * `tomcat-server` 走全量发行包（多应用），`tomcat` / `undertow` / `jetty` 是嵌入式单应用。
+ */
+enum containerTypeTomcatServer = "tomcat-server";
+enum containerTypeTomcat = "tomcat";
+enum containerTypeUndertow = "undertow";
+enum containerTypeJetty = "jetty";
 
-/** `<engine mode>`：容器发行包（多应用）或嵌入式单应用。 */
-enum engineModeContainer = "container";
-enum engineModeStandalone = "standalone";
+/** 支持的引擎类型。`tomcat-server` 与 `tomcat` 是前缀关系，解析时按最长类型匹配。 */
+enum supportedEngineTypes = [containerTypeTomcatServer, containerTypeTomcat, containerTypeUndertow, containerTypeJetty];
 
-/** creator 类型常量（与 `bas.enginecreator.isContainerType` 一致）。 */
-enum containerTypeTomcatDist = "tomcat-dist";
-enum containerTypeTomcatEmbed = "tomcat-embed";
-enum containerTypeUndertowEmbed = "undertow-embed";
+/** 是否 tomcat 系（JSP/SCI 等 tomcat 专有处理只对它们生效）。 */
+bool isTomcatType(string typ) {
+  return typ == containerTypeTomcatServer || typ == containerTypeTomcat;
+}
 
 /** A `<listener>` under `<engine>`：类名加任意属性。 */
 class Listener {
@@ -134,11 +138,17 @@ private string baseNameOf(string path) {
 /** An engine definition from `<engines><engine>`. */
 class Engine {
   string name;
+  /** 运行形态：`tomcat-server` / `tomcat` / `undertow` / `jetty`，见 {@link supportedEngineTypes}。 */
   string typ;
-  /** 容器版本：tomcat 为发行包版本，undertow 为 undertow-servlet 版本。 */
+  /** 容器版本：tomcat 为发行包版本，undertow 为 undertow-servlet 版本，jetty 为 Jetty 版本。 */
   string version_;
-  /** `container`（发行包多应用）或 `standalone`（嵌入式单应用），缺省 `container`。 */
-  string mode = engineModeContainer;
+  /**
+   * 是否启用 WebSocket：缺省 `true`（保留 `engines.ini` 的完整默认集）。
+   * 显式 `false` 时 {@link resolveEngineDeps} 会跳过 `<engine type>.websocket` 分节，
+   * 不再引入 `tomcat-embed-websocket` / `undertow-websockets` / jetty websocket 等构件。
+   * `tomcat-server` 的 WebSocket 随发行包提供，本开关对它无效果。
+   */
+  bool websocketSupport = true;
   bool jspSupport;
   Listener[] listeners;
   Jar[] jars;
@@ -153,11 +163,6 @@ class Engine {
   override string toString() const {
     return name;
   }
-
-  /** 是否以嵌入式（单应用）方式运行。 */
-  bool standalone() const {
-    return mode == engineModeStandalone;
-  }
 }
 
 /**
@@ -168,6 +173,10 @@ class Engine {
  * {@link resolveEngineDeps} 从 `engines.ini` + `<engine><jar>` 计算，不在这里累加。
  */
 void applyEngineDefault(Container container, Engine engine) {
+  // 这些默认项（listener / Loader / JarScanner）都是 Tomcat 专有，仅 Tomcat 系需要
+  if (!isTomcatType(engine.typ))
+    return;
+
   if (!engine.listeners.length) {
     engine.listeners ~= new Listener("org.apache.catalina.core.JreMemoryLeakPreventionListener");
     engine.listeners ~= new Listener("org.apache.catalina.core.ThreadLocalLeakPreventionListener");
@@ -219,21 +228,15 @@ string[] engineDefaultDeps(string section) {
 }
 
 /**
- * 由引擎的 `type` 与 `mode` 推导 creator 类型。
- *
- * `container` + tomcat 走全量发行包（多应用），`standalone` + tomcat/undertow 走嵌入式
- * 单应用；undertow 没有发行包，只支持 `standalone`。其余组合抛 `ServerXmlException`。
+ * `<engine type>` 本身就是 creator 类型：校验为 {@link supportedEngineTypes} 之一后原样返回，
+ * 其余抛 `ServerXmlException`。
  */
 string containerTypeOf(Engine engine) {
-  if (engine.typ == engineTomcat)
-    return engine.standalone ? containerTypeTomcatEmbed : containerTypeTomcatDist;
-  if (engine.typ == engineUndertow) {
-    if (!engine.standalone)
-      throw new ServerXmlException("engine " ~ engine.name
-          ~ " (undertow) requires mode=\"" ~ engineModeStandalone ~ "\"");
-    return containerTypeUndertowEmbed;
-  }
-  throw new ServerXmlException("engine " ~ engine.name ~ " type " ~ engine.typ ~ " is not supported");
+  foreach (t; supportedEngineTypes)
+    if (engine.typ == t)
+      return t;
+  throw new ServerXmlException("engine " ~ engine.name ~ " type \"" ~ engine.typ
+      ~ "\" is not supported (expected " ~ supportedEngineTypes.join(", ") ~ ")");
 }
 
 /** `<engine><jar>` 归一化成 jstart `[engine]` 依赖行（gav 去掉前缀，其余原样）。 */
@@ -249,22 +252,31 @@ private string jarDepLine(Jar jar) {
  * 计算引擎依赖：`engines.ini` 的默认集（展开 `{version}` / `{bas}`）与
  * `<engine><jar>` 合并——GA 相同则就地覆盖（保持默认项顺序），否则追加；
  * url / 本地路径直接追加，重复项只保留一次。
+ *
+ * `engine.websocketSupport` 为 false 时跳过 `<containerType>.websocket` 分节，
+ * 从而剔除 `tomcat-embed-websocket` / `undertow-websockets` / jetty websocket 等构件。
  */
 string[] resolveEngineDeps(Container container, Engine engine, string containerType) {
   string[] deps;
   int[string] gaPos;
 
-  foreach (raw; engineDefaultDeps(containerType)) {
-    auto dep = raw.replace("{version}", engine.version_).replace("{bas}", container.version_);
-    auto ga = gaOf(dep);
-    if (ga.length && (ga in gaPos))
-      deps[gaPos[ga]] = dep;
-    else {
-      if (ga.length)
-        gaPos[ga] = cast(int) deps.length;
-      deps ~= dep;
+  void mergeDefaults(string[] raws) {
+    foreach (raw; raws) {
+      auto dep = raw.replace("{version}", engine.version_).replace("{bas}", container.version_);
+      auto ga = gaOf(dep);
+      if (ga.length && (ga in gaPos))
+        deps[gaPos[ga]] = dep;
+      else {
+        if (ga.length)
+          gaPos[ga] = cast(int) deps.length;
+        deps ~= dep;
+      }
     }
   }
+
+  mergeDefaults(engineDefaultDeps(containerType));
+  if (engine.websocketSupport)
+    mergeDefaults(engineDefaultDeps(containerType ~ ".websocket"));
 
   foreach (jar; engine.jars) {
     auto dep = jarDepLine(jar);
@@ -347,7 +359,7 @@ class HttpConnector {
   bool enableLookups;
   Nullable!int acceptCount;
   Nullable!int maxConnections;
-  int connectionTimeout = 20000;
+  int connectionTimeout = 60000;
   bool disableUploadTimeout = true;
 }
 
@@ -422,7 +434,7 @@ class Webapp {
 
   /** Tomcat SCI filter：禁用 JSP 时需要屏蔽 JasperInitializer。 */
   Nullable!string getContainerSciFilter(Engine engine) const {
-    if (engine.typ == engineTomcat && !jspSupport)
+    if (isTomcatType(engine.typ) && !jspSupport)
       return nullable("JasperInitializer");
     return Nullable!string.init;
   }
@@ -799,13 +811,10 @@ Engine parseEngine(XmlElem elem) {
       requireAttr(elem, "version", "<engine>"));
   auto jsp = optAttr(elem, "jsp-support");
   e.jspSupport = !jsp.isNull && jsp.get == "true";
-
-  auto mode = nonBlankAttr(elem, "mode");
-  if (!mode.isNull) {
-    enforce!ServerXmlException(mode.get == engineModeContainer || mode.get == engineModeStandalone,
-        format!"Invalid mode '%s' on <engine %s> (expected container or standalone)"(mode.get, e.name));
-    e.mode = mode.get;
-  }
+  // 缺省 true：不写该属性即保留 engines.ini 的完整默认集（含 websocket）
+  auto websocket = optAttr(elem, "websocket-support");
+  if (!websocket.isNull)
+    e.websocketSupport = websocket.get == "true";
 
   foreach (c; elementChildren(elem)) {
     switch (c.name) {

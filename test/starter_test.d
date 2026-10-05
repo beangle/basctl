@@ -32,20 +32,21 @@ import std.algorithm : canFind;
   assert(subappId("/portal", ["portal", "portal-2"]) == "portal-3");
 }
 
-@("standaloneWebappError restricts standalone engines to one webapp") unittest {
-  auto standalone = new Engine("tomcat", engineTomcat, "11.0.26");
-  standalone.mode = engineModeStandalone;
-  assert(standaloneWebappError(standalone, 1) == "");
-  auto err = standaloneWebappError(standalone, 3);
-  assert(err.canFind("single webapp"));
-  assert(err.canFind("use mode=\"container\""));
+@("standaloneWebappError restricts embed engines to one webapp") unittest {
+  assert(standaloneWebappError("tomcat", "tomcat", 1) == "");
+  assert(standaloneWebappError("undertow", "undertow", 1) == "");
+  assert(standaloneWebappError("jetty", "jetty", 1) == "");
 
-  auto container = new Engine("tomcat", engineTomcat, "11.0.26");
-  assert(standaloneWebappError(container, 3) == "");
+  auto err = standaloneWebappError("tomcat", "tomcat", 3);
+  assert(err.canFind("single webapp"));
+  assert(err.canFind("use type=\"tomcat-server\""));
+
+  // 发行包多应用不受限制
+  assert(standaloneWebappError("tomcat-server", "tomcat", 3) == "");
 }
 
 @("runtimeArgsFor adds bas defaults and farm options") unittest {
-  auto cfg = parseServerXml(`<bas version="1"><engines><engine name="tomcat" type="tomcat"
+  auto cfg = parseServerXml(`<bas version="1"><engines><engine name="tomcat" type="tomcat-server"
       version="11.0.18"/></engines><farms><farm name="f" engine="tomcat" max-heap-size="512M">
       <server-options>-Dems.profile=local
       --add-opens=java.base/java.lang=ALL-UNNAMED</server-options>
@@ -57,14 +58,49 @@ import std.algorithm : canFind;
   assert(args.canFind("-Dbas.server=f.s1"));
   assert(args.canFind("-Dems.profile=local"));
   assert(args.canFind("--add-opens=java.base/java.lang=ALL-UNNAMED"));
-  assert(appArgsFor(server) == ["--port=8080"]);
+  auto appArgs = appArgsFor(server);
+  assert(appArgs.canFind("--port=8080"));
+  assert(appArgs.canFind("--Dconnector.connectionTimeout=60000"));
+  assert(appArgs.canFind("--Dconnector.enableLookups=false"));
+  assert(appArgs.canFind("--Dconnector.disableUploadTimeout=true"));
+  // 未显式给出的项不下发，交给容器默认
+  assert(!appArgs.canFind("--Dconnector.acceptCount="));
+  assert(!appArgs.canFind("--Dconnector.maxConnections="));
+}
+
+@("appArgsFor maps <http> to connector engine properties") unittest {
+  auto cfg = parseServerXml(`<bas version="1"><engines><engine name="tomcat" type="tomcat"
+      version="11.0.18"/></engines><farms><farm name="f" engine="tomcat">
+      <http accept-count="200" max-connections="5000" connection-timeout="30000"
+        enable-lookups="true" disable-upload-timeout="false"/>
+      <server name="s1" http="8080"/></farm></farms>
+      <webapps><webapp uri="gav://g:a:1" run-at="f" path="/"/></webapps></bas>`);
+  auto args = appArgsFor(cfg.farms[0].servers[0]);
+  assert(args.canFind("--Dconnector.acceptCount=200"));
+  assert(args.canFind("--Dconnector.maxConnections=5000"));
+  assert(args.canFind("--Dconnector.connectionTimeout=30000"));
+  assert(args.canFind("--Dconnector.enableLookups=true"));
+  assert(args.canFind("--Dconnector.disableUploadTimeout=false"));
+}
+
+@("appArgsFor passes --jsp only for tomcat-server") unittest {
+  auto dist = parseServerXml(`<bas version="1"><engines><engine name="ts" type="tomcat-server"
+      version="11.0.18" jsp-support="true"/></engines>
+      <farms><farm name="f" engine="ts"><server name="s1" http="8080"/></farm></farms></bas>`);
+  assert(appArgsFor(dist.farms[0].servers[0]).canFind("--jsp=true"));
+
+  // 嵌入式引擎不支持 JSP：即使 server.xml 写了 jsp-support 也不下发 --jsp
+  auto embed = parseServerXml(`<bas version="1"><engines><engine name="te" type="tomcat"
+      version="11.0.18" jsp-support="true"/></engines>
+      <farms><farm name="f" engine="te"><server name="s1" http="8080"/></farm></farms></bas>`);
+  assert(!appArgsFor(embed.farms[0].servers[0]).canFind("--jsp"));
 }
 
 @("repoArgs passes release and snapshot repositories through to jstart") unittest {
   auto cfg = parseServerXml(`<bas version="0.13.16">
       <repository local="/m2" remote="http://r1,http://r2"/>
       <snapshot-repo remote="http://snap"/>
-      <engines><engine name="tomcat" type="tomcat" version="11.0.18"/></engines>
+      <engines><engine name="tomcat" type="tomcat-server" version="11.0.18"/></engines>
       <hosts><host name="local" ip="127.0.0.1"/></hosts>
       <farms><farm name="f" engine="tomcat"><server name="s" http="8080"/></farm></farms>
       <webapps><webapp uri="gav://g:a:1" run-at="f" path="/"/></webapps></bas>`);
@@ -75,7 +111,7 @@ import std.algorithm : canFind;
 @("repoArgs falls back to the snapshot local and omits empty repositories") unittest {
   auto cfg = parseServerXml(`<bas version="0.13.16">
       <snapshot-repo local="/m2snap"/>
-      <engines><engine name="tomcat" type="tomcat" version="11.0.18"/></engines>
+      <engines><engine name="tomcat" type="tomcat-server" version="11.0.18"/></engines>
       <hosts><host name="local" ip="127.0.0.1"/></hosts>
       <farms><farm name="f" engine="tomcat"><server name="s" http="8080"/></farm></farms>
       <webapps><webapp uri="gav://g:a:1" run-at="f" path="/"/></webapps></bas>`);

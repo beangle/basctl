@@ -9,14 +9,54 @@
 ```sh
 basctl run --engine=tomcat-11.0.25  /repo/app.war
 basctl run --engine=undertow-2.0.3.Final  org.beangle:app:1.0 --port=8080 --path=/app
+basctl run --engine=jetty-12.0.30  /repo/app.war
 basctl run --engine=tomcat-11.0.25 --print app.war   # 只写 spec 并打印 jstart 命令
 ```
+
+## 本地开发态运行
+
+`basctl` 与 `jstart` 是两个独立仓库，开发态不在 `PATH` 上，跑 `run` 前需要三步。
+
+1. 构建两个可执行文件：
+
+```sh
+cd basctl          && dub build --build=release-nobounds --compiler=ldc2   # target/basctl
+cd ../jstart       && dub build --build=release            --compiler=ldc2   # target/jstart
+```
+
+   jstart 请带 `--build=release` 重建：unittest 配置与 application 配置共用 `target/jstart`，
+   用 `dub test` / `--build=unittest` 构建过之后不重建，执行时会先跑一遍单测。
+
+2. 把 bas 引擎装进本地 Maven 仓库（`run` 的 `[engine]` 依赖从这里取）：
+
+```sh
+cd bas && sbt 'engine/publishM2'          # beangle-bas-engine:<bas>
+cd bas && sbt 'juli/publishM2'            # 仅 --engine=tomcat-server-<ver> 需要
+```
+
+3. 用环境变量把两个开发态二进制接上，再跑 `run`：
+
+```sh
+export bas_jstart=$HOME/workspace/beangle/jstart/target/jstart
+export bas_basctl=$HOME/workspace/beangle/basctl/target/basctl
+
+basctl run --engine=tomcat-11.0.26 --port=8080 /repo/app.war
+```
+
+- `bas_jstart`：jstart 可执行文件路径，缺省按 `PATH` 找 `jstart`（见 `src/bas/jstart.d`）。
+  开发态没装到 `PATH`，**必须**显式指定（或写 `PATH=$(dirname ...):$PATH`）。
+- `bas_basctl`：写进 spec 的 `[engine] init` 命令行，缺省依次取 `/proc/self/exe`、`basctl`
+  （见 `src/bas/spec.d`）。直接调用 `target/basctl` 时 `/proc/self/exe` 已指向它，通常不设也
+  可以；显式设一份更稳。
+- `M2_REPO` / `M2_REMOTE_REPO` 都不是必须的：jstart 的本地仓库缺省就是 `~/.m2/repository`；
+  缺件由 jstart 按内置上游（aliyun 等）下载，纯离线时加 `--offline`。
+- `--print` 只写 spec 并打印 `jstart` 命令行，**不**执行 jstart，适合先确认依赖集。
 
 ## 参数
 
 | 参数 | 说明 |
 |---|---|
-| `--engine=<type>-<version>` | **必填**；容器类型（`tomcat` / `undertow`）与版本，如 `tomcat-11.0.25`。决定 creator（`make tomcat-embed` / `make undertow-embed`）与依赖集 |
+| `--engine=<type>-<version>` | **必填**；容器类型（`tomcat` / `undertow` / `jetty` / `tomcat-server`）与版本，如 `tomcat-11.0.25`。creator 与依赖集都按这个 type 取（同名 `make <type>`） |
 | `--bas=<version>` | `beangle-bas-engine` 版本，缺省为 basctl 内置的 `defaultBasVersion`（见 `src/bas/embed.d`） |
 | `--base=<dir>` / `--instance=<name>` | 组件根与目录名（缺省 `/tmp` / `bas`），jstart 组件目录 = `<base>/<instance>` |
 | `--workdir=<dir>` | 工作目录（缺省当前目录），写进 spec 的 `[app] working_dir` |
@@ -29,7 +69,7 @@ basctl run --engine=tomcat-11.0.25 --print app.war   # 只写 spec 并打印 jst
 
 ## 版本
 
-- **容器版本**来自 `--engine`（`tomcat-11.0.25` / `undertow-2.0.3.Final`），显式给出、无内置漂移；
+- **容器版本**来自 `--engine`（`tomcat-11.0.25` / `undertow-2.0.3.Final` / `jetty-12.0.30`），显式给出、无内置漂移；
 - **bas 引擎版本**取 basctl 的默认值 `defaultBasVersion`，可用 `--bas=` 覆盖。这只是 `run`
   的便捷默认；`conf/server.xml` 的多实例部署一律以 `<bas version>` 为准。
 
@@ -45,23 +85,26 @@ instance = bas
 working_dir = /home/me
 
 [engine]
-init = '/opt/basctl' make tomcat-embed
-org.apache.tomcat.embed:tomcat-embed-core:11.0.25         # engines.ini [tomcat-embed]
+init = '/opt/basctl' make tomcat
+org.apache.tomcat.embed:tomcat-embed-core:11.0.25         # engines.ini [tomcat]
 org.apache.tomcat.embed:tomcat-embed-websocket:11.0.25
 org.beangle.bas:beangle-bas-engine:0.14.0                 # {bas} = --bas / 默认值
 ```
 
 `[engine]` 的依赖来自 [resources/engines.ini](../resources/engines.ini) 中该容器类型的分节
-（`{version}` ← `--engine` 的版本，`{bas}` ← `--bas`）。`tomcat-embed` **不含 juli**：嵌入式
+（`{version}` ← `--engine` 的版本，`{bas}` ← `--bas`）。`tomcat` **不含 juli**：嵌入式
 容器的日志由应用自己承接（`tomcat-embed-core` 自带 JULI 的 `LogFactory`）。`undertow-*`
 按 `{version}`（`io.undertow.ee:undertow-servlet`）逐条列出容器传递依赖。
+`jetty` 同理由 `{version}`（`org.eclipse.jetty.ee10:jetty-ee10-webapp`）逐条列出 Jetty 传递依赖，
+并含 `org.slf4j:slf4j-api`——Jetty 的 `AbstractLifeCycle` 直接依赖它且无 JUL 回退，是容器硬依赖；
+logback 等 provider 与 CDI 相关 API 仍按需由应用自带。
 
 ## 与 `start` 的关系
 
 `run` 是单应用、前台的便捷入口；等价的持久化做法是在 `conf/server.xml` 里声明
-`<engine mode="standalone">` 并部署一个 webapp，再 `basctl start`（见
-[docs/start.md](start.md)）。两者共用同一套 spec 渲染、`make <type>` creator 回调与
-`engines.ini` 依赖集，区别只是输入来源（`--engine` vs. `<engine>`）与是否后台。
+`<engine type="tomcat">`（或 `undertow` / `jetty`）并部署一个 webapp，再 `basctl start`
+（见 [docs/start.md](start.md)）。两者共用同一套 spec 渲染、同名 `make <type>` creator 回调
+与 `engines.ini` 依赖集，区别只是输入来源（`--engine` vs. `<engine>`）与是否后台。
 
-只有一个 webapp 时也可用 `mode="container"` 的 `tomcat-dist`；`run` 固定走 embed，因为它的
-目的就是不起发行包、快速跑一个 war。
+`--engine` 也接受 `tomcat-server-<version>`，但那条路径仍会解压全量发行包；要快速起一个
+war，用嵌入式的 `tomcat` / `undertow` / `jetty`。

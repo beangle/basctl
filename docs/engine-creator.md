@@ -14,9 +14,13 @@
 | 原 Java 入口 | basctl 命令 |
 |---|---|
 | `org.beangle.bas.engine.EngineCreator`（公共解析/解压/argv） | `bas.enginecreator` 的公共函数 |
-| `org.beangle.bas.engine.tomcat.EmbedCreator` | `basctl make tomcat-embed` |
-| `org.beangle.bas.engine.undertow.EmbedCreator` | `basctl make undertow-embed` |
-| `org.beangle.bas.engine.tomcat.ServerCreator` | `basctl make tomcat-dist` |
+| `org.beangle.bas.engine.tomcat.EmbedCreator` | `basctl make tomcat` |
+| `org.beangle.bas.engine.undertow.EmbedCreator` | `basctl make undertow` |
+| `org.beangle.bas.engine.tomcat.ServerCreator` | `basctl make tomcat-server` |
+
+creator 只写启动命令，容器运行时入口仍在 Java 侧：`tomcat` / `undertow` / `jetty` 分别是
+`org.beangle.bas.engine.{tomcat,undertow,jetty}.Bootstrap`，`tomcat-server` 是
+`org.apache.catalina.startup.Bootstrap`。
 
 ## jstart 协议
 
@@ -31,11 +35,11 @@
 - `--base`：组件 base（pid、`webapps/`、`engines/` 都在其下），jstart 必传；
 - `--entry`：war 文件或已解压 webapp 目录；
 - `--engine-classpath-file`：jstart 写出的引擎依赖 classpath 文件（避免命令行过长）；
-  `tomcat-dist` 据此找发行包 zip，并把引擎 jar 复制进 `lib/`（提供 juli 实现的
+  `tomcat-server` 据此找发行包 zip，并把引擎 jar 复制进 `lib/`（提供 juli 实现的
   `beangle-bas-juli` 除外——它放 Catalina 系统 classpath 并顶替 `bin/tomcat-juli.jar`；
-  只有 `tomcat-dist` 需要 juli，`*-embed` 的日志由应用自带）；
+  只有 `tomcat-server` 需要 juli，`*-embed` 的日志由应用自带）；
 - `--app-classpath-file`：jstart 写出的应用依赖 classpath 文件，**只在单应用模式出现**
-  （`*-embed`，以及 `[app] entry` 的单应用 `tomcat-dist`）；入口把它和解压后的
+  （`*-embed`，以及 `[app] entry` 的单应用 `tomcat-server`）；入口把它和解压后的
   `WEB-INF` 一起拼进最终 classpath；
 - **多应用（`[subapp <id>]`）没有 `--app-classpath-file`**：jstart 既不写
   `<base>/engine-app.classpath` 也不传该参数，应用依赖不进 JVM classpath，由各
@@ -60,7 +64,7 @@
 entry = org.beangle.otk:beangle-otk-ws:war:0.0.29
 
 [engine]
-init = basctl make tomcat-embed       # 路径含空格时写 '/opt/my dir/basctl' make tomcat-embed
+init = basctl make tomcat             # 路径含空格时写 '/opt/my dir/basctl' make tomcat
 # init 之外的行是引擎 jar 清单（同 [libs] 语法）；jstart 解析后写成
 # <base>/engine-deps.classpath，并以 --engine-classpath-file= 交给 creator
 org.apache.tomcat.embed:tomcat-embed-core:11.0.26
@@ -82,6 +86,15 @@ classpath 上。
 `<engine>` 里写 `<jar uri="gav://ch.qos.logback:logback-core:1.6.3"/>` 可给 embed 容器
 补上应用日志实现。手工写 spec 时把合并结果原样列出即可。
 
+两个开关属性（`tomcat-server` 之外的 embed 引擎也能写）：
+
+- `websocket-support`（缺省 `true`）：`false` 时跳过 `engines.ini` 里的
+  `<type>.websocket` 补充集，不再引入 `tomcat-embed-websocket` /
+  `undertow-websockets` / `jetty-ee10-websocket-*` 等构件。`tomcat-server` 的
+  WebSocket 随发行包提供，该属性对它无效果。
+- `jsp-support`（缺省 `false`）：仅 `tomcat-server` 消费——控制精简 jasper/ecj
+  与 `conf/web.xml` 里的 JSP servlet；嵌入式引擎固定屏蔽 Jasper SCI，写它无效果。
+
 ### 运行与确认
 
 ```sh
@@ -89,9 +102,8 @@ jstart run app.jstart            # 运行：init 准备环境 → jstart exec �
 jstart run --print app.jstart    # 只打印最终启动命令，不 exec
 ```
 
-`basctl start` 会自动按 `server.xml` 生成 spec（`[engine] init` 按 `<engine mode>` 写成
-当前 basctl 的 `make tomcat-dist` / `make tomcat-embed` / `make undertow-embed`，可用
-`bas_basctl` 覆盖路径），再委托 `jstart run`。
+`basctl start` 会自动按 `server.xml` 生成 spec（`[engine] init` 按 `<engine type>` 写成
+当前 basctl 的同名 `make <type>`，可用 `bas_basctl` 覆盖路径），再委托 `jstart run`。
 
 ### 必要参数
 
@@ -108,18 +120,22 @@ jstart 单 webapp 时按此调用（多 webapp 见《多 webapp》一节，没�
 | `--base=<dir>` | 是 | jstart | 组件 base（`webapps/`、`engines/`、pid 都在其下）；creator 转成 `-Dbas.home=` |
 | `--entry=<war\|dir>` | 单应用必填 | jstart | war 文件或已解压目录；多 webapp 不传 |
 | `--entry-out=<file>` | 是 | jstart | 最终 argv（NUL 分隔）的写出文件，jstart 读到后 exec |
-| `--engine-classpath-file=<file>` | 是 | jstart | 引擎 jar 清单（`[engine]` 段除 init 外）的解析结果；`tomcat-dist` 也用它找发行包 zip、把 jar 复制进 `lib/` |
+| `--engine-classpath-file=<file>` | 是 | jstart | 引擎 jar 清单（`[engine]` 段除 init 外）的解析结果；`tomcat-server` 也用它找发行包 zip、把 jar 复制进 `lib/` |
 | `--app-classpath-file=<file>` | 单应用有 | jstart | 应用依赖 classpath，与 `WEB-INF` 一起拼进最终 classpath |
 | `--local-repo=<dir>` | 否 | jstart | 本地仓库，creator 转成 `-Dbas.repo=` |
 | `--app-jvm-arg=<opt>` | 否（可重复） | jstart | `[runtime]` 与 `-D`/`-X` 参数，进最终命令的 JVM 位置 |
 | `--port=` `--path=` `--jsp=` `--listener=` `--docBase=` `--Dk=v` 及其它 | 否 | spec `[args]` / 命令行透传 | 容器参数，由 creator 消费或转发 |
-| `--dist=<tomcat.zip>` | 否 | spec `[args]` | `tomcat-dist` 的发行包；缺省取引擎 classpath 上第一个 `.zip` |
+| `--dist=<tomcat.zip>` | 否 | spec `[args]` | `tomcat-server` 的发行包；缺省取引擎 classpath 上第一个 `.zip` |
 | `--main=<class>` | 否 | spec `[args]` | 覆盖容器入口类 |
 
 ### 示例
 
-**单 webapp · 嵌入式 tomcat**：`init = basctl make tomcat-embed`，`[engine]` 列
-`tomcat-embed-*`；`--path=/` → docBase `<base>/webapps/ROOT`。
+**单 webapp · 嵌入式 tomcat**：`init = basctl make tomcat`，`[engine]` 列
+`tomcat-embed-core` / `tomcat-embed-websocket`；`--path=/` → docBase `<base>/webapps/ROOT`。
+
+**单 webapp · 嵌入式 jetty**：`init = basctl make jetty`，`[engine]` 列
+`org.eclipse.jetty.ee10:*:{version}`（ee10 = Servlet 6/Jakarta）与
+`beangle-bas-engine`；docBase 布局与 tomcat 一致。
 
 **单 webapp · 全量 tomcat 发行包**：
 
@@ -128,7 +144,7 @@ jstart 单 webapp 时按此调用（多 webapp 见《多 webapp》一节，没�
 entry = /repo/…/app.war
 
 [engine]
-init = basctl make tomcat-dist
+init = basctl make tomcat-server
 org.apache.tomcat:tomcat:zip:11.0.26          # 发行包（creator 取 classpath 上的 .zip）
 org.beangle.bas:beangle-bas-engine:0.14.0
 org.beangle.bas:beangle-bas-juli:0.14.0       # 容器日志桥接（dist 专用）
@@ -139,14 +155,14 @@ org.beangle.bas:beangle-bas-juli:0.14.0       # 容器日志桥接（dist 专用
 --jsp=false
 ```
 
-**多 webapp · 全量 tomcat 发行包**（仍是 `make tomcat-dist`；jstart 不写 `--entry`）：
+**多 webapp · 全量 tomcat 发行包**（仍是 `make tomcat-server`；jstart 不写 `--entry`）：
 
 ```ini
 [app]
 base = /opt/bas/servers/platform.server1
 
 [engine]
-init = basctl make tomcat-dist
+init = basctl make tomcat-server
 org.apache.tomcat:tomcat:zip:11.0.26
 org.beangle.bas:beangle-bas-engine:0.14.0
 org.beangle.bas:beangle-bas-juli:0.14.0
@@ -170,7 +186,7 @@ libs = org.postgresql:postgresql:42.7.9
 **手工调试**（直接按协议调用 creator，看它写出什么）：
 
 ```sh
-basctl make tomcat-embed \
+basctl make tomcat \
   --base=/opt/bas/servers/platform.server1 \
   --entry=/repo/org/beangle/otk/beangle-otk-ws/0.0.29/beangle-otk-ws-0.0.29.war \
   --engine-classpath-file=/opt/bas/servers/platform.server1/engine-deps.classpath \
@@ -186,12 +202,13 @@ sed 's/\x00/\n/g' /tmp/entry.argv     # 查看写出的最终启动命令
 
 | 类型 | 容器来源 | 最终命令 |
 |---|---|---|
-| `tomcat-embed` | spec 里的 `tomcat-embed-*` jar | `java ... -cp <引擎+应用+WEB-INF> org.beangle.bas.engine.tomcat.Bootstrap --base= --docBase= ...` |
-| `undertow-embed` | spec 里的 `undertow-*` jar | 同构，容器入口为 `org.beangle.bas.engine.undertow.Bootstrap` |
-| `tomcat-dist` | `--dist=<tomcat.zip>` 或引擎 classpath 上的 `.zip` | `java ... -Dcatalina.base=... -cp <bin/bootstrap.jar[:juli]> org.apache.catalina.startup.Bootstrap start` |
+| `tomcat` | spec 里的 `tomcat-embed-core` / `tomcat-embed-websocket` jar | `java ... -cp <引擎+应用+WEB-INF> org.beangle.bas.engine.tomcat.Bootstrap --base= --docBase= ...` |
+| `undertow` | spec 里的 `undertow-*` jar | 同构，容器入口为 `org.beangle.bas.engine.undertow.Bootstrap` |
+| `jetty` | spec 里的 `org.eclipse.jetty.ee10:*` jar | 同构，容器入口为 `org.beangle.bas.engine.jetty.Bootstrap` |
+| `tomcat-server` | `--dist=<tomcat.zip>` 或引擎 classpath 上的 `.zip` | `java ... -Dcatalina.base=... -cp <bin/bootstrap.jar[:juli]> org.apache.catalina.startup.Bootstrap start` |
 
-- 嵌入式模式（`*-embed`）一个实例跑一个 webapp；容器入口类可用 `--main=` 覆盖。
-- `tomcat-dist` 解压并**精简**发行包到 `<base>/engines/`（`.dist` 记录 zip 名 + 精简规则，
+- 嵌入式模式（`tomcat` / `undertow` / `jetty`）一个实例跑一个 webapp；容器入口类可用 `--main=` 覆盖。
+- `tomcat-server` 解压并**精简**发行包到 `<base>/engines/`（`.dist` 记录 zip 名 + 精简规则，
   未变则复用），把引擎 jar 复制进 `lib/`（`beangle-bas-juli` 除外：它上系统 classpath 并
   让发行包自带的 `bin/tomcat-juli.jar` 被删），生成
   `conf/{catalina.properties,web.xml,server.xml}`，再输出标准 catalina 启动命令。
@@ -200,7 +217,7 @@ sed 's/\x00/\n/g' /tmp/entry.argv     # 查看写出的最终启动命令
 
 ## 多 webapp（`[subapp <id>]`）
 
-一个 `tomcat-dist` 引擎可在同一 JVM 里部署多个 webapp（每个一个 `<Context>`）。此时 jstart
+一个 `tomcat-server` 引擎可在同一 JVM 里部署多个 webapp（每个一个 `<Context>`）。此时 jstart
 不传 `--entry`/`--path`/`--app-classpath-file`，而是把每个 webapp 写进 `--base` 下的约定文件
 `engine-subapps.jstart`（launch spec 片段，一段一个 `[subapp <id>]`）——因此多应用下
 **没有** `<base>/engine-app.classpath`，应用依赖全部交给各 Context 的 `DependencyClassLoader`：
@@ -234,7 +251,7 @@ path = /admin
   只用 `<bin/bootstrap.jar>`），各 webapp 的依赖互不干扰；
 - `[subapp]` 的 id、归一化后的 context path 与 docBase 目录名都必须唯一（`/a/b` 与
   `/a#b` 的 context path 不同，docBase 却是同一个 `webapps/a#b`），否则入口报错；
-- 只有 `tomcat-dist` 支持多应用；`tomcat-embed`/`undertow-embed` 的容器 main 只接受单个
+- 只有 `tomcat-server` 支持多应用；`tomcat` / `undertow` / `jetty` 的容器 main 只接受单个
   `--docBase`，遇到多应用直接报错。
 
 ## docBase 布局（归入口负责）

@@ -21,16 +21,38 @@ import bas.net;
 
 import std.algorithm : sort;
 import std.array : join;
-import std.conv : text;
+import std.string : chomp;
 
-/** basctl 的 logo。 */
-string logo(string version_) {
-  return text(
-i` ____    __    ___
+/**
+ * bas 的标志：纯 ASCII，任何字符集的终端都能显示（与 bas 引擎的 `BasVersion.ASCII_LOGO` 同一份）。
+ * 图形各行的行尾空白已去掉，避免被 editorconfig 的 trim_trailing_whitespace 破坏；
+ * 用 token string 原样存放，收尾换行由 chomp 去掉。
+ */
+string asciiLogo() {
+  return q"BAS
+ ____    __    ___
 (  _ \  /__\  / __)
  ) _ < /(__)\ \__ \
 (____/(__)(__)(___/
-version $(version_)`);
+BAS".chomp;
+}
+
+/**
+ * stdout 是否交互终端：是则在横幅里打图形，不是（重定向到日志 / 管道 / CI）只留文字。
+ * POSIX 用 isatty(1)，Windows 用 GetConsoleMode，不关心字符集（图形是纯 ASCII）。
+ */
+bool showArt() @trusted {
+  version (Windows) {
+    import core.sys.windows.winbase : GetStdHandle, STD_OUTPUT_HANDLE;
+    import core.sys.windows.wincon : GetConsoleMode;
+
+    uint mode;
+    return GetConsoleMode(GetStdHandle(STD_OUTPUT_HANDLE), &mode) != 0;
+  } else {
+    import core.sys.posix.unistd : isatty;
+
+    return isatty(1) != 0;
+  }
 }
 
 /** 所有本机地址，排序后以逗号连接。 */
@@ -38,4 +60,21 @@ string hostsLine() {
   auto addresses = localAddresses();
   addresses.sort();
   return "hosts:" ~ addresses.join(",");
+}
+
+/**
+ * 操作者横幅：图形 + 版本行 + 本机地址。`bas.sh version` 与 `basctl status` 都用它，
+ * 图形只在交互终端出现（见 {@link showArt}），重定向到日志时退化为纯文字。
+ *
+ * `basVersion` 是 `conf/server.xml` 的 `<bas version>`（bas 引擎版本）；为空表示拿不到
+ * server.xml，此时只显示 basctl 自身的版本，避免把 basctl 的版本误当成 bas 引擎版本。
+ */
+string banner(string basctlVersion, string basVersion, bool art = showArt()) {
+  auto versions = basVersion.length
+    ? "bas " ~ basVersion ~ "   basctl " ~ basctlVersion
+    : "basctl " ~ basctlVersion;
+  auto hostLine = hostsLine();
+  return art
+    ? asciiLogo() ~ "\n" ~ versions ~ "\n" ~ hostLine
+    : versions ~ "\n" ~ hostLine;
 }

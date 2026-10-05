@@ -20,9 +20,40 @@ module test.banner_test;
 import bas.banner;
 
 import std.algorithm : canFind;
+import std.array : split;
+import std.string : endsWith, stripRight;
 
-@("logo renders bas and version") unittest {
-  assert(logo("1.2.3").length > 1);
-  assert(logo("1.2.3").canFind("(  _ \\"));
-  assert(logo("1.2.3").canFind("version 1.2.3"));
+@("asciiLogo renders the bas figure in pure ASCII") unittest {
+  auto art = asciiLogo();
+  assert(art.canFind("(  _ \\"), "should read bas, not sas");
+  assert(art.endsWith("(__)(__)(___/"));
+  // 纯图形，尾部不带换行，版本行由 banner 拼接；每行不留行尾空白
+  auto lines = art.split('\n');
+  assert(lines.length == 4);
+  foreach (line; lines) {
+    assert(line == line.stripRight);
+    foreach (ch; line)
+      assert(ch < 128, "logo must stay in ASCII");
+  }
+}
+
+@("banner shows both versions and hosts") unittest {
+  auto text = banner("0.0.1", "0.14.0", false);
+  assert(text.canFind("bas 0.14.0"));
+  assert(text.canFind("basctl 0.0.1"));
+  assert(text.canFind("hosts:"));
+  // 重定向时第一行就是版本行，便于日志里 grep
+  assert(text.split('\n')[0].canFind("bas 0.14.0"));
+}
+
+@("banner without server.xml only shows basctl") unittest {
+  auto text = banner("0.0.1", "", false);
+  assert(text.canFind("basctl 0.0.1"));
+  assert(!text.canFind("bas 0.14.0"));
+}
+
+@("banner prints the logo on an interactive terminal") unittest {
+  auto text = banner("0.0.1", "0.14.0", true);
+  assert(text.canFind("(____/"));
+  assert(text.canFind("basctl 0.0.1"));
 }

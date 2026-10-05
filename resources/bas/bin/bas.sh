@@ -19,7 +19,7 @@ conf="$BAS_HOME/conf/server.xml"
 usage() {
   echo "Usage: bas.sh <command> [args]"
   echo "commands:"
-  echo "  version     Show version and local hosts         (basctl version)"
+  echo "  version     Show logo, versions and local hosts  (basctl banner)"
   echo "  status      Show running servers                 (basctl status)"
   echo "  resolve     Resolve webapp deps only, no start   (basctl resolve <farm|server|all>)"
   echo "  start       Start instances via jstart           (basctl start <farm|server|all>)"
@@ -32,7 +32,7 @@ usage() {
 
 cmd="${1:-status}"
 case "$cmd" in
-  version)  exec "$basctl_cmd" version ;;
+  version)  exec "$basctl_cmd" banner "$conf" ;;
   status)   exec "$basctl_cmd" status ;;
   resolve)  exec "$basctl_cmd" resolve "$conf" "${@:2}" ;;
   start)    exec "$BAS_HOME/bin/start.sh" "${@:2}" ;;

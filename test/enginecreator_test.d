@@ -215,3 +215,17 @@ import std.zip : ArchiveMember, CompressionMethod, ZipArchive;
   assert(xml.canFind(`libs="a:b:1"`));
   assert(xml.canFind(`useVirtualThreads="true"`));
 }
+
+@("serverXml renders connector attributes from <http> engine properties") unittest {
+  auto xml = serverXml("8080", [ContextSpec("/portal", "/b/webapps/portal", "")], "11", [],
+      [EngineProperty("connector.acceptCount", "200"),
+       EngineProperty("connector.maxConnections", "5000"),
+       EngineProperty("connector.connectionTimeout", "30000"),
+       EngineProperty("connector.enableLookups", "true"),
+       EngineProperty("connector.disableUploadTimeout", "false")]);
+  assert(xml.canFind(`acceptCount="200"`));
+  assert(xml.canFind(`maxConnections="5000"`));
+  assert(xml.canFind(`connectionTimeout="30000"`));
+  assert(xml.canFind(`enableLookups="true"`));
+  assert(xml.canFind(`disableUploadTimeout="false"`));
+}

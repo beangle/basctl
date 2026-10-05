@@ -11,7 +11,7 @@ basctl start all
 ```
 
 单应用、不起 `conf/server.xml` 的快速运行用 [`basctl run`](run.md)：一个
-`--engine=<type>-<version>` 参数即等价于这里的 `mode="standalone"`。
+`--engine=<type>-<version>` 参数即等价于这里的嵌入式引擎（`tomcat` / `undertow` / `jetty`）。
 
 ## 流程
 
@@ -20,13 +20,12 @@ basctl start all
 2. **解析 webapp**：沿用 `make` / `resolve` 的语义（`gav://`、http(s) 直链、本地路径、
    SNAPSHOT 本地覆盖）；失败写 `servers/<farm.server>/error` 并跳过该实例；
 3. **生成 spec**：`conf/<farm.server>.jstart`——一个 `<server>` 一份 spec（一个 JVM），
-   并按引擎的 `type` / `mode` 把 `[engine] init` 写成对应 creator 的 `make` 命令行
-   （`mode="container"` → `make tomcat-dist`；`mode="standalone"` → `make tomcat-embed` /
-   `make undertow-embed`）；
+   并按 `<engine type>` 把 `[engine] init` 写成对应 creator 的 `make <type>` 命令行
+   （`tomcat-server` / `tomcat` / `undertow` / `jetty`，与 type 同名）；
 4. **`jstart resolve <spec>`**：校验 spec 与各 webapp 的依赖齐备，失败即不启动该实例；
 5. **后台 `jstart run <spec>`**：jstart 先运行 `[engine] init` → creator 准备容器环境
-   （`container`：解压并裁剪 Tomcat、逐 webapp 解压 docBase、生成容器 `server.xml`；
-   `standalone`：解压单个 webapp 并拼出内嵌容器启动命令）并写出最终启动命令，jstart
+   （`tomcat-server`：解压并裁剪 Tomcat、逐 webapp 解压 docBase、生成容器 `server.xml`；
+   嵌入式：解压单个 webapp 并拼出内嵌容器启动命令）并写出最终启动命令，jstart
    再 exec 它（进程变为容器）。
 
 启动后写 `servers/<farm.server>/SERVER_PID`，控制台输出进
@@ -52,7 +51,7 @@ instance = platform.server1                  # 组件目录名 → jstart 实例
 working_dir = /opt/bas
 
 [engine]
-init = basctl make tomcat-dist              # 当前 basctl（可用 bas_basctl 覆盖路径）
+init = basctl make tomcat-server              # 当前 basctl（可用 bas_basctl 覆盖路径）
 org.apache.tomcat:tomcat:zip:11.0.26         # 发行包（creator 取 classpath 上的 zip 解压）
 org.beangle.bas:beangle-bas-engine:0.14.0    # 引擎 jar（会被装进 dist 的 lib/）
 org.beangle.bas:beangle-bas-juli:0.14.0      # 容器日志桥接（放 Catalina 系统 classpath，不进 lib/）
@@ -68,6 +67,11 @@ org.postgresql:postgresql:42.7.9             # <engine><jar> 追加（GA 不冲�
 
 [args]
 --port=8081                                  # <server http="8081">
+--Dconnector.enableLookups=false             # <farm><http enable-lookups>
+--Dconnector.disableUploadTimeout=true       # <farm><http disable-upload-timeout>
+--Dconnector.connectionTimeout=60000         # <farm><http connection-timeout>
+--Dconnector.acceptCount=200                 # <farm><http accept-count>，未给出则不下发
+--Dconnector.maxConnections=5000             # <farm><http max-connections>，未给出则不下发
 
 [subapp cas]
 entry = /repo/org/beangle/ems/beangle-ems-cas_3/4.8.8/beangle-ems-cas_3-4.8.8.war
@@ -83,23 +87,27 @@ libs = org.postgresql:postgresql:42.7.9      # <webapp libs="...">
   `[subapp <id>]`（id 由 context path 推导），各自 docBase 与 `libs`，**依赖互不串味**：
   每个 Context 用自己的 `DependencyClassLoader`，应用依赖不进 JVM classpath；
 - `[engine]` 的依赖来自 `engines.ini` 中该容器类型的默认集（`{version}` / `{bas}` 展开）
-  与 `<engine><jar>` 的合并结果：GA 相同覆盖，否则追加；`container` 的发行包来自
+  与 `<engine><jar>` 的合并结果：GA 相同覆盖，否则追加；`tomcat-server` 的发行包来自
   `[engine]` 里的 `.zip`，其余 jar 复制进 `lib/`。例外是 `beangle-bas-juli`——它被放到
   Catalina 的**系统 classpath**（Catalina `Bootstrap` 静态初始化就要用
   `org.apache.juli.logging.LogFactory`）并顶替发行包自带的 `bin/tomcat-juli.jar`；
 - `[engine]` 里除发行包外的 gav 在生成阶段就用 `jstart fetch` 校验本地齐备，缺失即失败，
   不必等到启动阶段；
-- `mode="container"` 下，只有一个 webapp 时同样生成 `[subapp]`——统一走「一个引擎多
+- `tomcat-server` 下，只有一个 webapp 时同样生成 `[subapp]`——统一走「一个引擎多
   Context」的路径，与 bas「一个 server 一个 JVM」的语义一致（也让单应用与多应用共用
-  同一套依赖隔离）。`mode="standalone"` 走嵌入式路径：该 server 必须只部署一个 webapp，
-  spec 用单应用 `[app] entry`，由 `make tomcat-embed`（tomcat）或 `make undertow-embed`
-  （undertow）解压并启动；前者不需要 juli，日志由应用自带。
+  同一套依赖隔离）。`tomcat` / `undertow` / `jetty` 走嵌入式路径：该 server 必须只
+  部署一个 webapp，spec 用单应用 `[app] entry`，由对应的 `make <type>` 解压并启动；
+  嵌入式的日志由应用自带，不需要 juli。
+- 上面的 `--Dconnector.*` 由 `<farm><http>` 换算而来：嵌入式引擎读 `--D` 直接生效；
+  `tomcat-server` 由 creator 把它们渲染进 `conf/server.xml` 的 `<Connector>`（Catalina
+  不读这些 `-D`）。各引擎实际认哪些项见 `bas` 的 README（`maxConnections` / `enable-lookups` /
+  `disable-upload-timeout` 仅 Tomcat）。
 
-`mode="standalone"` 生成的 spec 如下（单应用，不再有 `[subapp]`，webapp 的 contextPath
+`tomcat` 生成的 spec 如下（单应用，不再有 `[subapp]`，webapp 的 contextPath
 转成 `--path`）：
 
 ```ini
-# mode="standalone" 示例
+# tomcat 示例
 [app]
 entry = /repo/org/beangle/otk/beangle-otk-ws/0.0.29/beangle-otk-ws-0.0.29.war
 base = /opt/bas/servers
@@ -107,7 +115,7 @@ instance = platform.server1
 working_dir = /opt/bas
 
 [engine]
-init = basctl make tomcat-embed
+init = basctl make tomcat
 org.apache.tomcat.embed:tomcat-embed-core:11.0.26
 org.apache.tomcat.embed:tomcat-embed-websocket:11.0.26
 org.beangle.bas:beangle-bas-engine:0.14.0
@@ -115,13 +123,16 @@ org.beangle.bas:beangle-bas-engine:0.14.0
 [args]
 --port=8081
 --path=/app
+--Dconnector.enableLookups=false
+--Dconnector.disableUploadTimeout=true
+--Dconnector.connectionTimeout=60000
 ```
 
 ## 说明与限制
 
-- `container` 只支持 `type="tomcat"`；`standalone` 支持 `type="tomcat"` 与
-  `type="undertow"`，`undertow` 只支持 `standalone`，其它组合会报错；
-- `[engine] init` 直接写当前 `basctl` 的 `make tomcat-dist` 命令行（路径取自
+- `tomcat-server` 走多应用全量发行包（`org.apache.tomcat:tomcat:zip`）；
+  `tomcat` / `undertow` / `jetty` 只支持单应用，多于一个 webapp 时报错；
+- `[engine] init` 直接写当前 `basctl` 的 `make tomcat-server` 命令行（路径取自
   `/proc/self/exe`，可用环境变量 `bas_basctl` 覆盖，含空格时会加引号）；`jstart` 仍用
   `bas_jstart` 指定；
 - 实例目录靠 `[app] instance` 显式命名（`servers/<farm.server>`），与 `make`/`status`/`logs`

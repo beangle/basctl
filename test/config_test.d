@@ -30,10 +30,8 @@ import std.format : format;
 
   assert(cfg.engines.length == 1);
   assert(cfg.engines[0].name == "tomcat");
-  assert(cfg.engines[0].typ == "tomcat");
+  assert(cfg.engines[0].typ == "tomcat-server");
   assert(cfg.engines[0].version_ == "11.0.26");
-  assert(cfg.engines[0].mode == engineModeContainer);
-  assert(!cfg.engines[0].standalone());
   assert(cfg.engines[0].jars.length == 1);
   assert(cfg.engines[0].jars[0].uri == "gav://org.postgresql:postgresql:42.7.9");
   assert(cfg.engines[0].jars[0].name() == "postgresql-42.7.9.jar");
@@ -48,6 +46,10 @@ import std.format : format;
   assert(cfg.farms[0].servers[0].http == 8088);
   assert(cfg.farms[0].servers[0].host.ip == "127.0.0.1");
   assert(cfg.farms[0].servers[0].maxHeapSize == "300M");
+  // <http> 未声明时的缺省：connection-timeout 60s，accept-count/max-connections 不下发
+  assert(cfg.farms[0].http.connectionTimeout == 60000);
+  assert(cfg.farms[0].http.acceptCount.isNull);
+  assert(cfg.farms[0].http.maxConnections.isNull);
 
   assert(cfg.farms[1].name == "platform");
   assert(!cfg.farms[1].serverOptions.isNull);
@@ -72,7 +74,7 @@ import std.format : format;
 @("runAt resolves qualified server name") unittest {
   auto xml = format!(`
     <bas version="1">
-      <engines><engine name="t" type="tomcat" version="9"/></engines>
+      <engines><engine name="t" type="tomcat-server" version="9"/></engines>
       <farms>
         <farm name="a" engine="t"><server name="s1" http="8080"/></farm>
       </farms>
@@ -89,7 +91,7 @@ import std.format : format;
   auto xml = `
     <bas version="9">
       <engines>
-        <engine name="t" type="tomcat" version="11" jsp-support="true">
+        <engine name="t" type="tomcat-server" version="11" jsp-support="true">
           <listener class-name="L1" foo="bar"/>
           <context>
             <loader class-name="MyLoader" loaderClass="MyClassLoader"/>
@@ -108,6 +110,8 @@ import std.format : format;
     </bas>`;
   auto cfg = parseServerXml(xml);
   assert(cfg.engines[0].jspSupport);
+  // 未写 websocket-support 时缺省 true，保留 engines.ini 的完整默认集
+  assert(cfg.engines[0].websocketSupport);
   assert(cfg.engines[0].listeners.length == 1);
   assert(cfg.engines[0].listeners[0].properties["foo"] == "bar");
   assert(cfg.engines[0].context.loader.className == "MyLoader");
@@ -140,7 +144,7 @@ import std.format : format;
 
 @("applyEngineDefault fills tomcat defaults once") unittest {
   auto cfg = parseServerXml(`<bas version="0.13.9">
-      <engines><engine name="tomcat" type="tomcat" version="11.0.5"/></engines>
+      <engines><engine name="tomcat" type="tomcat-server" version="11.0.5"/></engines>
       <farms><farm name="f" engine="tomcat"><server name="s" http="8080"/></farm></farms>
     </bas>`);
   auto engine = cfg.engines[0];
@@ -151,60 +155,117 @@ import std.format : format;
   assert(engine.context.jarScanner.properties["scanClassPath"] == "false");
   // 引擎依赖不再由默认值累加，而是由 resolveEngineDeps 从 engines.ini + <jar> 计算
   assert(engine.jars.length == 0);
+
+  // 非 Tomcat 引擎不补 Tomcat 专有的 listener / Loader / JarScanner
+  auto jetty = new Engine("j", containerTypeJetty, "12.0.30");
+  applyEngineDefault(cfg, jetty);
+  assert(jetty.listeners.length == 0);
+  assert(jetty.context is null);
 }
 
-@("containerTypeOf maps type and mode to creator types") unittest {
+@("containerTypeOf accepts the four creator types and rejects the rest") unittest {
   import std.exception : assertThrown;
 
   auto cfg = parseServerXml(`<bas version="0.14.0">
       <engines>
-        <engine name="t" type="tomcat" version="11.0.26"/>
-        <engine name="te" type="tomcat" version="11.0.26" mode="standalone"/>
-        <engine name="u" type="undertow" version="2.0.3.Final" mode="standalone"/>
+        <engine name="ts" type="tomcat-server" version="11.0.26"/>
+        <engine name="te" type="tomcat" version="11.0.26"/>
+        <engine name="u" type="undertow" version="2.0.3.Final"/>
+        <engine name="j" type="jetty" version="12.0.30"/>
       </engines>
     </bas>`);
-  assert(cfg.engines[0].mode == engineModeContainer);
-  assert(containerTypeOf(cfg.engines[0]) == containerTypeTomcatDist);
-  assert(containerTypeOf(cfg.engines[1]) == containerTypeTomcatEmbed);
-  assert(containerTypeOf(cfg.engines[2]) == containerTypeUndertowEmbed);
+  assert(containerTypeOf(cfg.engines[0]) == containerTypeTomcatServer);
+  assert(containerTypeOf(cfg.engines[1]) == containerTypeTomcat);
+  assert(containerTypeOf(cfg.engines[2]) == containerTypeUndertow);
+  assert(containerTypeOf(cfg.engines[3]) == containerTypeJetty);
+  assert(isTomcatType(cfg.engines[0].typ) && isTomcatType(cfg.engines[1].typ));
+  assert(!isTomcatType(cfg.engines[2].typ) && !isTomcatType(cfg.engines[3].typ));
 
-  auto undertowContainer = new Engine("u2", engineUndertow, "2.0.3.Final");
-  assertThrown!ServerXmlException(containerTypeOf(undertowContainer));
-  auto jetty = new Engine("j", engineJetty, "12.0.0");
-  assertThrown!ServerXmlException(containerTypeOf(jetty));
-  assertThrown!ServerXmlException(parseServerXml(
-      `<bas version="1"><engines><engine name="x" type="tomcat" version="1" mode="weird"/></engines></bas>`));
+  // 其它类型都不再接受
+  assertThrown!ServerXmlException(containerTypeOf(new Engine("r", "resin", "4.0.0")));
 }
 
 @("engineDefaultDeps reads the engines.ini section") unittest {
-  auto dist = engineDefaultDeps(containerTypeTomcatDist);
+  auto dist = engineDefaultDeps(containerTypeTomcatServer);
   assert(dist.canFind("org.apache.tomcat:tomcat:zip:{version}"));
   assert(dist.canFind("org.beangle.bas:beangle-bas-engine:{bas}"));
   assert(dist.canFind("org.beangle.bas:beangle-bas-juli:{bas}"));
 
-  auto embed = engineDefaultDeps(containerTypeTomcatEmbed);
+  auto embed = engineDefaultDeps(containerTypeTomcat);
   assert(embed.canFind("org.apache.tomcat.embed:tomcat-embed-core:{version}"));
   assert(embed.canFind("org.beangle.bas:beangle-bas-engine:{bas}"));
   // embed 不引入 juli，日志由应用自带
   assert(!embed.canFind("beangle-bas-juli"));
 
-  auto undertow = engineDefaultDeps(containerTypeUndertowEmbed);
+  auto undertow = engineDefaultDeps(containerTypeUndertow);
   assert(undertow.canFind("io.undertow.ee:undertow-servlet:{version}"));
   assert(undertow.canFind("io.undertow:undertow-core:2.4.4.Final"));
   assert(!undertow.canFind("beangle-bas-juli"));
+
+  auto jetty = engineDefaultDeps(containerTypeJetty);
+  assert(jetty.canFind("org.eclipse.jetty.ee10:jetty-ee10-webapp:{version}"));
+  assert(jetty.canFind("org.eclipse.jetty.ee10:jetty-ee10-annotations:{version}"));
+  // Jetty 的 AbstractLifeCycle 直接依赖 slf4j-api（无 JUL 回退）；只声明 API，provider 由应用自带
+  assert(jetty.canFind("org.slf4j:slf4j-api:2.0.17"));
+  assert(!jetty.canFind("logback"));
+  assert(jetty.canFind("org.beangle.bas:beangle-bas-engine:{bas}"));
+  assert(!jetty.canFind("beangle-bas-juli"));
+
+  // 各类型的 websocket 补充集独立成 <type>.websocket 分节，基础分节不再包含它们
+  assert(!embed.canFind("tomcat-embed-websocket"));
+  assert(!undertow.canFind("undertow-websockets"));
+  assert(engineDefaultDeps(containerTypeTomcat ~ ".websocket")
+      .canFind("org.apache.tomcat.embed:tomcat-embed-websocket:{version}"));
+  assert(engineDefaultDeps(containerTypeUndertow ~ ".websocket")
+      .canFind("io.undertow.ee:undertow-websockets:{version}"));
+  auto jettyWs = engineDefaultDeps(containerTypeJetty ~ ".websocket");
+  assert(jettyWs.canFind("org.eclipse.jetty.ee10.websocket:jetty-ee10-websocket-jakarta-server:{version}"));
+  assert(jettyWs.canFind("org.eclipse.jetty.websocket:jetty-websocket-core-server:{version}"));
+  assert(jettyWs.canFind("org.eclipse.jetty:jetty-client:{version}"));
+  assert(jettyWs.canFind("jakarta.websocket:jakarta.websocket-api:2.1.1"));
+}
+
+@("resolveEngineDeps adds websocket deps only when enabled") unittest {
+  auto cfg = parseServerXml(`<bas version="0.14.0">
+      <engines>
+        <engine name="on" type="tomcat" version="11.0.26"/>
+        <engine name="off" type="tomcat" version="11.0.26" websocket-support="false"/>
+      </engines>
+    </bas>`);
+  assert(cfg.engines[0].websocketSupport);
+  assert(!cfg.engines[1].websocketSupport);
+
+  auto on = resolveEngineDeps(cfg, cfg.engines[0], containerTypeTomcat);
+  assert(on.canFind("org.apache.tomcat.embed:tomcat-embed-websocket:11.0.26"));
+  // 基础依赖仍在
+  assert(on.canFind("org.apache.tomcat.embed:tomcat-embed-core:11.0.26"));
+
+  auto off = resolveEngineDeps(cfg, cfg.engines[1], containerTypeTomcat);
+  assert(!off.canFind("tomcat-embed-websocket"));
+  assert(off.canFind("org.apache.tomcat.embed:tomcat-embed-core:11.0.26"));
+
+  // jetty 的 websocket 补充集同样可关
+  auto jettyCfg = parseServerXml(`<bas version="0.14.0">
+      <engines>
+        <engine name="j" type="jetty" version="12.0.30" websocket-support="false"/>
+      </engines>
+    </bas>`);
+  auto jetty = resolveEngineDeps(jettyCfg, jettyCfg.engines[0], containerTypeJetty);
+  assert(!jetty.canFind("jetty-ee10-websocket"));
+  assert(jetty.canFind("org.eclipse.jetty.ee10:jetty-ee10-webapp:12.0.30"));
 }
 
 @("resolveEngineDeps expands placeholders and merges <jar> by GA") unittest {
   auto cfg = parseServerXml(`<bas version="0.14.0">
       <engines>
-        <engine name="tomcat" type="tomcat" version="11.0.26">
+        <engine name="tomcat" type="tomcat-server" version="11.0.26">
           <jar uri="gav://org.apache.tomcat:tomcat:zip:11.0.24"/>
           <jar uri="gav://org.postgresql:postgresql:42.7.13"/>
           <jar uri="/opt/local/extra.jar"/>
         </engine>
       </engines>
     </bas>`);
-  auto deps = resolveEngineDeps(cfg, cfg.engines[0], containerTypeTomcatDist);
+  auto deps = resolveEngineDeps(cfg, cfg.engines[0], containerTypeTomcatServer);
   // 引擎与 juli 版本来自 <bas version>
   assert(deps.canFind("org.beangle.bas:beangle-bas-engine:0.14.0"));
   assert(deps.canFind("org.beangle.bas:beangle-bas-juli:0.14.0"));
@@ -221,13 +282,13 @@ import std.format : format;
 @("resolveEngineDeps lets a <jar> override the bas engine version for embed") unittest {
   auto cfg = parseServerXml(`<bas version="0.14.0">
       <engines>
-        <engine name="tomcat" type="tomcat" version="11.0.26" mode="standalone">
+        <engine name="tomcat" type="tomcat" version="11.0.26">
           <jar uri="gav://org.beangle.bas:beangle-bas-engine:0.13.16"/>
           <jar uri="gav://ch.qos.logback:logback-core:1.6.3"/>
         </engine>
       </engines>
     </bas>`);
-  auto deps = resolveEngineDeps(cfg, cfg.engines[0], containerTypeTomcatEmbed);
+  auto deps = resolveEngineDeps(cfg, cfg.engines[0], containerTypeTomcat);
   // <jar> 覆盖默认的引擎版本，且不引入 juli
   assert(deps.canFind("org.beangle.bas:beangle-bas-engine:0.13.16"));
   assert(!deps.canFind("org.beangle.bas:beangle-bas-engine:0.14.0"));

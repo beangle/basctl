@@ -56,6 +56,8 @@ version (unittest) {
     switch (args[1]) {
     case "version", "-v", "--version":
       return cmdVersion();
+    case "banner":
+      return cmdBanner(args[2 .. $]);
     case "status":
       return cmdStatus();
     case "init":
@@ -101,7 +103,8 @@ private:
 void printUsage() {
   stderr.writeln("Usage: basctl <command> [args]");
   stderr.writeln("Commands:");
-  stderr.writeln("  version                       Show logo and local hosts");
+  stderr.writeln("  version                       Show the basctl version");
+  stderr.writeln("  banner [server.xml]           Show logo, versions and local hosts (used by bas.sh version)");
   stderr.writeln("  status                        Show running servers under $BAS_HOME/servers");
   stderr.writeln("  init [--force] [workdir]      Install the control scripts under <workdir>/bin");
   stderr.writeln("  make [server.xml] <pattern>   Generate specs and resolve dependencies (no start)");
@@ -119,7 +122,7 @@ void printUsage() {
 /**
  * `make`：两种输入，同一种「准备」语义——
  *
- *  - `make <tomcat-dist|tomcat-embed|undertow-embed> [协议参数]`：jstart `[engine] init`
+ *  - `make <tomcat-server|tomcat|undertow|jetty> [协议参数]`：jstart `[engine] init`
  *    的回调（creator），准备容器环境并写出最终启动命令；
  *  - `make [server.xml] <farm|server|all>`：按配置只准备不启动，生成 spec 并
  *    `jstart resolve`（预取依赖）。
@@ -141,17 +144,41 @@ private int cmdMake(string[] args) {
 
 /** `make` 的用法（creator 模式与只准备模式）。 */
 private void makeUsage() {
-  stderr.writeln("Usage: basctl make <tomcat-dist|tomcat-embed|undertow-embed> [options]");
+  stderr.writeln("Usage: basctl make <tomcat-server|tomcat|undertow|jetty> [options]");
   stderr.writeln("       basctl make [server.xml] <farm|server|all>");
   stderr.writeln("  <type> mode is the jstart `[engine] init` callback; the <pattern> mode only");
   stderr.writeln("  generates specs and resolves dependencies, start them with `basctl start`.");
 }
 
-/** `version`：打印 logo 与本机地址。 */
+/** `version`：纯文本版本，便于脚本取值（`basctl 0.0.1`）。 */
 int cmdVersion() {
-  writeln(logo(basctlVersion));
-  writeln(hostsLine());
+  writeln("basctl " ~ basctlVersion);
   return 0;
+}
+
+/**
+ * `banner [server.xml]`：面向操作者的横幅（logo + 版本行 + 本机地址），由 `bas.sh version` 调用。
+ *
+ * 未给 server.xml 时取 `$BAS_HOME/conf/server.xml`；能给到 `<bas version>` 就显示 bas 引擎版本，
+ * 文件缺失或解析失败则退化为只显示 basctl 版本。
+ */
+int cmdBanner(string[] args) {
+  auto confFile = args.length ? args[0] : buildPath(resolveBasHome(), "conf", "server.xml");
+  writeln(banner(basctlVersion, deployedBasVersion(confFile)));
+  return 0;
+}
+
+/**
+ * 读取 server.xml 的 `<bas version>`（部署所用的 bas 引擎版本）：文件缺失或解析失败都返回空串，
+ * 横幅据此退化为只显示 basctl 版本（避免拿不到配置时把 basctl 的版本当成 bas 引擎版本）。
+ */
+private string deployedBasVersion(string confFile) {
+  if (!exists(confFile))
+    return "";
+  try
+    return parseServerXmlFile(confFile).version_;
+  catch (Exception)
+    return "";
 }
 
 /** 解析配置文件中的 webapp（`resolve` 命令）。 */
@@ -213,9 +240,9 @@ string resolveBasHome() @trusted {
 
 /** `status`：列出 `$BAS_HOME/servers` 下仍在运行的实例及其监听端口。 */
 int cmdStatus() {
-  writeln(logo(basctlVersion));
-  stdout.flush();
   auto basHome = resolveBasHome();
+  writeln(banner(basctlVersion, deployedBasVersion(buildPath(basHome, "conf", "server.xml"))));
+  stdout.flush();
   auto serversDir = buildPath(basHome, "servers");
 
   if (!exists(serversDir) || !isDir(serversDir)) {

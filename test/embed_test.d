@@ -26,17 +26,30 @@ import std.algorithm : canFind;
   assert(tomcat.typ == "tomcat");
   assert(tomcat.version_ == "11.0.25");
 
+  // 与 tomcat 前缀重叠，按最长类型匹配到 tomcat-server
+  auto server = EngineRef.parse("tomcat-server-11.0.26");
+  assert(server.typ == "tomcat-server");
+  assert(server.version_ == "11.0.26");
+
   auto undertow = EngineRef.parse("undertow-2.0.3.Final");
   assert(undertow.typ == "undertow");
   assert(undertow.version_ == "2.0.3.Final");
 
+  auto jetty = EngineRef.parse("jetty-12.0.30");
+  assert(jetty.typ == "jetty");
+  assert(jetty.version_ == "12.0.30");
+
   // 版本里可以带 `-`
   assert(EngineRef.parse("tomcat-11.0.0-M1").version_ == "11.0.0-M1");
-  // 缺版本 / 未知类型 / 缺分隔符都算非法
+  // 缺少 type / 缺少版本 / 未知类型都算非法
   assert(EngineRef.parse("tomcat").typ.length == 0);
+  assert(EngineRef.parse("tomcat-server").typ.length == 0);
   assert(EngineRef.parse("tomcat-").typ.length == 0);
-  assert(EngineRef.parse("-11.0.25").typ.length == 0);
-  assert(EngineRef.parse("jetty-11").typ.length == 0);
+  assert(EngineRef.parse("jetty").typ.length == 0);
+  assert(EngineRef.parse("resin-4").typ.length == 0);
+  // 旧的 *-embed 命名不再接受
+  assert(EngineRef.parse("tomcat-embed-11.0.25").typ.length == 0);
+  assert(EngineRef.parse("undertow-embed-2.0.3.Final").typ.length == 0);
 }
 
 @("parseRunArgs splits the entry, app args, jvm args and options") unittest {
@@ -70,7 +83,8 @@ import std.algorithm : canFind;
 
 @("parseRunArgs requires a well-formed --engine") unittest {
   assert(parseRunArgs(["app.war"]).error.canFind("Missing --engine"));
-  assert(parseRunArgs(["--engine=jetty-11", "app.war"]).error.canFind("Invalid --engine"));
+  assert(parseRunArgs(["--engine=resin-4", "app.war"]).error.canFind("Invalid --engine"));
+  assert(parseRunArgs(["--engine=tomcat-server", "app.war"]).error.canFind("Invalid --engine"));
   assert(parseRunArgs(["--engine=tomcat-11.0.25", "--instance=../etc", "app.war"])
       .error.canFind("Invalid --instance"));
   assert(parseRunArgs(["--engine=tomcat-11.0.25", "--instance=.", "app.war"])
@@ -81,20 +95,40 @@ import std.algorithm : canFind;
   assert(isSafeInstance("portal-1.2_x"));
 }
 
-@("planRun picks the embed container and engines.ini deps") unittest {
+@("planRun uses the engine type directly and expands engines.ini deps") unittest {
   auto opts = parseRunArgs(["--engine=tomcat-11.0.25", "app.war"]);
   auto tomcat = planRun(opts);
-  assert(tomcat.containerType == "tomcat-embed");
+  assert(tomcat.containerType == "tomcat");
   assert(tomcat.deps.canFind("org.apache.tomcat.embed:tomcat-embed-core:11.0.25"));
   assert(tomcat.deps.canFind("org.beangle.bas:beangle-bas-engine:" ~ defaultBasVersion));
   assert(!tomcat.deps.canFind("org.apache.tomcat:tomcat:zip:"));
+  assert(!tomcat.deps.canFind("beangle-bas-juli"));
 
   opts = parseRunArgs(["--engine=undertow-2.0.3.Final", "--bas=1.2.3", "app.war"]);
   auto undertow = planRun(opts);
-  assert(undertow.containerType == "undertow-embed");
+  assert(undertow.containerType == "undertow");
   assert(undertow.deps.canFind("io.undertow.ee:undertow-servlet:2.0.3.Final"));
   assert(undertow.deps.canFind("org.beangle.bas:beangle-bas-engine:1.2.3"));
   assert(!undertow.deps.canFind("beangle-bas-juli"));
+
+  opts = parseRunArgs(["--engine=jetty-12.0.30", "app.war"]);
+  auto jetty = planRun(opts);
+  assert(jetty.containerType == "jetty");
+  assert(jetty.deps.canFind("org.eclipse.jetty.ee10:jetty-ee10-webapp:12.0.30"));
+  assert(jetty.deps.canFind("org.eclipse.jetty.ee10:jetty-ee10-annotations:12.0.30"));
+  assert(jetty.deps.canFind("org.slf4j:slf4j-api:2.0.17"));
+  assert(!jetty.deps.canFind("logback"));
+  assert(jetty.deps.canFind("org.beangle.bas:beangle-bas-engine:" ~ defaultBasVersion));
+  assert(!jetty.deps.canFind("beangle-bas-juli"));
+  // jetty 不含 tomcat 的 juli 与发行包
+  assert(!jetty.deps.canFind("org.apache.tomcat"));
+
+  // run 也能跑全量发行包（单应用），此时带上 juli
+  opts = parseRunArgs(["--engine=tomcat-server-11.0.26", "app.war"]);
+  auto server = planRun(opts);
+  assert(server.containerType == "tomcat-server");
+  assert(server.deps.canFind("org.apache.tomcat:tomcat:zip:11.0.26"));
+  assert(server.deps.canFind("org.beangle.bas:beangle-bas-juli:" ~ defaultBasVersion));
 }
 
 @("warTarget rewrites a 3-part gav to war packaging only") unittest {

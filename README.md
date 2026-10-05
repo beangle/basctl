@@ -17,10 +17,10 @@
 |---|---|---|
 | basctl | 编译期常量（`basctl version` 输出） | 本工具的发行号，与 bas 引擎无关 |
 | bas | `conf/server.xml` 的 `<bas version>` | `beangle-bas-engine`（及 `beangle-bas-juli`）的版本 |
-| 容器 | `<engine version>` | 容器版本：tomcat 为发行包版本，undertow 为 `io.undertow.ee:undertow-servlet` 版本 |
+| 容器 | `<engine version>` | 容器版本：tomcat 为发行包版本，undertow 为 `io.undertow.ee:undertow-servlet` 版本，jetty 为 Jetty 版本 |
 
-`<engine mode="container|standalone">`（缺省 `container`）决定运行方式：`container` 走全量
-发行包（多应用，仅 tomcat），`standalone` 走嵌入式单应用（tomcat / undertow）。
+`<engine type>` 直接给出容器形态，取值与 creator / `engines.ini` 分节同名：`tomcat-server`
+走全量发行包（多应用），`tomcat` / `undertow` / `jetty` 是嵌入式单应用。
 
 各容器类型的默认依赖集固定在编译期内嵌的 [resources/engines.ini](resources/engines.ini)：
 `{version}` / `{bas}` 分别由上述两个 version 展开；`<engine><jar>` 与默认集合并——GA
@@ -51,7 +51,8 @@ dub test --compiler=ldc2
 
 | 命令 | 说明 |
 |---|---|
-| `basctl version` | 打印版本横幅与本机地址 |
+| `basctl version` | 打印 `basctl <版本>`（单行纯文本，便于脚本取值） |
+| `basctl banner [server.xml]` | 操作者横幅：logo + bas 引擎版本（取自 `<bas version>`）+ basctl 版本 + 本机地址；`bas.sh version` 调它。图形为纯 ASCII，只在交互终端出现，重定向到日志/管道时只剩版本行与本机地址 |
 | `basctl status` | 列出 `$BAS_HOME/servers` 下运行中的实例及其监听端口 |
 | `basctl init [--force] [--dry-run] [workdir]` | 初始化组件目录：把控制脚本铺到 `<workdir>/bin`，并建 `conf/` |
 | `basctl make [server.xml] <farm\|server\|all>` | 只准备不启动：生成 jstart spec 并 `jstart resolve` 预取依赖 |
@@ -101,8 +102,8 @@ $BAS_HOME/
 | `make [server.xml] <pattern>` | `conf/server.xml`，批量选 Server | **持久**布局：`engines/<name>-<ver>/` + `servers/<name>/` + 按 server 生成一份 launch spec | 面向运维与启动前预取：只写 spec 并 `jstart resolve`，不起进程；随后 `basctl start` |
 | `make <type> [options]` | jstart 的 `[engine] init` 协议，单次运行计划 | jstart base 下的 `engines/`、各 webapp 的 docBase，以及 `--entry-out` 里的**容器启动命令** | `start` / jstart 运行时的回调，用户一般不直接调用 |
 
-`<type>` 取 `tomcat-dist`、`tomcat-embed` 或 `undertow-embed`，分别对应全量 Tomcat 发行包与
-两种嵌入式容器。
+`<type>` 取 `tomcat-server`、`tomcat`、`undertow` 或 `jetty`，分别对应全量 Tomcat 发行包与
+三种嵌入式容器。
 
 ## 与 jstart 的关系
 
@@ -110,20 +111,19 @@ $BAS_HOME/
 目录编排与配置渲染。`jstart` 不在 `PATH` 时可用环境变量 `bas_jstart` 指定其路径。
 
 运行 war 时，jstart 按 `[engine] init` 协议调用 basctl 的 `make <type>` 并把 war 交给它：它准备
-webapp、写出最终启动命令，jstart 再 exec。`basctl make tomcat-embed` /
-`undertow-embed` / `tomcat-dist` 承接原 `engine` 模块的 `EmbedCreator` /
-`ServerCreator`（如何调用、spec 示例、必要参数、docBase 布局与 classpath 拼装见
+webapp、写出最终启动命令，jstart 再 exec。`basctl make tomcat` / `undertow` / `jetty` /
+`tomcat-server` 承接原 `engine` 模块的 creator 逻辑（如何调用、spec 示例、必要参数、
+docBase 布局与 classpath 拼装见
 [docs/engine-creator.md](docs/engine-creator.md)）：
 
 ```sh
 # [engine] init 直接写命令行（jstart 支持“程序 + 参数”，无需 wrapper）
-init = basctl make tomcat-embed
+init = basctl make tomcat
 ```
 
-`basctl start` 会根据 `<engine mode>` 自动把 `[engine] init` 写成对应 creator 的
-`make <container|standalone>-*` 命令行（`container` 多应用走 `make tomcat-dist`，
-`standalone` 单应用走 `make tomcat-embed` / `make undertow-embed`），再
-`jstart resolve` 校验依赖、`jstart run` 后台启动；详见 [docs/start.md](docs/start.md)。
+`basctl start` 会根据 `<engine type>` 自动把 `[engine] init` 写成对应 creator 的
+`make <type>` 命令行（`tomcat-server` 多应用、`tomcat` / `undertow` / `jetty` 单应用），
+再 `jstart resolve` 校验依赖、`jstart run` 后台启动；详见 [docs/start.md](docs/start.md)。
 
 `basctl run` 面向单应用快速运行：一个 `--engine=<type>-<version>`（如
 `tomcat-11.0.25`）同时给出容器类型与版本，bas 引擎版本取 basctl 内置默认

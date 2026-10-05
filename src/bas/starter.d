@@ -21,13 +21,13 @@
  *
  *  1. 从 `conf/server.xml` 选出匹配的本机 `<server>`（farm 名 / `farm.server` / `all`）；
  *  2. 逐个解析 webapp（沿用 `make`/`resolve` 的语义），为每个 `<server>` 生成一份
- *     launch spec `conf/<farm.server>.jstart`——一个 `<server>` 一个 JVM：`mode="container"`
- *     时每个 webapp 一段 `[subapp <id>]`（各自 docBase 与 `libs`，依赖互不串味），
- *     `mode="standalone"` 时写单应用 `[app] entry`（该 server 只允许一个 webapp）；
+ *     launch spec `conf/<farm.server>.jstart`——一个 `<server>` 一个 JVM：
+ *     `type="tomcat-server"` 时每个 webapp 一段 `[subapp <id>]`（各自 docBase 与 `libs`，
+ *     依赖互不串味），`tomcat` / `undertow` / `jetty` 时写单应用 `[app] entry`（只允许一个 webapp）；
  *  3. `jstart resolve <spec>` 校验 spec 与依赖齐备；
- *  4. 后台 `jstart run <spec>`：jstart 先运行 `[engine] init`（按引擎 `type`/`mode` 写成
- *     对应的 `make tomcat-dist` / `make tomcat-embed` / `make undertow-embed`）→ 它准备
- *     容器环境并写出最终启动命令，jstart 再 exec。
+ *  4. 后台 `jstart run <spec>`：jstart 先运行 `[engine] init`（按引擎 `type` 写成对应的
+ *     `make tomcat-server` / `make tomcat` / `make undertow` / `make jetty`）→ 它准备容器
+ *     环境并写出最终启动命令，jstart 再 exec。
  *
  * 实例目录沿用 `servers/<farm.server>`——spec 里写 `[app] base = $BAS_HOME/servers`
  * 加 `[app] instance = <farm.server>`，jstart 的直接组件目录就是它；`SERVER_PID` 与
@@ -279,8 +279,8 @@ private Nullable!string prepareServer(string basHome, Container container, Serve
     stderr.writeln(server.qualifiedName ~ ": " ~ e.msg);
     return Nullable!string.init;
   }
-  bool standalone = containerType != containerTypeTomcatDist;
-  auto standaloneError = standaloneWebappError(engine, webapps.length);
+  bool standalone = containerType != containerTypeTomcatServer;
+  auto standaloneError = standaloneWebappError(containerType, engine.name, webapps.length);
   if (standaloneError.length) {
     stderr.writeln(server.qualifiedName ~ ": " ~ standaloneError);
     return Nullable!string.init;
@@ -326,12 +326,12 @@ private Nullable!string prepareServer(string basHome, Container container, Serve
 }
 
 /**
- * standalone 引擎只运行一个 webapp；部署多个时返回给运维看的错误信息，合法时返回空串。
+ * 嵌入式引擎（`tomcat` / `undertow` / `jetty`）只运行一个 webapp；部署多个时返回给运维看的错误信息，合法时返回空串。
  */
-string standaloneWebappError(Engine engine, size_t webappCount) {
-  if (engine.standalone && webappCount > 1)
-    return "engine " ~ engine.name ~ " runs mode=\"" ~ engine.mode ~ "\" (single webapp), but "
-      ~ webappCount.to!string ~ " are deployed; use mode=\"" ~ engineModeContainer ~ "\"";
+string standaloneWebappError(string containerType, string engineName, size_t webappCount) {
+  if (containerType != containerTypeTomcatServer && webappCount > 1)
+    return "engine " ~ engineName ~ " type=\"" ~ containerType ~ "\" runs a single webapp, but "
+      ~ webappCount.to!string ~ " are deployed; use type=\"" ~ containerTypeTomcatServer ~ "\"";
   return "";
 }
 
@@ -386,13 +386,33 @@ string[] runtimeArgsFor(Server server) {
   return args;
 }
 
-/** `[args]`：透传给容器入口的参数（端口、JSP 开关）。 */
+/** `[args]`：透传给容器入口的参数（端口、JSP 开关与 `<http>` 连接器参数）。 */
 string[] appArgsFor(Server server) {
   string[] args;
   if (server.http > 0)
     args ~= "--port=" ~ server.http.to!string;
-  if (server.farm.engine.jspSupport)
+  // JSP 只对 tomcat-server（全量发行包）有意义：嵌入式引擎固定屏蔽 Jasper SCI
+  if (server.farm.engine.jspSupport && server.farm.engine.typ == containerTypeTomcatServer)
     args ~= "--jsp=true";
+  args ~= connectorArgs(server.farm.http);
+  return args;
+}
+
+/**
+ * `<http>` 连接器参数 → 引擎属性（`--Dconnector.*`）。嵌入式引擎直接消费；
+ * `tomcat-server` 由 creator 渲染进 `conf/server.xml` 的 `<Connector>`。
+ * `accept-count` / `max-connections` 只覆盖显式给出的项，其余取 basctl 的缺省值。
+ */
+private string[] connectorArgs(HttpConnector http) {
+  string[] args = [
+    "--Dconnector.enableLookups=" ~ (http.enableLookups ? "true" : "false"),
+    "--Dconnector.disableUploadTimeout=" ~ (http.disableUploadTimeout ? "true" : "false"),
+    "--Dconnector.connectionTimeout=" ~ http.connectionTimeout.to!string
+  ];
+  if (!http.acceptCount.isNull)
+    args ~= "--Dconnector.acceptCount=" ~ http.acceptCount.get.to!string;
+  if (!http.maxConnections.isNull)
+    args ~= "--Dconnector.maxConnections=" ~ http.maxConnections.get.to!string;
   return args;
 }
 

@@ -20,7 +20,7 @@
  * `basctl start`（按 farm）与 `basctl run`（单应用快速运行）生成的是同一种 spec：
  * `[app]` 声明入口（单应用）与组件目录，`[engine]` 声明 init 命令行与容器依赖，
  * 可选的 `[runtime]` / `[args]` 分别承载 JVM 参数与应用参数；多 webapp
- * （`mode="container"`）时再用若干 `[subapp <id>]` 段。
+ * （`tomcat-server`）时再用若干 `[subapp <id>]` 段。
  *
  * 本模块只负责拼文本与转义，不做 IO，也不调用 jstart。
  */
@@ -86,7 +86,7 @@ string renderLaunchSpec(string baseRoot, string instance, string workingDir, str
  * jstart 的 `[engine] init` 命令行：调用本 basctl 的 `make <type>`。
  * jstart 自己完成分词，所以路径含空格时按 shell 规则加引号即可，无需 wrapper 脚本。
  */
-string engineInitCommand(string containerType = "tomcat-dist") {
+string engineInitCommand(string containerType = "tomcat-server") {
   return shellQuote(basctlExecutable()) ~ " make " ~ containerType;
 }
 

@@ -24,14 +24,14 @@ import std.string : startsWith;
 
 @("renderLaunchSpec writes engine, runtime, args and one section per subapp") unittest {
   auto text = renderLaunchSpec("/srv/bas/servers", "platform.server1", "/srv/bas",
-      "/srv/bas/bin/basctl make tomcat-dist",
+      "/srv/bas/bin/basctl make tomcat-server",
       ["org.apache.tomcat:tomcat:zip:11.0.18", "org.beangle.bas:beangle-bas-engine:0.13.16"],
       ["-Xmx300M", "-Dems.profile=local"], ["--port=8081"],
       [SubappSpec("cas", "/r/cas.war", "/cas", "org.postgresql:postgresql:42.7.9"),
        SubappSpec("portal", "/r/portal.war", "/portal", "")]);
   assert(text.canFind("[app]\nbase = /srv/bas/servers\ninstance = platform.server1\n"));
   assert(text.canFind("working_dir = /srv/bas\n"));
-  assert(text.canFind("init = /srv/bas/bin/basctl make tomcat-dist\n"));
+  assert(text.canFind("init = /srv/bas/bin/basctl make tomcat-server\n"));
   assert(text.canFind("\n[runtime]\n-Xmx300M\n-Dems.profile=local\n"));
   assert(text.canFind("\n[args]\n--port=8081\n"));
   assert(text.canFind("\n[subapp cas]\nentry = /r/cas.war\npath = /cas\nlibs = org.postgresql:postgresql:42.7.9\n"));
@@ -40,12 +40,12 @@ import std.string : startsWith;
   assert(!text.canFind("entry = /r/portal.war\n\n[engine]"));
 }
 
-@("renderLaunchSpec writes a single [app] entry for standalone runs") unittest {
+@("renderLaunchSpec writes a single [app] entry for embedded runs") unittest {
   auto text = renderLaunchSpec("/tmp", "bas", "/srv/bas",
-      "/opt/basctl make tomcat-embed", ["org.beangle.bas:beangle-bas-engine:0.13.16"],
+      "/opt/basctl make tomcat", ["org.beangle.bas:beangle-bas-engine:0.13.16"],
       ["-Xmx512M"], ["--port=8080", "--path=/app"], [], "/tmp/app.war");
   assert(text.canFind("[app]\nentry = /tmp/app.war\nbase = /tmp\ninstance = bas\n"));
-  assert(text.canFind("\n[engine]\ninit = /opt/basctl make tomcat-embed\n"
+  assert(text.canFind("\n[engine]\ninit = /opt/basctl make tomcat\n"
       ~ "org.beangle.bas:beangle-bas-engine:0.13.16\n"));
   assert(text.canFind("\n[runtime]\n-Xmx512M\n"));
   assert(text.canFind("\n[args]\n--port=8080\n--path=/app\n"));
@@ -59,11 +59,12 @@ import std.string : startsWith;
 
 @("engineInitCommand quotes the basctl path and names the make subcommand") unittest {
   auto cmd = engineInitCommand();
-  assert(cmd.canFind(" make tomcat-dist"));
+  assert(cmd.canFind(" make tomcat-server"));
   assert(cmd.startsWith("'") || cmd.canFind("'"));
 }
 
 @("engineInitCommand accepts the embedded container types") unittest {
-  assert(engineInitCommand("tomcat-embed").canFind(" make tomcat-embed"));
-  assert(engineInitCommand("undertow-embed").canFind(" make undertow-embed"));
+  assert(engineInitCommand("tomcat").canFind(" make tomcat"));
+  assert(engineInitCommand("undertow").canFind(" make undertow"));
+  assert(engineInitCommand("jetty").canFind(" make jetty"));
 }

@@ -17,19 +17,20 @@
 /**
  * `basctl run`：嵌入式运行单个 webapp（war / Maven 坐标 / http url）。
  *
- * 不读 `conf/server.xml`：一个参数 `--engine=<type>-<version>`（如 `tomcat-11.0.25`、
- * `undertow-2.0.3.Final`）同时给出容器类型与版本；bas 引擎版本取 basctl 的默认值
- * {@link defaultBasVersion}（`--bas=` 可覆盖）。依赖集与 `start` 共用 `engines.ini`
- * （见 {@link bas.config.resolveEngineDeps}，这里没有 `<engine><jar>`，就用默认集）。
+ * 不读 `conf/server.xml`：一个参数 `--engine=<type>-<version>`（如
+ * `tomcat-11.0.25`、`undertow-2.0.3.Final`、`jetty-12.0.30`）同时给出容器类型与版本；bas 引擎
+ * 版本取 basctl 的默认值 {@link defaultBasVersion}（`--bas=` 可覆盖）。依赖集与 `start`
+ * 共用 `engines.ini`（见 {@link bas.config.resolveEngineDeps}，这里没有 `<engine><jar>`，
+ * 就用默认集）。
  *
- * 据此写出单应用 launch spec（`[app] entry` + `[engine] init = basctl make <type>-embed`），
- * 再前台 `jstart run` —— jstart 先跑 init 准备容器环境，随后 exec 容器进程；本命令等待
- * 其退出并返回同一退出码。
+ * 据此写出单应用 launch spec（`[app] entry` + `[engine] init = basctl make <type>`），再前台
+ * `jstart run` —— jstart 先跑 init 准备容器环境，随后 exec 容器进程；本命令等待其退出并
+ * 返回同一退出码。
  */
 module bas.embed;
 
 import bas.artifact : isRemote;
-import bas.config : Container, Engine, containerTypeOf, engineModeStandalone, resolveEngineDeps;
+import bas.config : Container, Engine, containerTypeOf, resolveEngineDeps, supportedEngineTypes;
 import bas.jstart : jstartCommand;
 import bas.spec : engineInitCommand, renderLaunchSpec;
 
@@ -38,7 +39,7 @@ import std.file : getcwd, mkdirRecurse, write;
 import std.path : absolutePath, buildPath, dirName;
 import std.process : ProcessException, environment, spawnProcess, wait;
 import std.stdio : stderr, stdout, writeln;
-import std.string : indexOf, startsWith, strip;
+import std.string : startsWith, strip;
 
 /**
  * `run` 的 beangle-bas-engine 默认版本。
@@ -48,21 +49,30 @@ import std.string : indexOf, startsWith, strip;
  */
 enum defaultBasVersion = "0.14.0";
 
-/** `<type>-<version>` 形式的嵌入式容器（如 `tomcat-11.0.25`）。 */
+/** `<type>-<version>` 形式的容器（如 `tomcat-11.0.25`）。 */
 struct EngineRef {
   string typ;
   string version_;
 
-  /** 解析 `tomcat-11.0.25` / `undertow-2.0.3.Final`；类型未知或缺少版本时返回空 `typ`。 */
+  /**
+   * 按 {@link supportedEngineTypes} 中最长的已知类型前缀解析，其余为版本：
+   * `tomcat-11.0.25` / `tomcat-server-11.0.26` / `undertow-2.0.3.Final` / `jetty-12.0.30`。
+   * 版本必须数字开头，据此把裸类型名（如 `tomcat-server`）与旧式 `tomcat-embed-*`
+   * 判为非法：类型未知、缺少版本或版本非数字开头时返回空 `typ`。
+   */
   static EngineRef parse(string value) {
     auto s = strip(value);
-    auto dash = s.indexOf('-');
-    if (dash <= 0 || dash + 1 >= s.length)
-      return EngineRef.init;
-    auto typ = strip(s[0 .. dash]);
-    if (typ != "tomcat" && typ != "undertow")
-      return EngineRef.init;
-    return EngineRef(typ, strip(s[dash + 1 .. $]));
+    EngineRef best;
+    foreach (t; supportedEngineTypes) {
+      if (!s.startsWith(t ~ "-"))
+        continue;
+      auto ver = strip(s[t.length + 1 .. $]);
+      if (!ver.length || ver[0] < '0' || ver[0] > '9')
+        continue;
+      if (t.length > best.typ.length)
+        best = EngineRef(t, ver);
+    }
+    return best;
   }
 }
 
@@ -96,7 +106,6 @@ RunPlan planRun(RunOptions opts) {
   auto container = new Container;
   container.version_ = opts.bas;
   auto engine = new Engine(opts.engine.typ, opts.engine.typ, opts.engine.version_);
-  engine.mode = engineModeStandalone;
 
   RunPlan plan;
   plan.containerType = containerTypeOf(engine);
@@ -144,7 +153,7 @@ void runUsage() {
   stderr.writeln("Usage: basctl run [options] <app> [app args...]");
   stderr.writeln("  <app>                         war / 解压目录，g:a:v（按 war），或 http(s) url");
   stderr.writeln("Options:");
-  stderr.writeln("  --engine=<type>-<version>     Embedded container, e.g. tomcat-11.0.25 (required)");
+  stderr.writeln("  --engine=<type>-<version>     Container type and version, e.g. tomcat-11.0.25 (required)");
   stderr.writeln("  --bas=<version>               beangle-bas-engine version (default " ~ defaultBasVersion ~ ")");
   stderr.writeln("  --base=<dir>                  Base root of the component (default /tmp)");
   stderr.writeln("  --instance=<name>             Component directory name (default bas)");
