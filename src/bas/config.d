@@ -412,24 +412,27 @@ class Webapp {
   string[string] properties;
   bool resolveSupport = true;
   string docBase;
-  string realms;
   bool jspSupport;
   Server[] runAt;
   string contextPath;
+  string[] urls;
   Nullable!bool unpack;
   Nullable!string libs;
-  Resource[] resources;
 
   this(string uri) {
     this.uri = uri;
   }
 
-  /** Names of the referenced resources, in declaration order. */
-  string[] resourceNames() const {
-    string[] names;
-    foreach (r; resources)
-      names ~= r.name;
-    return names;
+  /**
+   * 路由（setline、反代）使用的 URL 前缀：声明了 `<url>` 就用它们，否则退回部署上下文。
+   *
+   * 上下文为 `/` 的 webapp 内部 URL 没有公共前缀（如 `/context1`、`/context2`）时，只有显式
+   * 声明才能被按路径转发；未声明时它占用 `/`，与其他 webapp 争用同一路径会在生成路由时报冲突。
+   */
+  string[] routePaths() const {
+    if (urls.length)
+      return urls.dup;
+    return [contextPath.length ? contextPath : "/"];
   }
 
   /** Tomcat SCI filter：禁用 JSP 时需要屏蔽 JasperInitializer。 */
@@ -603,20 +606,6 @@ class Container {
     string[] res;
     foreach (name, _; resources)
       res ~= name;
-    return res;
-  }
-
-  /** Resource names referenced by webapps deployed to the given farm. */
-  string[] farmResourceNames(Farm farm) const {
-    string[] res;
-    foreach (app; webapps) {
-      if (app.runAt.length && (app.runAt[0].farm is farm)) {
-        foreach (rn; app.resourceNames()) {
-          if (!res.canFind(rn))
-            res ~= rn;
-        }
-      }
-    }
     return res;
   }
 
@@ -956,13 +945,12 @@ Webapp parseWebapp(Container conf, XmlElem elem) {
     w.libs = libs;
 
   foreach (c; elementChildren(elem)) {
-    if (c.name == "resource-ref") {
-      auto refName = requireAttr(c, "ref", "<resource-ref>");
-      auto res = refName in conf.resources;
-      enforce!ServerXmlException(res !is null, "Missing resource ref '" ~ refName ~ "' for webapp " ~ w.uri);
-      w.resources ~= *res;
-    } else if (c.name == "realm") {
-      w.realms = "<Realm " ~ renderAttrs(c) ~ "/>";
+    if (c.name == "url") {
+      auto path = normalizeUrlPath(requireAttr(c, "path", "<url>"));
+      enforce!ServerXmlException(path.startsWith("/"),
+          "<url path> must start with /: '" ~ path ~ "' in webapp " ~ w.uri);
+      if (!w.urls.canFind(path))
+        w.urls ~= path;
     }
   }
 
@@ -995,12 +983,12 @@ Webapp parseWebapp(Container conf, XmlElem elem) {
   return w;
 }
 
-/** 把元素属性原样重排，供 `<Realm .../>` 这类模板片段复用。 */
-string renderAttrs(XmlElem elem) {
-  string[] parts;
-  foreach (a; elem.attributes)
-    parts ~= a.name ~ "=\"" ~ attrText(a) ~ "\"";
-  return parts.join(" ");
+/** 规范化一条对外 URL 前缀：去掉尾部 `/`，`/` 本身保留。 */
+private string normalizeUrlPath(string path) {
+  auto p = strip(path);
+  if (p.length > 1 && p.endsWith("/"))
+    p = p[0 .. $ - 1];
+  return p;
 }
 
 /** 收集除 `exclude` 之外的属性，构造 Tomcat 透传属性表（有序性不敏感）。 */

@@ -18,8 +18,9 @@
     约定：
     - 根元素为 <bas>；元素与属性一律小写连字符（kebab-case）。
     - 标注 anyAttribute 的元素会原样保留未声明属性（透传给 Tomcat 的
-      Context/Loader/JarScanner/Resource/Realm），其余元素上的未声明项被忽略。
-    - <proxy> 及其子节点供反代侧使用，basctl 不消费，仅为兼容 bashub 生成的配置而收录。
+      Context/Loader/JarScanner），其余元素上的未声明项被忽略。
+    - <proxy> / <resource-ref> / <realm> 均不在支持范围内：反代配置另行生成，JNDI 资源与
+      Realm 尚未接入控制面。
   -->
 
   <!-- ================= 基础类型 ================= -->
@@ -58,7 +59,6 @@
         <xs:element name="resources" type="resourcesType" minOccurs="0"/>
         <xs:element name="farms" type="farmsType" minOccurs="0"/>
         <xs:element name="webapps" type="webappsType" minOccurs="0"/>
-        <xs:element name="proxy" type="proxyType" minOccurs="0"/>
       </xs:all>
       <xs:attribute name="version" type="xs:string" use="required">
         <xs:annotation>
@@ -299,8 +299,7 @@ accept-count/connection-timeout；Undertow 只用 accept-count/connection-timeou
 
   <xs:complexType name="webappType">
     <xs:choice minOccurs="0" maxOccurs="unbounded">
-      <xs:element name="resource-ref" type="resourceRefType"/>
-      <xs:element name="realm" type="realmType"/>
+      <xs:element name="url" type="urlType"/>
     </xs:choice>
     <xs:attribute name="uri" type="xs:string" use="required">
       <xs:annotation>
@@ -310,7 +309,7 @@ accept-count/connection-timeout；Undertow 只用 accept-count/connection-timeou
     <xs:attribute name="name" type="xs:string"/>
     <xs:attribute name="path" type="xs:string">
       <xs:annotation>
-        <xs:documentation>context path；/ 或空视为 ROOT。</xs:documentation>
+        <xs:documentation>context path；/ 或空视为 ROOT。仅描述部署上下文，路由用的对外路径见 &lt;url&gt;。</xs:documentation>
       </xs:annotation>
     </xs:attribute>
     <xs:attribute name="run-at" type="xs:string">
@@ -342,44 +341,17 @@ accept-count/connection-timeout；Undertow 只用 accept-count/connection-timeou
     </xs:anyAttribute>
   </xs:complexType>
 
-  <xs:complexType name="resourceRefType">
-    <xs:attribute name="ref" type="xs:string" use="required">
+  <xs:complexType name="urlType">
+    <xs:annotation>
+      <xs:documentation>webapp 对外暴露的 URL 前缀，供 setline / 反代按路径转发。可声明多条；
+        都未声明时按 &lt;webapp path&gt; 的 context path 转发。上下文为 / 而内部 URL 无公共前缀时
+        （如 /context1、/context2），必须逐条列出，否则多个这样的 webapp 会争用同一路径。</xs:documentation>
+    </xs:annotation>
+    <xs:attribute name="path" type="xs:string" use="required">
       <xs:annotation>
-        <xs:documentation>引用的 &lt;resource name&gt;，必须已声明。</xs:documentation>
+        <xs:documentation>以 / 开头的 URL 前缀；交由 basctl 规范化（去掉尾部 /）。</xs:documentation>
       </xs:annotation>
     </xs:attribute>
-  </xs:complexType>
-
-  <xs:complexType name="realmType">
-    <xs:annotation>
-      <xs:documentation>Context 的 Realm；属性全部原样透传。</xs:documentation>
-    </xs:annotation>
-    <xs:anyAttribute processContents="lax"/>
-  </xs:complexType>
-
-  <!-- ================= 反代（basctl 不消费） ================= -->
-
-  <xs:complexType name="proxyType">
-    <xs:all>
-      <xs:element name="https" type="httpsType" minOccurs="0"/>
-      <xs:element name="status" type="statusType" minOccurs="0"/>
-    </xs:all>
-    <xs:attribute name="engine" type="xs:string"/>
-    <xs:attribute name="hostname" type="xs:string"/>
-    <xs:attribute name="maxconn" type="xs:nonNegativeInteger"/>
-    <xs:attribute name="http-port" type="xs:nonNegativeInteger"/>
-  </xs:complexType>
-
-  <xs:complexType name="httpsType">
-    <xs:attribute name="port" type="xs:nonNegativeInteger"/>
-    <xs:attribute name="ciphers" type="xs:string"/>
-    <xs:attribute name="protocols" type="xs:string"/>
-    <xs:attribute name="force-https" type="boolType"/>
-  </xs:complexType>
-
-  <xs:complexType name="statusType">
-    <xs:attribute name="url" type="xs:string"/>
-    <xs:attribute name="auth" type="xs:string"/>
   </xs:complexType>
 
 </xs:schema>

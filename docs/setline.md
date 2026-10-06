@@ -10,7 +10,7 @@ setline 的后端按约定固定为 `127.0.0.1:<port>`，因此这条路径面�
 ## 用法
 
 ```sh
-basctl setline [server.xml] [--output=<file>] [--listen=<addr>] [--host=<name>]
+basctl setline [server.xml] [--output=<file>] [--listen=<addr>]
 ```
 
 | 参数 | 缺省 | 说明 |
@@ -18,7 +18,10 @@ basctl setline [server.xml] [--output=<file>] [--listen=<addr>] [--host=<name>]
 | `server.xml` | `$BAS_HOME/conf/server.xml` | 拓扑来源 |
 | `--output` | `$BAS_HOME/conf/setline.json` | 配置写出位置；`-` 表示写 stdout（取片段用） |
 | `--listen` | `127.0.0.1:8080` | 入口地址：`8080` / `*:8080` / `127.0.0.1:8080` 都可以，与 setline 的 `listen` 一致 |
-| `--host` | `*` | 路由归属的 Host；`*` 是 setline 的兜底命名空间，等价于按路径匹配任意 Host |
+
+setline 的 `routes` 以 Host 分组，而 `server.xml` 里没有 hostname，basctl 无从得知分组依据，
+因此全部路由固定写进兜底命名空间 `*`——整个拓扑就是**一个分组**，按路径匹配任意 Host。要把它
+归到某个域名下，合并时改这一个键即可（或用运行期接口按 host 写入）。
 
 生成后把结果位置、路由条数与入口地址打出来，直接照抄最后一行即可启动：
 
@@ -33,11 +36,34 @@ run: setline -f /opt/bas/conf/setline.json
 
 ## 路由生成规则
 
-- 每个 `<webapp>` 的 context path 作为路径前缀（`path="/"` 或省略为 `/`）。
+- 路径前缀取 `<webapp>` 声明的 `<url path="..."/>`（可多条）；一条都没声明时退回 context path
+  （`path="/"` 或省略为 `/`）。也就是说 `path` 描述的是部署上下文，`<url>` 才是对外暴露的路径。
 - 端口取该 webapp 的 `run-at` 目标 server 的 `http`。
 - 同一路径落在多个 server 上时合并成端口列表，由 setline 在健康实例间选择（自带 TCP 健康检查）。
 - 没有 `run-at`、或 server 未声明 `http`（端口 0）的 webapp 跳过。
+- 同一路径被**端口集合不同**的多个 webapp 认领时无法判定归属，命令报冲突并退出，不写配置；
+  端点集合相同时合并，不算冲突（同一 webapp 的多实例部署）。
 - 路由按路径排序，输出稳定，便于纳入版本管理或 diff。
+
+### 上下文为 `/` 的 webapp
+
+有的 webapp 上下文是 `/`，内部却按 `/context1`、`/context2` 分组；若这些 URL 没有公共前缀，
+就只能声明上下文为 `/`。两个这样的 webapp 无法靠路径区分端口——`contextPath` 都是 `/`——此时
+必须逐条列出各自的对外路径：
+
+```xml
+<webapp uri="gav://org.beangle.otk:beangle-otk-ws:war:0.0.30" run-at="one" path="/">
+  <url path="/context1"/>
+  <url path="/context2"/>
+</webapp>
+<webapp uri="gav://org.beangle.ems:beangle-ems-ws:4.17.2" run-at="two" path="/">
+  <url path="/context3"/>
+  <url path="/context4"/>
+</webapp>
+```
+
+声明了 `<url>` 就不再认领 context path（上例的 `/` 不会生成路由）。未声明时两个 webapp 都占 `/`，
+`basctl setline` 会报 `Route conflict on /` 并列出双方，而不是随机挑一个端口。
 
 ## 示例
 
@@ -74,8 +100,8 @@ run: setline -f /opt/bas/conf/setline.json
   之外的服务。
 - **代理是全局的**：一台机器上通常只有一份 setline，它同时服务 bas 与别的系统。`basctl setline`
   只产出 bas 那部分路由，**不要拿它整体覆盖**全局配置——把它当片段并入（见下）。
-- `basctl` 不消费 `server.xml` 的 `<proxy>` 段：它描述的是生产入口（haproxy / nginx / ...），
-  与本地 setline 代理是两件事；本地入口用 `--listen` / `--host` 指定。
+- 生产入口（haproxy / nginx / ...）与本地 setline 代理是两件事，`server.xml` 不描述前者；
+  本地入口用 `--listen` 指定。
 - Linux only：setline 基于 epoll，且后端固定为回环地址，无法代理其它主机上的 server。
 - 只做 HTTP/1.x 转发，不终止 TLS，也不做路径改写（前缀原样透传）。
 

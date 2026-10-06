@@ -121,7 +121,7 @@ void printUsage() {
   stderr.writeln("  setline [server.xml]          Render the setline config for the whole topology:");
   stderr.writeln("                                one entry address routes to every server's http port");
   stderr.writeln("                                (writes conf/setline.json; --output=<file>)");
-  stderr.writeln("                                (--listen=<addr>, --host=<name>)");
+  stderr.writeln("                                (--listen=<addr>)");
   stderr.writeln("  firewall [workdir]            Configure firewalld ports from conf/server.xml");
   stderr.writeln("  pull [--remote=<url>] [workdir]  Fetch conf/server.xml from the control endpoint");
 }
@@ -236,24 +236,25 @@ int cmdResolve(string[] args) {
 }
 
 /**
- * `setline [server.xml] [--output=<file>] [--listen=<addr>] [--host=<name>]`：把 server.xml 的
+ * `setline [server.xml] [--output=<file>] [--listen=<addr>]`：把 server.xml 的
  * 服务拓扑渲染成 setline（本地 HTTP 路径路由器）的 JSON 配置——一个入口地址按路径前缀把请求
  * 转发到各 server 的 http 端口，同一 webapp 的多个实例自动成为端口列表。
  *
+ * 路径取自 webapp 的 `<url path>`（未声明时退回 context path）。同一路径被端口集合不同的多个
+ * webapp 认领时无法判定归属，打印冲突并退出，不写出配置。
+ *
  * 缺省 server.xml 取 `$BAS_HOME/conf/server.xml`，结果写到 `$BAS_HOME/conf/setline.json`，入口
- * `127.0.0.1:8080`，路由归属任意 Host。写完把结果位置、路由条数与入口地址打出来；`--output=-`
- * 时只写 stdout（便于取片段并入全局代理）。
+ * `127.0.0.1:8080`，路由落在 setline 的兜底命名空间 `*`（server.xml 没有 hostname，无法按域名
+ * 分组）。写完把结果位置、路由条数与入口地址打出来；`--output=-` 时只写 stdout（便于取片段并入
+ * 全局代理）。
  */
 int cmdSetline(string[] args) {
   string confFile;
   string outFile;
   auto listen = defaultSetlineListen;
-  auto host = defaultSetlineHost;
   foreach (arg; args) {
     if (arg.startsWith("--listen="))
       listen = arg["--listen=".length .. $];
-    else if (arg.startsWith("--host="))
-      host = arg["--host=".length .. $];
     else if (arg.startsWith("--output="))
       outFile = arg["--output=".length .. $];
     else if (!confFile.length)
@@ -270,8 +271,15 @@ int cmdSetline(string[] args) {
     return 1;
   }
 
-  auto routes = setlineRoutes(parseServerXmlFile(confFile));
-  auto text = renderSetlineConfig(routes, listen, host);
+  auto plan = setlinePlan(parseServerXmlFile(confFile));
+  if (plan.conflicts.length) {
+    foreach (c; plan.conflicts)
+      stderr.writeln("Route conflict on " ~ c.path ~ ": declared by " ~ c.webapps.join(", "));
+    stderr.writeln("Give each webapp its own <url path=\"...\"/> so no two share a path.");
+    return 1;
+  }
+  auto routes = plan.routes;
+  auto text = renderSetlineConfig(routes, listen);
   if (outFile == "-") {
     stdout.write(text);
     stdout.flush();
@@ -300,10 +308,12 @@ int cmdSetline(string[] args) {
 
 /** `setline` 的用法。 */
 private void setlineUsage() {
-  stderr.writeln("Usage: basctl setline [server.xml] [--output=<file>] [--listen=<addr>] [--host=<name>]");
+  stderr.writeln("Usage: basctl setline [server.xml] [--output=<file>] [--listen=<addr>]");
   stderr.writeln("  Renders the setline config for the whole topology: one entry address routes");
   stderr.writeln("  by path prefix to every server's http port. Output defaults to conf/setline.json");
-  stderr.writeln("  (--output=- writes the JSON to stdout instead).");
+  stderr.writeln("  (--output=- writes the JSON to stdout instead; --listen sets the entry address.)");
+  stderr.writeln("  Routes go under setline's fallback namespace \"*\": server.xml has no hostname,");
+  stderr.writeln("  so the whole topology is a single group matching any Host by path.");
 }
 
 /** `BAS_HOME` 有值时取其指向目录，否则取当前工作目录。 */

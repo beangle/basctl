@@ -60,6 +60,94 @@ import std.file : readText;
   assert(routes[1].path == "/api" && routes[1].ports == [9001, 9002]);
 }
 
+@("setlinePlan routes a root webapp by its declared <url path> list") unittest {
+  auto conf = parseServerXml(`
+<bas version="0.14.0">
+  <engines>
+    <engine name="tomcat" type="tomcat" version="11.0.26"/>
+  </engines>
+  <farms>
+    <farm name="a" engine="tomcat">
+      <server name="s1" http="9001"/>
+    </farm>
+    <farm name="b" engine="tomcat">
+      <server name="s1" http="9002"/>
+    </farm>
+  </farms>
+  <webapps>
+    <webapp uri="gav://a:one:1" run-at="a" path="/">
+      <url path="/context1"/>
+      <url path="/context2/"/>
+    </webapp>
+    <webapp uri="gav://a:two:1" run-at="b" path="/">
+      <url path="/context3"/>
+      <url path="/context4"/>
+    </webapp>
+  </webapps>
+</bas>`);
+  auto plan = setlinePlan(conf);
+  // 两个 webapp 的上下文都是 /，靠各自声明的 URL 前缀区分；声明了 <url> 就不再认领 context path。
+  assert(plan.conflicts.length == 0);
+  assert(plan.routes.length == 4);
+  assert(plan.routes[0].path == "/context1" && plan.routes[0].ports == [9001]);
+  assert(plan.routes[1].path == "/context2" && plan.routes[1].ports == [9001]);
+  assert(plan.routes[2].path == "/context3" && plan.routes[2].ports == [9002]);
+  assert(plan.routes[3].path == "/context4" && plan.routes[3].ports == [9002]);
+}
+
+@("setlinePlan reports a conflict when one path lands on different servers") unittest {
+  auto conf = parseServerXml(`
+<bas version="0.14.0">
+  <engines>
+    <engine name="tomcat" type="tomcat" version="11.0.26"/>
+  </engines>
+  <farms>
+    <farm name="a" engine="tomcat">
+      <server name="s1" http="9001"/>
+    </farm>
+    <farm name="b" engine="tomcat">
+      <server name="s1" http="9002"/>
+    </farm>
+  </farms>
+  <webapps>
+    <webapp uri="gav://a:one:1" run-at="a" path="/"/>
+    <webapp uri="gav://a:two:1" run-at="b" path="/"/>
+  </webapps>
+</bas>`);
+  auto plan = setlinePlan(conf);
+  assert(plan.conflicts.length == 1);
+  assert(plan.conflicts[0].path == "/");
+  assert(plan.conflicts[0].webapps == ["gav://a:one:1", "gav://a:two:1"]);
+  // 冲突仍然给出合并后的路由，便于调用方提示后仍能写出可用的配置
+  assert(plan.routes.length == 1 && plan.routes[0].ports == [9001, 9002]);
+}
+
+@("setlinePlan keeps two webapps on one path when they share every server") unittest {
+  auto conf = parseServerXml(`
+<bas version="0.14.0">
+  <engines>
+    <engine name="tomcat" type="tomcat" version="11.0.26"/>
+  </engines>
+  <farms>
+    <farm name="a" engine="tomcat">
+      <server name="s1" http="9001"/>
+    </farm>
+  </farms>
+  <webapps>
+    <webapp uri="gav://a:one:1" run-at="a" path="/">
+      <url path="/context1"/>
+    </webapp>
+    <webapp uri="gav://a:two:1" run-at="a" path="/">
+      <url path="/context1"/>
+    </webapp>
+  </webapps>
+</bas>`);
+  auto plan = setlinePlan(conf);
+  // 端口集合一致时无法区分也无区别，合并即可，不报冲突
+  assert(plan.conflicts.length == 0);
+  assert(plan.routes.length == 1 && plan.routes[0].ports == [9001]);
+}
+
 @("setlineRoutes drops webapps whose server has no http port") unittest {
   auto conf = parseServerXml(`
 <bas version="0.14.0">
@@ -78,15 +166,15 @@ import std.file : readText;
   assert(setlineRoutes(conf).length == 0);
 }
 
-@("renderSetlineConfig writes listen, host and single/multiple ports") unittest {
+@("renderSetlineConfig writes listen, the fallback namespace and single/multiple ports") unittest {
   auto text = renderSetlineConfig([SetlineRoute("/api", [9001]), SetlineRoute("/m", [9001, 9002])],
-      "127.0.0.1:8080", "demo.example.com");
+      "127.0.0.1:8080");
   assert(text == "{\n  \"listen\": \"127.0.0.1:8080\",\n  \"routes\": {\n"
-      ~ "    \"demo.example.com\": {\n      \"/api\": 9001,\n      \"/m\": [9001, 9002]\n    }\n  }\n}\n");
+      ~ "    \"*\": {\n      \"/api\": 9001,\n      \"/m\": [9001, 9002]\n    }\n  }\n}\n");
 }
 
-@("renderSetlineConfig escapes the host and writes an empty route table") unittest {
-  auto text = renderSetlineConfig([], "127.0.0.1:8080", "a\"b");
-  assert(text.canFind(`"a\"b": {}`));
+@("renderSetlineConfig writes an empty route table") unittest {
+  auto text = renderSetlineConfig([], "127.0.0.1:8080");
+  assert(text.canFind(`"*": {}`));
   assert(text.canFind(`"listen": "127.0.0.1:8080"`));
 }

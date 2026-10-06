@@ -103,9 +103,7 @@ import std.format : format;
       <resources><resource name="ds1" url="jdbc:x" type="javax.sql.DataSource"/></resources>
       <farms><farm name="f" engine="t" max-heap-size="1G"><server name="s" http="80" host="h1"/></farm></farms>
       <webapps>
-        <webapp uri="gav://a:b:1" run-at="f" path="/" doc-base="/tmp/a.war" resolve-support="false">
-          <resource-ref ref="ds1"/>
-        </webapp>
+        <webapp uri="gav://a:b:1" run-at="f" path="/" doc-base="/tmp/a.war" resolve-support="false"/>
       </webapps>
     </bas>`;
   auto cfg = parseServerXml(xml);
@@ -123,15 +121,11 @@ import std.format : format;
   auto app = cfg.webapps[0];
   assert(app.contextPath == "");
   assert(app.uri == cfg.webapps[0].uri);
-  assert(app.resources.length == 1);
-  assert(app.resources[0].name == "ds1");
-  assert(app.resources[0].type() == "javax.sql.DataSource");
   assert(!app.resolveSupport);
   assert(app.docBase.length == 0);
   assert(app.libs.isNull);
   assert(app.properties.length == 0);
   assert(!app.getContainerSciFilter(cfg.engines[0]).isNull);
-  assert(cfg.farmResourceNames(cfg.farms[0]) == ["ds1"]);
   assert(cfg.resourceNames() == ["ds1"]);
 }
 
@@ -140,6 +134,54 @@ import std.format : format;
 
   auto xml = `<bas version="1"><engines/><farms><farm name="f" engine="nope"/></farms></bas>`;
   assertThrown!ServerXmlException(parseServerXml(xml));
+}
+
+@("parse webapp <url> children as the exposed url prefixes") unittest {
+  auto xml = `<bas version="1">
+  <engines><engine name="t" type="tomcat-server" version="9"/></engines>
+  <farms><farm name="f" engine="t"><server name="s1" http="8080"/></farm></farms>
+  <webapps>
+    <webapp uri="gav://a:one:1" run-at="f" path="/">
+      <url path="/context1"/>
+      <url path="/context2/"/>
+      <url path="/context1"/>
+    </webapp>
+    <webapp uri="gav://a:two:1" run-at="f" path="/api"/>
+  </webapps>
+</bas>`;
+  auto cfg = parseServerXml(xml);
+
+  // 逐条保留声明顺序，规范化尾部 /，重复的忽略
+  assert(cfg.webapps[0].urls == ["/context1", "/context2"]);
+  // 声明了 <url> 就不再认领 context path
+  assert(cfg.webapps[0].routePaths() == ["/context1", "/context2"]);
+  // 未声明的退回 context path（/ 或空视为 ROOT）
+  assert(cfg.webapps[1].urls.length == 0);
+  assert(cfg.webapps[1].routePaths() == ["/api"]);
+
+  auto root = parseServerXml(`<bas version="1">
+  <engines><engine name="t" type="tomcat-server" version="9"/></engines>
+  <farms><farm name="f" engine="t"><server name="s1" http="8080"/></farm></farms>
+  <webapps><webapp uri="gav://a:one:1" run-at="f" path="/"/></webapps>
+</bas>`);
+  assert(root.webapps[0].routePaths() == ["/"]);
+}
+
+@("reject a webapp <url> that is not an absolute path") unittest {
+  import std.exception : assertThrown;
+
+  static string withUrl(string url) {
+    return `<bas version="1">
+  <engines><engine name="t" type="tomcat-server" version="9"/></engines>
+  <farms><farm name="f" engine="t"><server name="s1" http="8080"/></farm></farms>
+  <webapps><webapp uri="gav://a:one:1" run-at="f" path="/">` ~ url ~ `</webapp></webapps>
+</bas>`;
+  }
+
+  // 缺少 path 属性，或不是以 / 开头
+  assertThrown!ServerXmlException(parseServerXml(withUrl(`<url/>`)));
+  assertThrown!ServerXmlException(parseServerXml(withUrl(`<url path="context1"/>`)));
+  assertThrown!ServerXmlException(parseServerXml(withUrl(`<url path=""/>`)));
 }
 
 @("applyEngineDefault fills tomcat defaults once") unittest {

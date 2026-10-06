@@ -18,11 +18,16 @@
  * `basctl setline`：把 `server.xml` 的服务拓扑渲染成 setline 的 JSON 配置。
  *
  * setline 在本地监听一个入口地址，按 Host + 路径前缀把请求转发到 `127.0.0.1:<port>`。这里把
- * 每个 webapp 的 context path 与它部署到的 server 的 http 端口聚成 routes：同一路径落在多个
- * server 上时合并成端口列表，由 setline 在健康实例间选择（自带 TCP 健康检查）。
+ * 每个 webapp 的对外 URL 前缀（`<url path>`，未声明时退回 context path）与它部署到的 server
+ * 的 http 端口聚成 routes：同一路径落在多个 server 上时合并成端口列表，由 setline 在健康实例间
+ * 选择（自带 TCP 健康检查）。
+ *
+ * 同一路径被端口集合不同的多个 webapp 声明时无法判定归属，记成冲突（`SetlineConflict`）交给
+ * 调用方报错；端口集合相同时合并无害（同一 webapp 的多实例部署），不算冲突。
  *
  * 本模块只做纯计算与拼文本，不做 IO，也不启动 setline。后端固定为回环地址（setline 的约定），
- * 所以生成的路由只对跑在本机的 server 有意义。
+ * 所以生成的路由只对跑在本机的 server 有意义。server.xml 没有 hostname，路由一律写进 setline
+ * 的兜底命名空间 `*`，即整个拓扑是一个分组、按路径匹配任意 Host。
  */
 module bas.setline;
 
@@ -35,12 +40,34 @@ import std.conv : to;
 /** setline 的缺省入口地址，与 setline 自身缺省一致：本地回环，不占特权端口。 */
 enum defaultSetlineListen = "127.0.0.1:8080";
 
-/** 路由缺省归属的 Host；`*` 是 setline 的兜底命名空间，等价于按路径匹配任意 Host。 */
-enum defaultSetlineHost = "*";
+/**
+ * 路由写进 setline 的兜底命名空间 `*`。server.xml 里没有 hostname，basctl 无从得知按域名分组
+ * 的依据，所以固定产出一个分组（`*` 等价于按路径匹配任意 Host）。要归到某个域名下，合并时改键
+ * 即可，命令行不提供覆盖项。
+ */
+enum setlineRouteHost = "*";
 
 /** 一条路由：context path 前缀 + 后端 http 端口（升序、去重）。 */
 struct SetlineRoute {
   string path;
+  int[] ports;
+}
+
+/** 同一 path 被端口集合不同的多个 webapp 声明，无法按路径判定归属。 */
+struct SetlineConflict {
+  string path;
+  string[] webapps;
+}
+
+/** 路由计算结果：可渲染的路由与必须报错的冲突。 */
+struct SetlinePlan {
+  SetlineRoute[] routes;
+  SetlineConflict[] conflicts;
+}
+
+/** 一条路径的认领记录：声明者与其端口集合。 */
+private struct PathClaim {
+  string owner;
   int[] ports;
 }
 
@@ -50,43 +77,70 @@ struct SetlineRoute {
  * 没有 run-at、或 http 端口为 0（未分配）的 webapp 跳过；同一 path 落在多个 server 上时端口
  * 合并，交给 setline 轮询。结果按 path 排序，保证多次运行输出一致。
  */
-SetlineRoute[] setlineRoutes(Container conf) {
+SetlinePlan setlinePlan(Container conf) {
   string[] paths;
-  int[][string] portsByPath;
+  PathClaim[][string] claimsByPath;
   foreach (app; conf.webapps) {
-    auto path = app.contextPath.length ? app.contextPath : "/";
+    int[] ports;
     foreach (server; app.runAt) {
       if (server.http <= 0)
         continue;
-      if (!(path in portsByPath)) {
-        portsByPath[path] = [];
+      if (!ports.canFind(server.http))
+        ports ~= server.http;
+    }
+    if (!ports.length)
+      continue;
+    ports.sort();
+
+    foreach (path; app.routePaths()) {
+      if (!(path in claimsByPath)) {
+        claimsByPath[path] = [];
         paths ~= path;
       }
-      if (!portsByPath[path].canFind(server.http))
-        portsByPath[path] ~= server.http;
+      claimsByPath[path] ~= PathClaim(app.uri, ports);
     }
   }
   paths.sort();
 
-  SetlineRoute[] routes;
+  SetlinePlan plan;
   foreach (path; paths) {
-    auto ports = portsByPath[path];
+    auto claims = claimsByPath[path];
+    auto ports = claims[0].ports.dup;
+    string[] owners = [claims[0].owner];
+    bool conflicted;
+    foreach (claim; claims[1 .. $]) {
+      if (!owners.canFind(claim.owner))
+        owners ~= claim.owner;
+      if (claim.ports != claims[0].ports)
+        conflicted = true;
+      foreach (port; claim.ports) {
+        if (!ports.canFind(port))
+          ports ~= port;
+      }
+    }
     ports.sort();
-    routes ~= SetlineRoute(path, ports);
+    plan.routes ~= SetlineRoute(path, ports);
+    if (conflicted)
+      plan.conflicts ~= SetlineConflict(path, owners);
   }
-  return routes;
+  return plan;
+}
+
+/** 只要路由，忽略冲突（保留给只关心渲染的调用方与测试）。 */
+SetlineRoute[] setlineRoutes(Container conf) {
+  return setlinePlan(conf).routes;
 }
 
 /**
- * 渲染 setline 配置：`listen` 为入口地址，`host` 为路由归属的 Host。单个端口输出数字，多个
- * 端口输出数组（setline 两者都接受）。
+ * 渲染 setline 配置：`listen` 为入口地址，路由一律放在 `setlineRouteHost` 命名空间下。单个端口
+ * 输出数字，多个端口输出数组（setline 两者都接受）。
  */
-string renderSetlineConfig(const(SetlineRoute)[] routes, string listen, string host = defaultSetlineHost) {
+string renderSetlineConfig(const(SetlineRoute)[] routes, string listen) {
   auto sb = appender!string;
   sb.put("{\n");
   sb.put("  \"listen\": \"" ~ jsonEscape(listen) ~ "\",\n");
   sb.put("  \"routes\": {\n");
-  sb.put("    \"" ~ jsonEscape(host) ~ "\": {");
+  sb.put("    \"" ~ jsonEscape(setlineRouteHost) ~ "\": {");
   if (routes.length) {
     sb.put("\n");
     foreach (i, route; routes) {
