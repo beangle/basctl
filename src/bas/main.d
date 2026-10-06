@@ -15,8 +15,8 @@
  */
 
 /**
- * basctl 命令行入口：`version` / `status` / `init` / `make` / `resolve` / `start` /
- * `stop` / `run` / `firewall` / `pull`。
+ * basctl 命令行入口：`version` / `banner` / `status` / `init` / `make` / `resolve` /
+ * `start` / `stop` / `run` / `setline` / `firewall` / `pull`。
  */
 module bas.main;
 
@@ -29,19 +29,20 @@ import bas.init;
 import bas.net;
 import bas.pull;
 import bas.resolver;
+import bas.setline;
 import bas.serverstatus;
 import bas.starter;
 
 import std.algorithm : canFind, sort;
 import std.conv : to;
 import std.exception : enforce;
-import std.file : SpanMode, dirEntries, exists, isDir, readText;
+import std.file : SpanMode, dirEntries, exists, isDir, readText, write;
 import std.format : format;
 import std.path : absolutePath, baseName, buildPath;
 import std.process : Config, environment, execute;
 import std.regex : matchFirst, regex;
 import std.stdio : stderr, stdout, writeln;
-import std.string : indexOf, join, lastIndexOf, split, strip;
+import std.string : indexOf, join, lastIndexOf, split, startsWith, strip;
 
 /** CLI 自身版本，随发布更新。 */
 enum basctlVersion = "0.0.1";
@@ -82,6 +83,8 @@ version (unittest) {
       return 1;
     case "run":
       return runEmbedded(args[2 .. $]);
+    case "setline":
+      return cmdSetline(args[2 .. $]);
     case "firewall":
       return runFirewall(args[1 .. $]);
     case "pull":
@@ -115,6 +118,10 @@ void printUsage() {
   stderr.writeln("  run [options] <app>           Run one webapp in embedded mode");
   stderr.writeln("                                (--engine=<type>-<version>, e.g. tomcat-11.0.25;");
   stderr.writeln("                                bas engine version defaults to " ~ defaultBasVersion ~ ")");
+  stderr.writeln("  setline [server.xml]          Render the setline config for the whole topology:");
+  stderr.writeln("                                one entry address routes to every server's http port");
+  stderr.writeln("                                (writes conf/setline.json; --output=<file>)");
+  stderr.writeln("                                (--listen=<addr>, --host=<name>)");
   stderr.writeln("  firewall [workdir]            Configure firewalld ports from conf/server.xml");
   stderr.writeln("  pull [--remote=<url>] [workdir]  Fetch conf/server.xml from the control endpoint");
 }
@@ -226,6 +233,77 @@ int cmdResolve(string[] args) {
 
   auto missing = resolveWebapps(basHome, container.repository, container.snapshotRepo, webapps);
   return missing.length ? -1 : 0;
+}
+
+/**
+ * `setline [server.xml] [--output=<file>] [--listen=<addr>] [--host=<name>]`：把 server.xml 的
+ * 服务拓扑渲染成 setline（本地 HTTP 路径路由器）的 JSON 配置——一个入口地址按路径前缀把请求
+ * 转发到各 server 的 http 端口，同一 webapp 的多个实例自动成为端口列表。
+ *
+ * 缺省 server.xml 取 `$BAS_HOME/conf/server.xml`，结果写到 `$BAS_HOME/conf/setline.json`，入口
+ * `127.0.0.1:8080`，路由归属任意 Host。写完把结果位置、路由条数与入口地址打出来；`--output=-`
+ * 时只写 stdout（便于取片段并入全局代理）。
+ */
+int cmdSetline(string[] args) {
+  string confFile;
+  string outFile;
+  auto listen = defaultSetlineListen;
+  auto host = defaultSetlineHost;
+  foreach (arg; args) {
+    if (arg.startsWith("--listen="))
+      listen = arg["--listen=".length .. $];
+    else if (arg.startsWith("--host="))
+      host = arg["--host=".length .. $];
+    else if (arg.startsWith("--output="))
+      outFile = arg["--output=".length .. $];
+    else if (!confFile.length)
+      confFile = arg;
+    else {
+      setlineUsage();
+      return 1;
+    }
+  }
+  if (!confFile.length)
+    confFile = buildPath(resolveBasHome(), "conf", "server.xml");
+  if (!exists(confFile)) {
+    stderr.writeln("Cannot find config file " ~ confFile);
+    return 1;
+  }
+
+  auto routes = setlineRoutes(parseServerXmlFile(confFile));
+  auto text = renderSetlineConfig(routes, listen, host);
+  if (outFile == "-") {
+    stdout.write(text);
+    stdout.flush();
+    stderr.writeln(format!"%s routes, entry http://%s"(routes.length, listen));
+    return 0;
+  }
+
+  if (!outFile.length)
+    outFile = buildPath(resolveBasHome(), "conf", "setline.json");
+  auto target = absolutePath(outFile);
+  try
+    write(target, text);
+  catch (Exception e) {
+    // std.file 的错误信息自带路径前缀，去掉避免与我们的提示重复
+    auto reason = e.msg;
+    if (reason.startsWith(target ~ ": "))
+      reason = reason[target.length + 2 .. $];
+    stderr.writeln("Cannot write " ~ target ~ ": " ~ reason);
+    return 1;
+  }
+  writeln("write ", target);
+  writeln(format!"%s routes, entry http://%s"(routes.length, listen));
+  writeln("run: setline -f " ~ target);
+  return 0;
+}
+
+/** `setline` 的用法。 */
+private void setlineUsage() {
+  stderr.writeln("Usage: basctl setline [server.xml] [--output=<file>] [--listen=<addr>] [--host=<name>]");
+  stderr.writeln("  Renders the setline config for the whole topology: one entry address routes");
+  stderr.writeln("  by path prefix to every server's http port. Output defaults to conf/setline.json");
+  stderr.writeln("  (--output=- writes the JSON to stdout instead).");
 }
 
 /** `BAS_HOME` 有值时取其指向目录，否则取当前工作目录。 */

@@ -25,6 +25,7 @@ usage() {
   echo "  start       Start instances via jstart           (basctl start <farm|server|all>)"
   echo "  stop        Stop instances started by start      (basctl stop <farm|server|all>)"
   echo "  run         Run one webapp in embedded mode      (basctl run --engine=<type>-<ver> <war>)"
+  echo "  setline     Render the local setline proxy config (basctl setline)"
   echo "  restart     resolve, then stop + start"
   echo "  pull        Fetch and update conf/server.xml    (basctl pull)"
   exit 1
@@ -38,6 +39,7 @@ case "$cmd" in
   start)    exec "$BAS_HOME/bin/start.sh" "${@:2}" ;;
   stop)     exec "$BAS_HOME/bin/stop.sh" "${@:2}" ;;
   run)      exec "$basctl_cmd" run --workdir="$BAS_HOME" "${@:2}" ;;
+  setline)  exec "$basctl_cmd" setline "$conf" "${@:2}" ;;
   restart)  exec "$BAS_HOME/bin/restart.sh" "${@:2}" ;;
   pull)     exec "$basctl_cmd" pull "$BAS_HOME" ;;
   *)        usage ;;

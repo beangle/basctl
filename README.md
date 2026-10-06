@@ -7,7 +7,8 @@
 
 `engine` 模块的**容器入口**（creator，配合 jstart 的 war 运行协议）也由 basctl 提供，
 见 [docs/engine-creator.md](docs/engine-creator.md)；`start` 的流程与生成的 spec 见
-[docs/start.md](docs/start.md)。
+[docs/start.md](docs/start.md)；`setline` 把拓扑渲染成本地 setline 代理配置，见
+[docs/setline.md](docs/setline.md)。
 
 ## 版本语义
 
@@ -47,6 +48,10 @@ dub test --compiler=ldc2
 产物为 `target/basctl`。单元测试集中在 `test/`（每个源模块一个 `*_test.d`），用 D 内建
 `unittest` + `@("...")` 具名用例。
 
+打包成 deb / rpm（仅安装 `/usr/bin/basctl`）见 [scripts/README.md](scripts/README.md)：
+`scripts/build_deb.sh`（Debian 系）与 `scripts/build_rpm.sh`（Fedora/RHEL 系），版本取自
+`src/bas/main.d` 的 `basctlVersion`，与 `basctl version` 的输出一致。
+
 ## 命令
 
 | 命令 | 说明 |
@@ -60,6 +65,7 @@ dub test --compiler=ldc2
 | `basctl start [server.xml] <farm\|server\|all>` | 按 farm 生成 jstart spec、resolve 并后台启动实例 |
 | `basctl stop [server.xml] <farm\|server\|all> [--force] [--timeout=<sec>]` | 停止 `start` 启动的实例（逐个 `jstart stop`） |
 | `basctl run --engine=<type>-<version> <app>` | 嵌入式运行单个 webapp：`--engine=tomcat-11.0.25` 同时给出容器类型与版本，生成单应用 spec 后前台 `jstart run` |
+| `basctl setline [server.xml] [--output=<file>] [--listen=<addr>] [--host=<name>]` | 把服务拓扑渲染成 setline 配置（缺省写 `conf/setline.json` 并提示位置）：一个入口地址按路径前缀转发到各 server 的 http 端口，同一 webapp 的多实例自动成为端口列表，见 [docs/setline.md](docs/setline.md) |
 | `basctl make <type> [options]` | 容器入口（creator）：把 jstart 的 `[engine] init` 协议翻译成容器启动命令 |
 | `basctl firewall [workdir]` | 按配置交互式配置 firewalld 端口 |
 | `basctl pull [--remote=<url>] [workdir]` | 从控制端拉取 `conf/server.xml`（请求带 `ip:` 头，旧配置备份为 `server_old.xml`） |
