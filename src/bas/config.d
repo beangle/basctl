@@ -18,8 +18,8 @@
  * `server.xml`（`<bas>`）的配置模型与解析（不含 Proxy）。格式定义见 `resources/bas-1.0.0.xsd`。
  *
  * 解析结果是一个可直接遍历的对象图：`Container` 持有 engines / hosts / farms /
- * webapps / resources，`Farm` 引用 `Engine`，`Server` 引用 `Farm` 与 `Host`，
- * `Webapp.runAt` 直接引用 `Server` 对象。
+ * webapps / resources 与可选的 `<setline>`，`Farm` 引用 `Engine`，`Server` 引用
+ * `Farm` 与 `Host`，`Webapp.runAt` 直接引用 `Server` 对象。
  */
 module bas.config;
 
@@ -518,6 +518,11 @@ private string[] splitRepos(string urls) {
 /** `server.xml` 根对象：engines / hosts / farms / webapps / resources。 */
 class Container {
   string version_;
+  /**
+   * `<setline listen="...">` 的入口地址；未声明 `<setline>` 时为 `Nullable.init`（禁用）。
+   * 出现即启用：basctl 据此判断要不要维护 setline 的路由，不再另设开关。
+   */
+  Nullable!string setlineListen;
   Repository repository;
   SnapshotRepo snapshotRepo;
   Engine[] engines;
@@ -672,6 +677,9 @@ Container parseServerXml(string xmlText) {
         if (w.name == "webapp")
           conf.webapps ~= parseWebapp(conf, w);
       }
+      break;
+    case "setline":
+      conf.setlineListen = nullable(requireAttr(section, "listen", "<setline>"));
       break;
     default:
       break;

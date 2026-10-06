@@ -25,7 +25,7 @@ usage() {
   echo "  start       Start instances via jstart           (basctl start <farm|server|all>)"
   echo "  stop        Stop instances started by start      (basctl stop <farm|server|all>)"
   echo "  run         Run one webapp in embedded mode      (basctl run --engine=<type>-<ver> <war>)"
-  echo "  setline     Render the local setline proxy config (basctl setline)"
+  echo "  setline     Render/sync/stop the local setline proxy (basctl setline [--sync|--stop])"
   echo "  restart     resolve, then stop + start"
   echo "  pull        Fetch and update conf/server.xml    (basctl pull)"
   exit 1

@@ -59,6 +59,7 @@
         <xs:element name="resources" type="resourcesType" minOccurs="0"/>
         <xs:element name="farms" type="farmsType" minOccurs="0"/>
         <xs:element name="webapps" type="webappsType" minOccurs="0"/>
+        <xs:element name="setline" type="setlineType" minOccurs="0"/>
       </xs:all>
       <xs:attribute name="version" type="xs:string" use="required">
         <xs:annotation>
@@ -350,6 +351,21 @@ accept-count/connection-timeout；Undertow 只用 accept-count/connection-timeou
     <xs:attribute name="path" type="xs:string" use="required">
       <xs:annotation>
         <xs:documentation>以 / 开头的 URL 前缀；交由 basctl 规范化（去掉尾部 /）。</xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+  </xs:complexType>
+
+  <!-- ================= setline ================= -->
+
+  <xs:complexType name="setlineType">
+    <xs:annotation>
+      <xs:documentation>本机 setline 入口（HTTP 路径路由器）。元素出现即启用：basctl 起停实例时
+        把 server.xml 的拓扑同步成 setline 路由，需要时就在本机拉起 setline；不出现即禁用，
+        不再另设 shell 开关。管理接口不做鉴权，只接受本机来源的请求。</xs:documentation>
+    </xs:annotation>
+    <xs:attribute name="listen" type="xs:string" use="required">
+      <xs:annotation>
+        <xs:documentation>入口地址，与 setline 配置的 listen 同义：8080 / *:8080 / 127.0.0.1:8080。</xs:documentation>
       </xs:annotation>
     </xs:attribute>
   </xs:complexType>

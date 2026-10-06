@@ -140,18 +140,30 @@ string renderSetlineConfig(const(SetlineRoute)[] routes, string listen) {
   sb.put("{\n");
   sb.put("  \"listen\": \"" ~ jsonEscape(listen) ~ "\",\n");
   sb.put("  \"routes\": {\n");
-  sb.put("    \"" ~ jsonEscape(setlineRouteHost) ~ "\": {");
+  sb.put("    \"" ~ jsonEscape(setlineRouteHost) ~ "\": " ~ renderRouteMap(routes, "    ") ~ "\n");
+  sb.put("  }\n");
+  sb.put("}\n");
+  return sb.data;
+}
+
+/**
+ * 渲染 `path -> port|[ports]` 的映射对象，即 setline 路由表里一个 host 分组的内容。
+ *
+ * 运行期同步（`PUT /__setline/routes/all`）要的正是这段；`indent` 只影响换行后的缩进，
+ * 便于嵌进完整配置文件。
+ */
+string renderRouteMap(const(SetlineRoute)[] routes, string indent = "") {
+  auto sb = appender!string;
+  sb.put("{");
   if (routes.length) {
     sb.put("\n");
     foreach (i, route; routes) {
-      sb.put("      \"" ~ jsonEscape(route.path) ~ "\": " ~ portsJson(route.ports));
+      sb.put(indent ~ "  \"" ~ jsonEscape(route.path) ~ "\": " ~ portsJson(route.ports));
       sb.put(i + 1 < routes.length ? ",\n" : "\n");
     }
-    sb.put("    }\n");
-  } else
-    sb.put("}\n");
-  sb.put("  }\n");
-  sb.put("}\n");
+    sb.put(indent);
+  }
+  sb.put("}");
   return sb.data;
 }
 

@@ -17,7 +17,26 @@
 /** Unit tests for bas.main listener-snapshot parsing. */
 module test.main_test;
 
-import bas.main : extractListenPort, portsFromNetstat, portsFromSs;
+import bas.main : extractListenPort, portsFromNetstat, portsFromSs, setlineFileListen;
+
+import std.file : remove, write;
+
+@("setlineFileListen reads the listen field as written") unittest {
+  auto path = "/tmp/basctl-setline-file-listen.json";
+  scope (exit) remove(path);
+
+  write(path, `{"listen":"127.0.0.1:8080","adminToken":"x"}`);
+  assert(setlineFileListen(path) == "127.0.0.1:8080");
+
+  write(path, `{"listen":8080}`);
+  assert(setlineFileListen(path) == "8080");
+
+  write(path, `{"routes":{}}`);
+  assert(setlineFileListen(path) == "");
+
+  write(path, "not json");
+  assert(setlineFileListen(path) == "");
+}
 
 @("extractListenPort ipv4 and bracket ipv6") unittest {
   assert(extractListenPort("127.0.0.1:8080") == "8080");

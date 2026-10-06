@@ -25,4 +25,5 @@
     <webapp  uri="gav://org.beangle.ems:beangle-ems-ws:4.17.2" run-at="platform" path="/api/platform" />
   </webapps>
 
+  <setline listen="127.0.0.1:8080"/>
 </bas>

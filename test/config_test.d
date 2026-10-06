@@ -39,6 +39,9 @@ import std.format : format;
   assert(cfg.hosts.length == 1);
   assert(cfg.hosts[0].name == "localhost" && cfg.hosts[0].ip == "127.0.0.1");
 
+  assert(!cfg.setlineListen.isNull);
+  assert(cfg.setlineListen.get == "127.0.0.1:8080");
+
   assert(cfg.farms.length == 2);
   assert(cfg.farms[0].name == "tools");
   assert(cfg.farms[0].maxHeapSize == "300M");
@@ -134,6 +137,19 @@ import std.format : format;
 
   auto xml = `<bas version="1"><engines/><farms><farm name="f" engine="nope"/></farms></bas>`;
   assertThrown!ServerXmlException(parseServerXml(xml));
+}
+
+@("parse the optional setline entry") unittest {
+  auto cfg = parseServerXml(`<bas version="1">
+    <setline listen="*:8080"/>
+    <engines><engine name="t" type="tomcat" version="11"/></engines>
+    <farms><farm name="f" engine="t"><server name="s1" http="8080"/></farm></farms>
+  </bas>`);
+  assert(!cfg.setlineListen.isNull);
+  assert(cfg.setlineListen.get == "*:8080");
+
+  auto off = parseServerXml(`<bas version="1"><engines/></bas>`);
+  assert(off.setlineListen.isNull);
 }
 
 @("parse webapp <url> children as the exposed url prefixes") unittest {

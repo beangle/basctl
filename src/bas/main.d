@@ -30,15 +30,17 @@ import bas.net;
 import bas.pull;
 import bas.resolver;
 import bas.setline;
+import bas.setlineproc;
 import bas.serverstatus;
 import bas.starter;
 
 import std.algorithm : canFind, sort;
 import std.conv : to;
 import std.exception : enforce;
-import std.file : SpanMode, dirEntries, exists, isDir, readText, write;
+import std.file : SpanMode, dirEntries, exists, isDir, mkdirRecurse, readText, write;
 import std.format : format;
-import std.path : absolutePath, baseName, buildPath;
+import std.json : JSONType, parseJSON;
+import std.path : absolutePath, baseName, buildPath, dirName;
 import std.process : Config, environment, execute;
 import std.regex : matchFirst, regex;
 import std.stdio : stderr, stdout, writeln;
@@ -236,7 +238,8 @@ int cmdResolve(string[] args) {
 }
 
 /**
- * `setline [server.xml] [--output=<file>] [--listen=<addr>]`：把 server.xml 的
+ * `setline [server.xml] [--output=<file>] [--listen=<addr>] [--sync] [--stop] [--force]`：
+ * 把 server.xml 的
  * 服务拓扑渲染成 setline（本地 HTTP 路径路由器）的 JSON 配置——一个入口地址按路径前缀把请求
  * 转发到各 server 的 http 端口，同一 webapp 的多个实例自动成为端口列表。
  *
@@ -244,19 +247,31 @@ int cmdResolve(string[] args) {
  * webapp 认领时无法判定归属，打印冲突并退出，不写出配置。
  *
  * 缺省 server.xml 取 `$BAS_HOME/conf/server.xml`，结果写到 `$BAS_HOME/conf/setline.json`，入口
- * `127.0.0.1:8080`，路由落在 setline 的兜底命名空间 `*`（server.xml 没有 hostname，无法按域名
- * 分组）。写完把结果位置、路由条数与入口地址打出来；`--output=-` 时只写 stdout（便于取片段并入
- * 全局代理）。
+ * 取 `--listen` > `<setline listen>` > `127.0.0.1:8080`，路由落在 setline 的兜底命名空间 `*`
+ * （server.xml 没有 hostname，无法按域名分组）。写完把结果位置、路由条数与入口地址打出来；
+ * `--output=-` 时只写 stdout（便于取片段并入全局代理）。
+ *
+ * 两个子模式：
+ *  - `--sync`：确保入口可用（在跑就复用，空闲就地启动），再把整组路由推给 setline；
+ *  - `--stop [--force]`：只停 basctl 就地启动的那个（`$BAS_HOME/run/setline.pid`），
+ *    进程不退时加 `--force` 才 SIGKILL。
  */
 int cmdSetline(string[] args) {
   string confFile;
   string outFile;
-  auto listen = defaultSetlineListen;
+  string listen;
+  bool sync, stop, force;
   foreach (arg; args) {
     if (arg.startsWith("--listen="))
       listen = arg["--listen=".length .. $];
     else if (arg.startsWith("--output="))
       outFile = arg["--output=".length .. $];
+    else if (arg == "--sync")
+      sync = true;
+    else if (arg == "--stop")
+      stop = true;
+    else if (arg == "--force")
+      force = true;
     else if (!confFile.length)
       confFile = arg;
     else {
@@ -264,14 +279,33 @@ int cmdSetline(string[] args) {
       return 1;
     }
   }
+
+  auto basHome = resolveBasHome();
+  if (stop) {
+    // bas.sh 总会把 conf/server.xml 当第一个参数传进来；--stop 不需要它，忽略即可
+    if (sync || outFile.length) {
+      setlineUsage();
+      return 1;
+    }
+    return stopSetline(basHome, force);
+  }
+  if (sync && outFile.length) {
+    stderr.writeln("--sync pushes routes to the running setline; it does not use --output.");
+    return 1;
+  }
+
   if (!confFile.length)
-    confFile = buildPath(resolveBasHome(), "conf", "server.xml");
+    confFile = buildPath(basHome, "conf", "server.xml");
   if (!exists(confFile)) {
     stderr.writeln("Cannot find config file " ~ confFile);
     return 1;
   }
 
-  auto plan = setlinePlan(parseServerXmlFile(confFile));
+  auto container = parseServerXmlFile(confFile);
+  if (!listen.length)
+    listen = container.setlineListen.isNull ? defaultSetlineListen : strip(container.setlineListen.get);
+
+  auto plan = setlinePlan(container);
   if (plan.conflicts.length) {
     foreach (c; plan.conflicts)
       stderr.writeln("Route conflict on " ~ c.path ~ ": declared by " ~ c.webapps.join(", "));
@@ -279,6 +313,10 @@ int cmdSetline(string[] args) {
     return 1;
   }
   auto routes = plan.routes;
+
+  if (sync)
+    return syncSetlineRoutes(basHome, routes, listen);
+
   auto text = renderSetlineConfig(routes, listen);
   if (outFile == "-") {
     stdout.write(text);
@@ -288,7 +326,7 @@ int cmdSetline(string[] args) {
   }
 
   if (!outFile.length)
-    outFile = buildPath(resolveBasHome(), "conf", "setline.json");
+    outFile = buildPath(basHome, "conf", "setline.json");
   auto target = absolutePath(outFile);
   try
     write(target, text);
@@ -306,12 +344,73 @@ int cmdSetline(string[] args) {
   return 0;
 }
 
+/**
+ * `--sync`：先要一份 `conf/setline.json`（就地启动要用它；不存在才写骨架，已有的一律不改——
+ * 那是 setline 进程的配置，里面有 `adminToken` 这类 basctl 不该碰的东西），再确保入口可用
+ * （在跑就复用，空闲就地启动），最后把整组路由推过去。路由由 setline 自己写回文件，重启不丢。
+ */
+private int syncSetlineRoutes(string basHome, const(SetlineRoute)[] routes, string listen) {
+  ListenEndpoint endpoint;
+  try
+    endpoint = parseListenEndpoint(listen);
+  catch (Exception e) {
+    stderr.writeln(e.msg);
+    return 1;
+  }
+
+  auto confFile = buildPath(basHome, "conf", "setline.json");
+  if (!exists(confFile)) {
+    mkdirRecurse(dirName(confFile));
+    try
+      write(confFile, renderSetlineConfig(null, listen));
+    catch (Exception e) {
+      stderr.writeln("Cannot write " ~ confFile ~ ": " ~ e.msg);
+      return 1;
+    }
+  } else {
+    auto fileListen = setlineFileListen(confFile);
+    bool differs;
+    try
+      differs = fileListen.length > 0 && parseListenEndpoint(fileListen) != endpoint;
+    catch (Exception)
+      differs = false;
+    if (differs)
+      stderr.writeln("Note: " ~ confFile ~ " says listen=" ~ fileListen ~ " but this command uses "
+          ~ listen ~ "; the running setline follows the file. The routes below go to " ~ listen ~ ".");
+  }
+
+  if (syncSetline(basHome, endpoint, renderRouteMap(routes)) != 0)
+    return 1;
+  writeln(format!"%s routes synced to http://%s"(routes.length, endpoint.toString()));
+  return 0;
+}
+
+/** 读 `conf/setline.json` 里 `listen` 的原始写法；文件或字段不可用时返回空串。 */
+public string setlineFileListen(string path) {
+  try {
+    auto root = parseJSON(readText(path));
+    if (!("listen" in root.object))
+      return "";
+    auto listen = root["listen"];
+    if (listen.type == JSONType.string)
+      return strip(listen.str);
+    if (listen.type == JSONType.integer)
+      return listen.integer.to!string;
+  }
+  catch (Exception) {
+  }
+  return "";
+}
+
 /** `setline` 的用法。 */
 private void setlineUsage() {
-  stderr.writeln("Usage: basctl setline [server.xml] [--output=<file>] [--listen=<addr>]");
+  stderr.writeln("Usage: basctl setline [server.xml] [--output=<file>] [--listen=<addr>] [--sync]");
+  stderr.writeln("       basctl setline --stop [--force]");
   stderr.writeln("  Renders the setline config for the whole topology: one entry address routes");
   stderr.writeln("  by path prefix to every server's http port. Output defaults to conf/setline.json");
   stderr.writeln("  (--output=- writes the JSON to stdout instead; --listen sets the entry address.)");
+  stderr.writeln("  --sync pushes the routes to a running setline, starting one if the entry is free;");
+  stderr.writeln("  --stop stops the instance basctl started ($BAS_HOME/run/setline.pid), --force SIGKILLs it.");
   stderr.writeln("  Routes go under setline's fallback namespace \"*\": server.xml has no hostname,");
   stderr.writeln("  so the whole topology is a single group matching any Host by path.");
 }

@@ -8,7 +8,10 @@
 `engine` 模块的**容器入口**（creator，配合 jstart 的 war 运行协议）也由 basctl 提供，
 见 [docs/engine-creator.md](docs/engine-creator.md)；`start` 的流程与生成的 spec 见
 [docs/start.md](docs/start.md)；`setline` 把拓扑渲染成本地 setline 代理配置，见
-[docs/setline.md](docs/setline.md)。
+[docs/setline.md](docs/setline.md)；围绕 setline 的后续设想（动态端口、自动注册、对账、容器化）
+见 [docs/setline-roadmap.md](docs/setline-roadmap.md)，其中的实例运行信息格式见
+[docs/server-info.md](docs/server-info.md)、入口配置与启用规则见
+[docs/setline-config.md](docs/setline-config.md)。
 
 ## 版本语义
 
@@ -66,6 +69,7 @@ dub test --compiler=ldc2
 | `basctl stop [server.xml] <farm\|server\|all> [--force] [--timeout=<sec>]` | 停止 `start` 启动的实例（逐个 `jstart stop`） |
 | `basctl run --engine=<type>-<version> <app>` | 嵌入式运行单个 webapp：`--engine=tomcat-11.0.25` 同时给出容器类型与版本，生成单应用 spec 后前台 `jstart run` |
 | `basctl setline [server.xml] [--output=<file>] [--listen=<addr>]` | 把服务拓扑渲染成 setline 配置（缺省写 `conf/setline.json` 并提示位置）：一个入口地址按路径前缀转发到各 server 的 http 端口，同一 webapp 的多实例自动成为端口列表，见 [docs/setline.md](docs/setline.md) |
+| `basctl setline --sync` / `--stop [--force]` | 把整组路由推给正在跑的 setline（入口空着就地拉起来）／停掉 basctl 就地启动的那个，见 [docs/setline.md](docs/setline.md) |
 | `basctl make <type> [options]` | 容器入口（creator）：把 jstart 的 `[engine] init` 协议翻译成容器启动命令 |
 | `basctl firewall [workdir]` | 按配置交互式配置 firewalld 端口 |
 | `basctl pull [--remote=<url>] [workdir]` | 从控制端拉取 `conf/server.xml`（请求带 `ip:` 头，旧配置备份为 `server_old.xml`） |
@@ -93,9 +97,11 @@ basctl init --dry-run /opt/bas
 ```
 $BAS_HOME/
   conf/server.xml
+  conf/setline.json             # 本机 setline 入口配置（<setline> 启用时，归 setline 进程所有）
   engines/<name>-<version>/     # 解压并按需裁剪后的 Tomcat
   servers/<farm>.<server>/      # 单个实例的 catalina.base
   webapps/                      # http 直链与 SNAPSHOT 覆盖的落地目录
+  run/                          # 机器级守护进程的运行态（如就地启动的 setline.pid）
   logs/
 ```
 
