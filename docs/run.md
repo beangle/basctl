@@ -108,3 +108,7 @@ logback 等 provider 与 CDI 相关 API 仍按需由应用自带。
 
 `--engine` 也接受 `tomcat-server-<version>`，但那条路径仍会解压全量发行包；要快速起一个
 war，用嵌入式的 `tomcat` / `undertow` / `jetty`。
+
+`run` 是纯前台：不写 `server.info`、不注册到 setline、不在 `BAS_HOME` 留痕，退出就靠 Ctrl-C
+（终端把 SIGINT 转给整个前台进程组，jstart 与容器进程一起退出，本命令不额外转发信号）。
+需要重启、按 `BAS_HOME` 管起来、对外暴露路由时，用 `basctl start`。

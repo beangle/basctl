@@ -1,8 +1,9 @@
 # setline 集成 roadmap
 
 本文件跟踪 bas / basctl 与 setline 的集成设想，供后续核对与跟踪。每项用复选框表示进度，落地后
-回填 commit。**当前的落地情况**：R0 / R1 / R2 / R3 / R4 / R5 / R7（除 embed 单应用注册）/ R8 /
-R9 已完成，R6 与 R7 的 embed 单应用注册尚未开始。
+回填 commit。**当前的落地情况**：R0 / R1 / R2 / R3 / R4 / R5 /
+R7（route 列 + `start` 预检）/ R8 / R9 已完成；R6 未开始；R7 原设想的「embed 单应用注册」已明确不做
+（`run` 保持纯前台，见 R7）。
 
 | 编号 | 主题 | 状态 | 依赖 |
 |---|---|---|---|
@@ -13,7 +14,7 @@ R9 已完成，R6 与 R7 的 embed 单应用注册尚未开始。
 | R4 | basctl 容器化：一机器一出口 | 已落地（见 [container.md](container.md)） | R1-R3 |
 | R5 | host 分组（多人 / 多项目共享） | 已落地（见 [setline-config.md](setline-config.md)） | R2、R3 |
 | R6 | 生产侧 agent manifest 通道 | 未开始 | 独立 |
-| R7 | 命令面融合 | 部分落地（route 列、start 预检；embed 单应用注册未开始） | R1-R3 |
+| R7 | 命令面融合 | 部分落地（route 列、start 预检；embed 单应用注册：不做） | R1-R3 |
 | R8 | jstart 精简：去掉 `app.pid` 与 `stop` | 已落地 | 独立 |
 | R9 | setline 管理面：写只认本机、读保留 `adminToken` | 已落地 | 独立 |
 
@@ -249,7 +250,9 @@ haproxy / nginx。
 **目标**：把"路由"从一条独立命令（`basctl setline`）摊进日常命令面——看状态、起停、跑单应用时
 都能直接看到/维护自己那一格路由，不必记着额外再敲一次 `--sync`。
 
-**进度**：route 列与 `start` 预检已落地，embed 单应用注册未开始。
+**进度**：route 列与 `start` 预检已落地。原设想的「embed 单应用注册」（`basctl run --route=<路径>`）
+**已决定不做**：`run` 是一次性的前台委托（写 spec → `exec jstart run`，退出码就是服务进程的退出码），
+Ctrl-C 由终端整组转发，它不写 `server.info`、不碰 setline，也不在 `BAS_HOME` 留痕。
 
 - `basctl status` 的 route 列：拿运行中实例该有的路由（`runningPlan`）与 setline 上的实际路由
   对照，报 `missing on setline` / `setline has …, want …` / `not in this BAS_HOME`，全对得上就是
@@ -259,13 +262,14 @@ haproxy / nginx。
 - `start` 预检：R2 的"冲突前置"已经覆盖了**声明了端口**的拓扑（`setlinePlan`，配置级，跑不跑都
   算）；`http="0"`（动态端口）的冲突要等端口分配完，由起完那次对账兜底——那时冲突只警告、不写
   路由，因此现象是"实例起来了但没路由"，不是"启动失败"。
-- 未开始：`basctl run --port=0 --route=/x` 让 embed 的单应用也在 setline 上注册一格、退出即摘除，
-  复活"单应用快速入口"。
+- 不做：让 embed 的单应用（`basctl run`）在 setline 上注册一格、退出即摘除。`run` 是开发期的
+  临时前台进程，行为要可预期地"跑完就没了"；真要长期对外，用 `basctl start` 走 `server.info`
+  那条路（R0-R2）。因此 `run` 连 `--port=0` 的动态端口分配都不需要——端口由 jstart / 容器自己给。
 
 **验收**
 
 - [x] `basctl status` 增加 route 列（对 `GET /__setline/routes` 反查）
-- [ ] `basctl run --port=0 --route=/x`：embed 单应用自动注册、退出摘除，复活"单应用快速入口"
+- [x] 决定 `run` 不注册 setline（前台执行、Ctrl-C 退出即可），本项验收项撤销
 - [x] `basctl start` 前做冲突预检（同 R2）
 
 ## R8 jstart 精简：去掉 `app.pid` 与 `stop`
