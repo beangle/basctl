@@ -66,7 +66,7 @@ dub test --compiler=ldc2
 |---|---|
 | `basctl version` | 打印 `basctl <版本>`（单行纯文本，便于脚本取值） |
 | `basctl banner [server.xml]` | 操作者横幅：logo + bas 引擎版本（取自 `<bas version>`）+ basctl 版本 + 本机地址；`bas.sh version` 调它。图形为纯 ASCII，只在交互终端出现，重定向到日志/管道时只剩版本行与本机地址 |
-| `basctl status` | 列出 `$BAS_HOME/servers` 下运行中的实例：读 `server.info` 展示 pid、端口、引擎、启动时间与各 webapp 的对外 url；pid 已不在的显示为 `stale`。配了 `<setline>` 时另起一节报名命空间、入口地址与通不通（`up` / `down`） |
+| `basctl status` | 列出 `$BAS_HOME/servers` 下运行中的实例：读 `server.info` 展示 pid、端口、引擎、启动时间与各 webapp 的对外 url；pid 已不在的显示为 `stale`。配了 `<setline>` 时另起一节报名命空间、入口地址与通不通（`up` / `down`），并读一次 `GET /__setline/routes`（setline 对本机免凭据）给出 route 列（缺 / 端口对不上 / 多 / `routes in sync`） |
 | `basctl init [--force] [--dry-run] [workdir]` | 初始化组件目录：把控制脚本铺到 `<workdir>/bin`，并建 `conf/` |
 | `basctl make [server.xml] <farm\|server\|all>` | 只准备不启动：生成 jstart spec 并 `jstart resolve` 预取依赖 |
 | `basctl resolve <server.xml> [pattern...]` | 只解析 webapp，不生成实例 |

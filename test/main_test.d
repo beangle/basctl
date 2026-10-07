@@ -18,8 +18,10 @@
 module test.main_test;
 
 import bas.config : Container, parseServerXml;
-import bas.main : setlineStatusLine, staleStatusLine, statusLines;
+import bas.main : setlineStatusLines, staleStatusLine, statusLines;
 import bas.serverinfo : ServerInfo, WebappInfo;
+
+import core.thread : Thread;
 
 import std.algorithm : canFind;
 import std.conv : to;
@@ -61,7 +63,7 @@ import std.typecons : nullable;
   assert(staleStatusLine(info, "platform.server2") == "platform.server2(stale port=20002)");
 }
 
-@("setlineStatusLine reports the namespace, the endpoint and whether it answers") unittest {
+@("setlineStatusLines reports the namespace, the endpoint and whether it answers") unittest {
   // 用例与别的用例并行跑，端口是共享资源：刚释放的端口可能被别的用例抢走，所以换一个端口重试。
   string endpoint;
   bool down;
@@ -71,37 +73,64 @@ import std.typecons : nullable;
     probe.bind(new InternetAddress("127.0.0.1", 0));
     endpoint = "127.0.0.1:" ~ (cast(InternetAddress) probe.localAddress).port.to!string;
     probe.close();
-    if (setlineStatusLine(setlineContainer("alice.localhost", endpoint))
-        == "host=alice.localhost endpoint=" ~ endpoint ~ " (down)") {
+    if (setlineStatusLines(setlineContainer("alice.localhost", endpoint), [])
+        == ["host=alice.localhost endpoint=" ~ endpoint ~ " (down)"]) {
       down = true;
       break;
     }
   }
   assert(down, "no probed port stayed free long enough to observe 'down'");
 
-  // 入口有人监听：报 up。basctl 不判断坐的是不是我们的 setline（那要写一次路由才知道）。
+  // 入口有人监听：报 up，route 列如实说"读不动"。不判断坐的是不是我们的 setline——status 只读，
+  // 不做带副作用的写探测。这里接一下就连关，让 curl 立刻失败，不必等它的 --max-time。
   auto listener = new Socket(AddressFamily.INET, SocketType.STREAM);
   scope (exit) listener.close();
   listener.bind(new InternetAddress("127.0.0.1", 0));
   listener.listen(1);
   auto upEndpoint = "127.0.0.1:" ~ (cast(InternetAddress) listener.localAddress).port.to!string;
-  assert(setlineStatusLine(setlineContainer("alice.localhost", upEndpoint))
-      == "host=alice.localhost endpoint=" ~ upEndpoint ~ " (up)");
+  auto acceptor = new Thread({
+    listener.accept().close();
+  });
+  acceptor.start();
+  auto upLines = setlineStatusLines(setlineContainer("alice.localhost", upEndpoint), []);
+  acceptor.join();
+  assert(upLines.length == 2, upLines.to!string);
+  assert(upLines[0] == "host=alice.localhost endpoint=" ~ upEndpoint ~ " (up)", upLines[0]);
+  assert(upLines[1].canFind("routes:") && upLines[1].canFind("cannot reach setline"), upLines[1]);
+
+  // 401（setline 的非本机读要 token）：如实报凭据墙，不当成 down、也不当成"没对上账"
+  auto authListener = new Socket(AddressFamily.INET, SocketType.STREAM);
+  scope (exit) authListener.close();
+  authListener.bind(new InternetAddress("127.0.0.1", 0));
+  authListener.listen(1);
+  auto authEndpoint = "127.0.0.1:" ~ (cast(InternetAddress) authListener.localAddress).port.to!string;
+  auto denier = new Thread({
+    auto conn = authListener.accept();
+    conn.send("HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\n\r\n");
+    conn.close();
+  });
+  denier.start();
+  auto denied = setlineStatusLines(setlineContainer("alice.localhost", authEndpoint), []);
+  denier.join();
+  assert(denied.length == 2, denied.to!string);
+  assert(denied[1].canFind("wants adminToken for non-local reads"), denied[1]);
 
   // 没配 <setline> 时整节省略（不启用就没有地址，也不报错）
-  assert(setlineStatusLine(parseServerXml(`<bas version="1"><engines/></bas>`)) == "");
-  assert(setlineStatusLine(parseServerXml(
-      `<bas version="1"><setline endpoint="` ~ upEndpoint ~ `"/><engines/></bas>`))
-      == "host=localhost endpoint=" ~ upEndpoint ~ " (up)");
+  assert(setlineStatusLines(parseServerXml(`<bas version="1"><engines/></bas>`), []).length == 0);
+  // hostname 缺省 localhost；入口没人听时状态行照样只有一行，不拨号
+  assert(setlineStatusLines(
+      parseServerXml(`<bas version="1"><setline endpoint="` ~ endpoint ~ `"/><engines/></bas>`), [])
+      == ["host=localhost endpoint=" ~ endpoint ~ " (down)"]);
 }
 
-@("setlineStatusLine reports a missing address instead of throwing") unittest {
+@("setlineStatusLines reports a missing address instead of throwing") unittest {
   // 配置校验已经保证"有 <setline> 就有 endpoint"；这条守的是手工构造的容器（公开 API），
   // 缺地址时也要有个说得清的结果，而不是抛异常。
   auto container = new Container();
   container.setlineHostname = nullable("localhost");
-  auto line = setlineStatusLine(container);
-  assert(line.canFind("host=localhost") && line.canFind("No setline entry address"), line);
+  auto lines = setlineStatusLines(container, []);
+  assert(lines.length == 1 && lines[0].canFind("host=localhost")
+      && lines[0].canFind("No setline entry address"), lines.to!string);
 }
 
 /** 一份带 `<setline>`（有 `<setline>` 就得有 `endpoint`）的最小可解析配置。 */

@@ -73,9 +73,10 @@ token、健康检查、连接超时这些要么属于 setline 自己的配置文
 `<setline endpoint>`（元素出现时必填）。`--endpoint` 留给"这份配置没启用 setline、只想渲染/对账
 一次"和临时覆盖：都没有地址可拨时才报错，没有缺省，也就没有"它到底拨哪儿"的第二种解释。
 
-setline 的 `adminToken` 只管**读**（路由表与状态页），留给将来同网段的服务进程读取用——例如把
-路由渲染成 haproxy / nginx 配置的同步程序。basctl 只走**写**接口（只认本机、不需要 token），
-所以 `server.xml` 里不放凭据。
+setline 的 `adminToken` 只管**读**的**非本机**来源（路由表与状态页），留给将来同网段的服务进程
+读取用——例如把路由渲染成 haproxy / nginx 配置的同步程序。**本机来源（读写同一条门）不需要任何
+凭据**，所以 `server.xml` 里不放 token：`--sync` / `--watch` 写路由、`status` 的 route 列读路由，
+都是用同一个 localhost 入口，装上就能用。
 
 ## 运行期同步（`--sync` / `--watch`）
 
@@ -100,20 +101,35 @@ systemd / 容器入口 / 你自己的事。
 
 ## 状态（`basctl status`）
 
-配了 `<setline>` 时，`basctl status` 在实例列表之后另起一节，一行给出命名空间、入口地址与状态：
+配了 `<setline>` 时，`basctl status` 在实例列表之后另起一节：首行是命名空间、入口地址与入口
+状态，随后是 route 列——拿「运行中实例该有的路由」（同 `--sync` 的输入）和 setline 上的实际
+路由对一次账：
 
 ```
 ---------------setline---------------
 host=localhost endpoint=127.0.0.1:8080 (up)
+  /api  setline has 8081, want [8081, 8088]
+  /tools  missing on setline (want 8090)
+  /old  not in this BAS_HOME (setline has 9000); a `setline --sync` removes it
 ```
 
-- `(up)`：入口有人应答——setline 是机器级服务，`status` 只报「通不通」，不猜坐的是谁（要确定
-  得写一次路由，那是 `--sync` 的事）；
-- `(down)`：入口没人监听，说明 setline 服务没在跑；
+- `(up)`：入口有人应答——setline 是机器级服务，`status` 只报「通不通」，不猜坐的是谁；
+  `(down)`：入口没人监听，说明 setline 服务没在跑（这时不拨号，route 列也不再往下写）；
+- `routes in sync (N)`：该有的路由条数，且与 setline 上的完全一致；
+- `missing on setline` / `setline has ..., want ...`：`start` 之后没推上去（setline 刚起，或推送
+  只警告过），或端口漂移后没对账（`--watch` 没在跑）；
+- `not in this BAS_HOME`：实例已停但路由还留着（对账没跑到）；这类多出来的路由按路径排序输出，
+  与"少的"一样都是对账没跟上的信号；
 - `host=localhost (No setline entry address: ...)`：手工构造的容器缺地址时的兜底（正常路径上
   "有 `<setline>` 就有 `endpoint`"由配置校验保证，写坏了在解析 `server.xml` 时就报错）。
 
-`status` 只读：它不启动、不停止、也不修改任何东西。
+route 列读的是 setline 的**读**接口（`GET /__setline/routes`）——只读、无副作用。setline 对本机
+来源免凭据，所以这条路径开箱即用、`server.xml` 里不需要 token；只有把 `<setline endpoint>` 指向
+**另一台机器**上的 setline 时才可能撞上凭据墙，那一行会写成
+`routes: <addr> wants adminToken for non-local reads (basctl holds no token)`：basctl 不存凭据，
+宁可如实报也不猜。入口通了但不是 setline（应答形状不对）、或连不上，也各用一行说清。
+
+`status` 只读：它不启动、不停止、也不修改任何东西（route 列只是一次 GET）。
 
 ## 停止与清空路由
 

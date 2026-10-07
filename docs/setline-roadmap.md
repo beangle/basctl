@@ -1,7 +1,8 @@
 # setline 集成 roadmap
 
 本文件跟踪 bas / basctl 与 setline 的集成设想，供后续核对与跟踪。每项用复选框表示进度，落地后
-回填 commit。**当前的落地情况**：R0 / R1 / R2 / R3 / R4 / R5 / R8 / R9 已完成，其余尚未开始。
+回填 commit。**当前的落地情况**：R0 / R1 / R2 / R3 / R4 / R5 / R7（除 embed 单应用注册）/ R8 /
+R9 已完成，R6 与 R7 的 embed 单应用注册尚未开始。
 
 | 编号 | 主题 | 状态 | 依赖 |
 |---|---|---|---|
@@ -12,7 +13,7 @@
 | R4 | basctl 容器化：一机器一出口 | 已落地（见 [container.md](container.md)） | R1-R3 |
 | R5 | host 分组（多人 / 多项目共享） | 已落地（见 [setline-config.md](setline-config.md)） | R2、R3 |
 | R6 | 生产侧 agent manifest 通道 | 未开始 | 独立 |
-| R7 | 命令面融合 | 未开始 | R1-R3 |
+| R7 | 命令面融合 | 部分落地（route 列、start 预检；embed 单应用注册未开始） | R1-R3 |
 | R8 | jstart 精简：去掉 `app.pid` 与 `stop` | 已落地 | 独立 |
 | R9 | setline 管理面：写只认本机、读保留 `adminToken` | 已落地 | 独立 |
 
@@ -245,9 +246,27 @@ haproxy / nginx。
 
 ## R7 命令面融合
 
-- [ ] `basctl status` 增加 route 列（对 `GET /__setline/routes` 反查）
+**目标**：把"路由"从一条独立命令（`basctl setline`）摊进日常命令面——看状态、起停、跑单应用时
+都能直接看到/维护自己那一格路由，不必记着额外再敲一次 `--sync`。
+
+**进度**：route 列与 `start` 预检已落地，embed 单应用注册未开始。
+
+- `basctl status` 的 route 列：拿运行中实例该有的路由（`runningPlan`）与 setline 上的实际路由
+  对照，报 `missing on setline` / `setline has …, want …` / `not in this BAS_HOME`，全对得上就是
+  一行 `routes in sync (N)`。读的是**读**接口（`GET /__setline/routes`，只读无副作用）；setline
+  对本机来源免凭据（见 R9），所以这条路径开箱即用、`server.xml` 里不存凭据，只有入口指向别的
+  机器时才可能撞上 `adminToken`，那时如实报出来而不是猜。
+- `start` 预检：R2 的"冲突前置"已经覆盖了**声明了端口**的拓扑（`setlinePlan`，配置级，跑不跑都
+  算）；`http="0"`（动态端口）的冲突要等端口分配完，由起完那次对账兜底——那时冲突只警告、不写
+  路由，因此现象是"实例起来了但没路由"，不是"启动失败"。
+- 未开始：`basctl run --port=0 --route=/x` 让 embed 的单应用也在 setline 上注册一格、退出即摘除，
+  复活"单应用快速入口"。
+
+**验收**
+
+- [x] `basctl status` 增加 route 列（对 `GET /__setline/routes` 反查）
 - [ ] `basctl run --port=0 --route=/x`：embed 单应用自动注册、退出摘除，复活"单应用快速入口"
-- [ ] `basctl start` 前做冲突预检（同 R2）
+- [x] `basctl start` 前做冲突预检（同 R2）
 
 ## R8 jstart 精简：去掉 `app.pid` 与 `stop`
 
@@ -269,22 +288,23 @@ haproxy / nginx。
 ## R9 setline 管理接口：写只认本机，读保留 token
 
 **状态：已落地**。setline 侧：写接口（`PUT` / `DELETE` 路由）只接受 TCP 对端
-localhost，不认凭据（路由变即流量变）；**读**接口（`GET /__setline/routes`、状态页）保留
-`adminToken`（`X-Setline-Token` / Basic Auth）且不限来源——路由表将来要开放给同网段的服务进程
-读取，例如把拓扑渲染成 haproxy / nginx 配置的同步 agent（见 R6）。basctl 侧只有
-`basctl setline --sync` / `--watch`，只走写路径，因此 `server.xml` 里不放 token。
+localhost，不认凭据（路由变即流量变）；**读**接口（`GET /__setline/routes`、状态页）**本机来源
+同样免凭据**（读写一条门），非本机来源才看 `adminToken`（`X-Setline-Token` / Basic Auth）且不限
+来源——路由表将来要开放给同网段的服务进程读取，例如把拓扑渲染成 haproxy / nginx 配置的同步
+agent（见 R6）。basctl 侧读写都从 localhost 发，因此 `server.xml` 里没有任何凭据。
 
 **为什么最初想删、后来保留**：token 诞生在第一条 commit，当时它管的是**写**（改路由）的凭据；
 写接口加上 localhost 门之后，写路径上它就冗余了，而读路径（`GET` routes + 状态页）是它最后的
-消费者。既然读要留给同网段的服务进程，这个凭据就有用，删不得——改为把它明确成「读凭据」并写进
-文档。
+消费者。既然读要留给同网段的服务进程，这个凭据就有用，删不得——改为把它明确成「非本机读的
+凭据」并写进文档。R7 的 route 列要读一次路由表，才把"本机读也免凭据"补齐：本机的读写不该有两种
+待遇，否则 basctl 得在 `server.xml` 里多存一个只读凭据（与"减少配置"的方向相反）。
 
 **验收**
 
 - [x] 写接口非本机来源一律 403；本机调用不需要任何凭据
-- [x] 读接口（含状态页）配了 `adminToken` 时缺凭据返回 401，凭据正确可读；不配即放行
-- [x] setline 的 `README.md` / `doc/runtime-routes-api.md` 说明「读留 token、写只认本机」的分工
-- [x] basctl 的 `--sync` 复用探测走写接口，配了 `adminToken` 也能复用已运行的 setline
+- [x] 读接口（含状态页）本机来源免凭据；非本机在配了 `adminToken` 时缺凭据返回 401，凭据正确可读
+- [x] setline 的 `README.md` / `doc/runtime-routes-api.md` 说明「本机读写免凭据、非本机读看 token」
+- [x] basctl 的 `--sync` / `status` 从 localhost 调用，配了 `adminToken` 的 setline 一样能写能读
 
 ## 已完成的前置（基线）
 

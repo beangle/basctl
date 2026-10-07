@@ -37,8 +37,10 @@ import bas.shellenv : readContainer;
 import bas.resolver;
 import bas.serverinfo : ServerInfo, liveInstances, readInstanceInfo;
 import bas.serverstatus;
-import bas.setline : SetlineConflict, conflictLines, renderSetlineConfig, runningPlan, setlinePlan;
-import bas.setlineproc;
+import bas.setline : SetlineConflict, conflictLines, parseRouteTable, renderSetlineConfig,
+  routeDriftLines, runningPlan, setlinePlan;
+import bas.setlineproc : RouteRead, defaultWatchIntervalSec, fetchRouteTable,
+  parseWatchInterval, syncRoutesToSetline, watchRoutes;
 import bas.starter;
 
 import std.algorithm : canFind, sort;
@@ -447,28 +449,69 @@ private string takeConfigFile(ref string[] rest) {
 }
 
 /**
- * `status` 的 setline 行：命名空间（`server.xml` 的 `<setline hostname>`）、入口地址与入口通不通。
- * 没配 `<setline>` 返回空串，`status` 就不打这一节。
+ * `status` 的 setline 一节：首行是命名空间（`server.xml` 的 `<setline hostname>`）、入口地址与
+ * 入口通不通，随后是「路由对没对上账」的 route 列。没配 `<setline>` 返回空数组，`status` 就不打
+ * 这一节。
  *
- * 只看「入口有没有人应答」：setline 是机器级服务，basctl 不知道也不该猜它归谁管（systemd /
- * 容器入口 / 手工），所以不报 pid；「坐的是不是我们那台 setline」得写一次路由才知道，那是
- * `setline --sync` 的事，`status` 不做带副作用的探测。
+ * 入口状态只看「有没有人应答」：setline 是机器级服务，basctl 不知道也不该猜它归谁管（systemd /
+ * 容器入口 / 手工），所以不报 pid。route 列读一次 `GET /__setline/routes`（只读、无副作用），
+ * 与运行中的实例该有的路由对照——**缺 / 端口对不上 / 多** 各占一行，全对得上就是一行
+ * `routes in sync (N)`；读不动（非本机的凭据墙 / 不是 setline / 连不上）也各用一行说清，不当成
+ * 命令失败。
  *
  * 地址来自 `<setline endpoint>`：有 `<setline>` 就有它（写了非法值在解析 `server.xml` 时就报错，
  * 走不到这里）；没有 `<setline>` 时整节省略，不报缺地址。这里仍兜一层异常，是为了手工构造容器
  * 的调用方（`Container` 是公开类型）也能拿到一句说得清的话。
  */
-public string setlineStatusLine(const Container container) {
+public string[] setlineStatusLines(const Container container, const(ServerInfo)[] live) {
   if (container.setlineHostname.isNull)
-    return "";
+    return [];
   auto hostname = strip(container.setlineHostname.get);
   ListenEndpoint endpoint;
   try
     endpoint = resolveSetlineEndpoint("", container.setlineEndpointText()).endpoint;
   catch (Exception e)
-    return format!"host=%s (%s)"(hostname, e.msg);
-  return format!"host=%s endpoint=%s %s"(hostname, endpoint.toString(),
-      portFree(endpoint) ? "(down)" : "(up)");
+    return [format!"host=%s (%s)"(hostname, e.msg)];
+
+  // 没人听就不拨号：`(down)` 已经说完了，再补一句"连不上"只是重复
+  if (portFree(endpoint))
+    return [format!"host=%s endpoint=%s (down)"(hostname, endpoint.toString())];
+
+  auto lines = [format!"host=%s endpoint=%s (up)"(hostname, endpoint.toString())];
+  auto plan = runningPlan(live);
+  if (plan.conflicts.length) {
+    // 实例之间就冲突（同一路径被端口集合不同的 webapp 认领）：这时候没有"该有的路由"可对账
+    foreach (line; conflictLines(plan.conflicts))
+      lines ~= "  " ~ line;
+    lines ~= "  routes not reconciled; fix the conflict, then `basctl setline --sync`";
+    return lines;
+  }
+
+  string json;
+  final switch (fetchRouteTable(endpoint, json)) {
+  case RouteRead.ok:
+    try {
+      auto table = parseRouteTable(json);
+      lines ~= routeDriftLines(plan.routes,
+          hostname in table ? table[hostname] : (int[][string]).init);
+    } catch (Exception e) {
+      lines ~= "  cannot read routes: " ~ e.msg;
+    }
+    break;
+  case RouteRead.unauthorized:
+    // setline 对 localhost 免凭据，所以走到这里说明拨的不是本机：要么改 <setline endpoint>，
+    // 要么让那台 setline 放开读——basctl 不存凭据，不会为一次 status 去配一个。
+    lines ~= "  routes: " ~ endpoint.toString()
+        ~ " wants adminToken for non-local reads (basctl holds no token)";
+    break;
+  case RouteRead.unexpected:
+    lines ~= "  routes: " ~ endpoint.toString() ~ " answers HTTP but is not the setline we expect";
+    break;
+  case RouteRead.unreachable:
+    lines ~= "  routes: cannot reach setline at " ~ endpoint.toString();
+    break;
+  }
+  return lines;
 }
 
 /**
@@ -484,11 +527,12 @@ int cmdStatus() {
   stdout.flush();
   auto serversDir = buildPath(basHome, "servers");
   auto container = readContainer(basHome);
-  auto setlineLine = container.isNull ? "" : setlineStatusLine(container.get);
+  // route 列要拿运行中的实例算"该有的路由"，所以边打印边收集
+  ServerInfo[] live;
 
   if (!exists(serversDir) || !isDir(serversDir)) {
     stderr.writeln("No servers directory: ", serversDir);
-    printSetlineStatus(setlineLine);
+    printSetlineStatus(container.isNull ? null : setlineStatusLines(container.get, live));
     return 1;
   }
 
@@ -504,10 +548,12 @@ int cmdStatus() {
     auto info = readInstanceInfo(basHome, name);
     if (info.isNull)
       continue;
-    if (info.get.pid <= 0 || !processRunning(info.get.pid))
+    if (info.get.pid <= 0 || !processRunning(info.get.pid)) {
       lines ~= staleStatusLine(info.get, name);
-    else
+    } else {
       lines ~= statusLines(info.get);
+      live ~= info.get;
+    }
   }
 
   if (lines.length) {
@@ -515,16 +561,17 @@ int cmdStatus() {
     foreach (line; lines)
       writeln(line);
   }
-  printSetlineStatus(setlineLine);
+  printSetlineStatus(container.isNull ? null : setlineStatusLines(container.get, live));
   return 0;
 }
 
 /** 打印 setline 那一节（未配置 `<setline>` 时什么都不打）。 */
-private void printSetlineStatus(string line) {
-  if (!line.length)
+private void printSetlineStatus(string[] lines) {
+  if (!lines.length)
     return;
   writeln("---------------setline---------------");
-  writeln(line);
+  foreach (line; lines)
+    writeln(line);
 }
 
 /**

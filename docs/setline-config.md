@@ -178,7 +178,10 @@ Restart=always
 - 渲染：`basctl setline [server.xml]`（`--output=-` 取片段；`--endpoint` 覆盖入口地址，渲染进
   文件的 `listen` 用它）；
 - `--sync`：把「现状」的路由推一次给已经在跑的 setline；
-- `--watch`：常驻做同一件事。
+- `--watch`：常驻做同一件事；
+- `status` 的 route 列：读一次路由表（`GET /__setline/routes`）与「现状」对照，报缺 / 端口对不上 /
+  多 / 全对上。这是 basctl 唯一读 setline 的地方——只读，走的是 setline 对本机免凭据的那个入口，
+  所以不需要任何配置。
 
 **用了外置 setline 就别再拿渲染去覆盖它的配置文件**：那个文件归服务所有，运行期路由由
 `--sync` 维护。渲染命令本身不做拦截——显式调用就是显式意图。
@@ -190,10 +193,12 @@ setline 的管理接口分两类，边界不同（详见 setline 的 `doc/runtim
 | 接口 | 来源限制 | 凭据 |
 |---|---|---|
 | 写：`PUT` / `DELETE` 路由 | **只接受 TCP 对端是 localhost** | 无 token |
-| 读：`GET /__setline/routes` | 不限来源 | `X-Setline-Token`（`adminToken`，为空则放行） |
-| 状态页 / `status.json` | 不限来源 | Basic Auth，用户名 `setline`，密码 `adminToken` |
+| 读：`GET /__setline/routes` | **本机免凭据**；其它来源不限 | 非本机：`X-Setline-Token`（`adminToken`，为空则放行） |
+| 状态页 / `status.json` | **本机免凭据**；其它来源不限 | 非本机：Basic Auth，用户名 `setline`，密码 `adminToken` |
 
-- 写路径就是 basctl 走的路（`--sync` 推路由）：只认本机，不需要凭据，因此 `server.xml` 里不放 token。
+- 写路径就是 basctl 推路由走的路（`--sync` / `--watch`）：只认本机，不需要凭据；`status` 的 route
+  列读路由表，读同样**对本机免凭据**——读写同一条门，所以 `server.xml` 里没有、也不需要 token。
+  只有非本机来源的读才看 `adminToken`（那是留给同网段服务进程的路径，见 R6）。
 - 读路径保留 token，是因为路由表将来要开放给同网段的服务进程读取——例如把拓扑渲染成
-  haproxy / nginx 配置的同步程序（roadmap 的 R6）。setline 的 `listen` 绑 `*` 时必须设置
-  `adminToken`，否则路由表对外可读；只绑回环时留空即可。
+  haproxy / nginx 配置的同步程序（roadmap 的 R6）；本机来源不在这条规则里，读写一样免凭据。
+  setline 的 `listen` 绑 `*` 时必须设置 `adminToken`，否则非本机的读也放行；只绑回环时留空即可。

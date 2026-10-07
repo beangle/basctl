@@ -25,6 +25,9 @@
  * 同一路径被端口集合不同的多个 webapp 声明时无法判定归属，记成冲突（`SetlineConflict`）交给
  * 调用方报错；端口集合相同时合并无害（同一 webapp 的多实例部署），不算冲突。
  *
+ * 反向的一步（`GET /__setline/routes` 的响应 → 可比较的路由表，`status` 的 route 列用它报"对没
+ * 对上账"）也在本模块：{@link parseRouteTable}、{@link routeDriftLines}。
+ *
  * 本模块只做纯计算与拼文本，不做 IO，也不启动 setline。后端固定为回环地址（setline 的约定），
  * 所以生成的路由只对跑在本机的 server 有意义。路由写进哪个命名空间由 `server.xml` 的
  * `<setline hostname>` 给出（见 {@link renderSetlineConfig}）——一台机器上共享一个 setline 的
@@ -42,6 +45,9 @@ import bas.serverinfo : ServerInfo, WebappInfo;
 import std.algorithm : canFind, sort;
 import std.array : appender, join;
 import std.conv : to;
+import std.format : format;
+import std.json : JSONType, parseJSON;
+import std.string : strip;
 
 /** 一条路由：context path 前缀 + 后端 http 端口（升序、去重）。 */
 struct SetlineRoute {
@@ -240,14 +246,113 @@ string renderRouteMap(const(SetlineRoute)[] routes, string indent = "") {
   return sb.data;
 }
 
-/** 端口渲染：单端口是数字，多端口是数组。 */
-private string portsJson(const(int)[] ports) {
+/**
+ * 解析 setline `GET /__setline/routes` 的响应：`{"<host>": [{"prefix": "/x", "port": 8080}, ...]}`。
+ *
+ * 返回 `host -> (path -> 端口集合)`（端口升序去重）。形状不对就抛异常——意思是"读回来的东西
+ * 不是路由表"，由调用方决定怎么报（`status` 只打一行，不因此让命令失败）。
+ */
+int[][string][string] parseRouteTable(string json) {
+  auto root = parseJSON(json);
+  if (root.type != JSONType.object)
+    throw new Exception("setline routes: expected a JSON object");
+
+  int[][string][string] table;
+  foreach (host, groups; root.object) {
+    if (groups.type != JSONType.array)
+      throw new Exception("setline routes: \"" ~ host ~ "\" is not an array");
+    int[][string] paths;
+    foreach (entry; groups.array) {
+      if (entry.type != JSONType.object || !("prefix" in entry.object))
+        throw new Exception("setline routes: entry without prefix");
+      auto path = entry.object["prefix"].str;
+      int[] ports;
+      if ("port" in entry.object)
+        ports ~= cast(int) entry.object["port"].integer;
+      if ("ports" in entry.object) {
+        foreach (port; entry.object["ports"].array)
+          ports ~= cast(int) port.integer;
+      }
+      ports.sort();
+      // setline 的 host / prefix 都过了规范化（去重、去尾斜杠），这里仍按同一规则收一遍，
+      // 免得比较时"/api"与"/api/"被当成两条。
+      paths[normalizeRoutePath(path)] = dedupe(ports);
+    }
+    table[host] = paths;
+  }
+  return table;
+}
+
+/**
+ * 把「本机该有的路由」（`runningPlan` 的现状）与「setline 上有的路由」对照成展示行——`status`
+ * 的 route 列，也是"对没对上账"的答案，不必再手工 `curl` 一遍。
+ *
+ * 该有的路由来自运行中的实例：**缺**说明 `start` 之后没推上去（setline 刚起或推送只警告过），
+ * **对不上**说明端口漂移后没对账，**多**说明实例已停但路由还留着（`--watch` 没跑或没走到
+ * `stop`）。全对得上就是一行 `routes in sync (N)`。
+ */
+string[] routeDriftLines(const(SetlineRoute)[] want, int[][string] have) {
+  string[] lines;
+  foreach (route; want) {
+    if (!(route.path in have))
+      lines ~= format!"  %s  missing on setline (want %s)"(route.path, portsText(route.ports));
+    else if (have[route.path] != route.ports)
+      lines ~= format!"  %s  setline has %s, want %s"(
+          route.path, portsText(have[route.path]), portsText(route.ports));
+  }
+
+  // 关联数组遍历顺序不定：多出来的路由排序后再输出，多次运行结果一致
+  string[] stale;
+  foreach (path, ports; have) {
+    bool wanted;
+    foreach (route; want)
+      if (route.path == path)
+        wanted = true;
+    if (!wanted)
+      stale ~= format!"  %s  not in this BAS_HOME (setline has %s); a `setline --sync` removes it"(
+          path, portsText(ports));
+  }
+  stale.sort();
+  lines ~= stale;
+
+  if (!lines.length)
+    lines ~= format!"  routes in sync (%s)"(want.length);
+  return lines;
+}
+
+/** 路由路径的规范化：去尾斜杠（根路径保留 `/`），与 setline 的 `normalizeRoutePrefix` 同义。 */
+private string normalizeRoutePath(string path) {
+  auto text = strip(path);
+  while (text.length > 1 && text[$ - 1] == '/')
+    text = text[0 .. $ - 1];
+  return text.length ? text : "/";
+}
+
+/** 端口升序去重（解析 setline 返回的 `port` / `ports` 时用）。 */
+private int[] dedupe(int[] ports) {
+  int[] result;
+  foreach (port; ports)
+    if (!result.canFind(port))
+      result ~= port;
+  result.sort();
+  return result;
+}
+
+/** 端口集合的展示写法：`8081` / `[8081, 8088]` / `none`。 */
+private string portsText(const(int)[] ports) {
+  if (!ports.length)
+    return "none";
   if (ports.length == 1)
     return ports[0].to!string;
   string[] items;
   foreach (port; ports)
     items ~= port.to!string;
   return "[" ~ items.join(", ") ~ "]";
+}
+
+/** 端口渲染：单端口是数字，多端口是数组。 */
+private string portsJson(const(int)[] ports) {
+  return ports.length == 1 ? ports[0].to!string : portsText(ports);
 }
 
 /** 最小 JSON 字符串转义（本命令只处理地址、Host 与 URL 路径）。 */

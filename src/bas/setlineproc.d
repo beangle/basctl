@@ -26,8 +26,10 @@
  * `server.xml` 的 `<setline hostname>`（缺省 `localhost`）。一台机器上共享同一个 setline 的多份
  * `BAS_HOME` 靠命名空间各占一格——`PUT /__setline/routes/all?host=<ns>` 只替换自己那一格。
  *
- * 本模块只走 setline 的**写**接口：它只认本机、不需要 token（路由表将来会开放给同网段的服务
- * 进程读取，那条**读**路径才有 token，basctl 用不上）。
+ * 本模块走 setline 的**写**接口：它只认本机、不需要 token。读接口（`GET /__setline/routes`）只在
+ * `status` 的 route 列里用一次（{@link fetchRouteTable}）——同样从 localhost 发，setline 对本机来源
+ * 免凭据（读写一条门），所以正常路径上不需要任何配置。只有把入口指向**别的机器**时才会撞上
+ * `adminToken`：basctl 不存凭据，遇到 401 就如实报，不猜。
  */
 module bas.setlineproc;
 
@@ -44,7 +46,7 @@ import std.format : format;
 import std.path : buildPath;
 import std.process : Config, execute;
 import std.stdio : stderr, stdout, writeln;
-import std.string : strip;
+import std.string : lastIndexOf, strip;
 
 /** 路由推送结果：写成功 / 有应答被拒 / 连不上。 */
 enum RouteSync {
@@ -98,6 +100,43 @@ RouteSync syncRoutes(ListenEndpoint endpoint, string hostname, string routeMapJs
   if (res.status != 0)
     return RouteSync.unreachable;
   return strip(res.output) == "200" ? RouteSync.synced : RouteSync.rejected;
+}
+
+/** 读 setline 路由表的结果。 */
+enum RouteRead {
+  /** 读到了（下面的 `json` 是 `host -> [route]` 的对象）。 */
+  ok,
+  /** 401：setline 配了 `adminToken`，读路由表要凭据，basctl 不持有。 */
+  unauthorized,
+  /** 有 HTTP 应答但不是我们认识的 setline（非 200/401）。 */
+  unexpected,
+  /** 连不上：没人听、超时或 curl 起不来。 */
+  unreachable
+}
+
+/**
+ * `GET /__setline/routes`：读回整张路由表（只读，无副作用）。
+ *
+ * 与写路径不同，读接口**不限来源**，但配了 `adminToken` 就要求凭据——basctl 不存 token（写路由
+ * 走 localhost 门，不需要），所以拿到 401 时如实返回 {@link RouteRead.unauthorized}，让人知道
+ * "不是没对上账，是没资格看"。`status` 用它报 route 列。
+ */
+RouteRead fetchRouteTable(ListenEndpoint endpoint, out string json) {
+  auto res = execute(["curl", "--silent", "--show-error", "--max-time", "5",
+      "-w", "\n" ~ httpCodeMarker ~ "%{http_code}",
+      jsonUrl(endpoint, "/__setline/routes")], null, Config.none);
+  if (res.status != 0)
+    return RouteRead.unreachable;
+  auto marker = res.output.lastIndexOf(httpCodeMarker);
+  if (marker < 0)
+    return RouteRead.unreachable;
+  json = res.output[0 .. marker];
+  auto code = strip(res.output[marker + httpCodeMarker.length .. $]);
+  if (code == "200")
+    return RouteRead.ok;
+  if (code == "401")
+    return RouteRead.unauthorized;
+  return RouteRead.unexpected;
 }
 
 /**
@@ -157,6 +196,9 @@ int parseWatchInterval(string text) {
 
 /** `--watch` 的缺省轮询周期（秒）：够短以覆盖 `kill -9`，又不至于让日志刷屏。 */
 enum defaultWatchIntervalSec = 5;
+
+/** `curl -w` 的输出标记：HTTP body 与状态码的分界（body 里不会出现它）。 */
+private enum httpCodeMarker = "__basctl_http_code__";
 
 /** Windows 上没有 `/dev/null`。 */
 version (Windows) private enum nullSink = "NUL";

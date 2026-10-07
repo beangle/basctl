@@ -22,6 +22,7 @@ import bas.serverinfo : ServerInfo, WebappInfo;
 import bas.setline;
 
 import std.algorithm : canFind;
+import std.conv : to;
 import std.file : readText;
 
 @("setlineRoutes maps every webapp to its server's http port") unittest {
@@ -217,6 +218,58 @@ import std.file : readText;
   assert(plan.routes[0].ports == [9001, 9002]);
   assert(plan.conflicts.length == 1 && plan.conflicts[0].path == "/api");
   assert(conflictLines(plan.conflicts)[0].canFind("gav://a:x:1, gav://a:y:1"));
+}
+
+@("parseRouteTable reads setline's GET /routes response into host -> path -> ports") unittest {
+  auto table = parseRouteTable(`{
+    "localhost": [
+      {"prefix": "/portal", "port": 8081},
+      {"prefix": "/api/", "ports": [8088, 8081, 8088]}
+    ],
+    "alice.localhost": [{"prefix": "/", "port": 9001}]
+  }`);
+  assert(table.length == 2);
+  // 单端口与端口数组都收成端口集合，升序去重，尾斜杠规范化（与 setline 的 prefix 规则一致）
+  assert(table["localhost"]["/portal"] == [8081]);
+  assert(table["localhost"]["/api"] == [8081, 8088]);
+  assert(table["alice.localhost"]["/"] == [9001]);
+}
+
+@("parseRouteTable rejects a response that is not a route table") unittest {
+  bool threw;
+  try
+    parseRouteTable("<html>hi</html>");
+  catch (Exception)
+    threw = true;
+  assert(threw, "a non-JSON body must not parse as a route table");
+}
+
+@("routeDriftLines reports missing, mismatched and leftover routes") unittest {
+  SetlineRoute[] want = [
+    SetlineRoute("/api", [8081, 8088]),
+    SetlineRoute("/portal", [8081]),
+    SetlineRoute("/tools", [8090]),
+  ];
+  int[][string] have = [
+    "/portal": [8081],
+    "/api": [8081],
+    "/old": [9000],
+  ];
+  auto lines = routeDriftLines(want, have);
+  assert(lines.length == 3, lines.to!string);
+  assert(lines[0].canFind("/api") && lines[0].canFind("setline has 8081, want [8081, 8088]"), lines[0]);
+  assert(lines[1].canFind("/tools") && lines[1].canFind("missing on setline"), lines[1]);
+  // 多出来的路由排在最后，并说清是谁的（别的 BAS_HOME 或没对账的残留），排序保证输出稳定
+  assert(lines[2].canFind("/old") && lines[2].canFind("not in this BAS_HOME"), lines[2]);
+}
+
+@("routeDriftLines says in sync when setline matches the live instances") unittest {
+  SetlineRoute[] want = [SetlineRoute("/api", [8081, 8088]), SetlineRoute("/portal", [8081])];
+  auto lines = routeDriftLines(want, ["/api": [8081, 8088], "/portal": [8081]]);
+  assert(lines == ["  routes in sync (2)"], lines.to!string);
+
+  // 没有运行中的实例、setline 上也是空的：空对空也算对上账
+  assert(routeDriftLines([], (int[][string]).init) == ["  routes in sync (0)"]);
 }
 
 /** 一份实例运行信息，只填对账关心的字段。 */
