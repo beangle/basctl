@@ -29,22 +29,21 @@ import bas.init;
 import bas.net;
 import bas.pull;
 import bas.resolver;
+import bas.serverinfo : ServerInfo, readInstanceInfo;
+import bas.serverstatus;
 import bas.setline;
 import bas.setlineproc;
-import bas.serverstatus;
 import bas.starter;
 
 import std.algorithm : canFind, sort;
 import std.conv : to;
-import std.exception : enforce;
 import std.file : SpanMode, dirEntries, exists, isDir, mkdirRecurse, readText, write;
 import std.format : format;
 import std.json : JSONType, parseJSON;
 import std.path : absolutePath, baseName, buildPath, dirName;
-import std.process : Config, environment, execute;
-import std.regex : matchFirst, regex;
+import std.process : environment;
 import std.stdio : stderr, stdout, writeln;
-import std.string : indexOf, join, lastIndexOf, split, startsWith, strip;
+import std.string : endsWith, join, leftJustify, startsWith, strip;
 
 /** CLI 自身版本，随发布更新。 */
 enum basctlVersion = "0.0.1";
@@ -69,20 +68,14 @@ version (unittest) {
       return cmdMake(args[2 .. $]);
     case "resolve":
       return cmdResolve(args[2 .. $]);
-    case "start":
-      if (args.length == 3)
-        return runStart(buildPath(resolveBasHome(), "conf", "server.xml"), args[2]);
-      if (args.length >= 4)
-        return runStart(args[2], args[3]);
-      stderr.writeln("Usage: basctl start [server.xml] <farm|server|all>");
-      return 1;
-    case "stop":
-      if (args.length == 3)
-        return runStop(buildPath(resolveBasHome(), "conf", "server.xml"), args[2 .. $]);
-      if (args.length >= 4)
-        return runStop(args[2], args[3 .. $]);
-      stderr.writeln("Usage: basctl stop [server.xml] <farm|server|all> [--force] [--timeout=<sec>]");
-      return 1;
+    case "start": {
+      auto rest = args[2 .. $];
+      return runStart(takeConfigFile(rest), rest);
+    }
+    case "stop": {
+      auto rest = args[2 .. $];
+      return runStop(takeConfigFile(rest), rest);
+    }
     case "run":
       return runEmbedded(args[2 .. $]);
     case "setline":
@@ -115,8 +108,11 @@ void printUsage() {
   stderr.writeln("  make [server.xml] <pattern>   Generate specs and resolve dependencies (no start)");
   stderr.writeln("  make <type> [options]         Prepare a container for jstart `[engine] init` (creator)");
   stderr.writeln("  resolve <server.xml> [pattern...]  Resolve webapps only");
-  stderr.writeln("  start [server.xml] <pattern>  Generate a jstart spec per server and start it");
-  stderr.writeln("  stop [server.xml] <pattern>   Stop the jstart instances started by `start`");
+  stderr.writeln("  start [server.xml] <pattern>  Allocate ports, generate a jstart spec per server and start it");
+  stderr.writeln("                                (--port-range=<from>-<to>, default 20000-29999, when");
+  stderr.writeln("                                <server http=\"0\">: basctl picks and records the port)");
+  stderr.writeln("  stop [server.xml] <pattern>   Stop the instances started by `start` (pid from server.info)");
+  stderr.writeln("                                (--timeout=<sec> default 15, --force: SIGKILL at once)");
   stderr.writeln("  run [options] <app>           Run one webapp in embedded mode");
   stderr.writeln("                                (--engine=<type>-<version>, e.g. tomcat-11.0.25;");
   stderr.writeln("                                bas engine version defaults to " ~ defaultBasVersion ~ ")");
@@ -425,7 +421,27 @@ string resolveBasHome() @trusted {
   return absolutePath(getcwd());
 }
 
-/** `status`：列出 `$BAS_HOME/servers` 下仍在运行的实例及其监听端口。 */
+/**
+ * 取命令行里的配置文件：第一个位置参数以 `.xml` 结尾即视为 `server.xml`（`<pattern>` 是
+ * farm 名 / `farm.server` / `all`，不会以 `.xml` 结尾），否则用 `$BAS_HOME/conf/server.xml`。
+ * 命中的参数会从 `rest` 摘掉，剩下的就是 `<pattern>` 与选项，所以选项写在前面或后面都行。
+ */
+private string takeConfigFile(ref string[] rest) {
+  if (rest.length && !rest[0].startsWith("-") && rest[0].endsWith(".xml")) {
+    auto value = rest[0];
+    rest = rest[1 .. $];
+    return value;
+  }
+  return buildPath(resolveBasHome(), "conf", "server.xml");
+}
+
+/**
+ * `status`：列出 `$BAS_HOME/servers` 下仍在运行的实例。
+ *
+ * 有运行信息（`server.info`）的实例按它展示端口、引擎、启动时间与各 webapp 的对外 url——端口是
+ * 启动前就定下的，不必再用 `ss` / `netstat` 反查监听端口（Windows 开发机同样可用）。pid 已经
+ * 不在的显示成 `stale`，提示信息还在但进程没了；没有运行信息的目录直接忽略。
+ */
 int cmdStatus() {
   auto basHome = resolveBasHome();
   writeln(banner(basctlVersion, deployedBasVersion(buildPath(basHome, "conf", "server.xml"))));
@@ -444,152 +460,50 @@ int cmdStatus() {
   }
   names.sort();
 
-  auto listenSnapshot = readListenSnapshot();
-  int shown;
+  string[] lines;
+  foreach (name; names) {
+    auto info = readInstanceInfo(basHome, name);
+    if (info.isNull)
+      continue;
+    if (info.get.pid <= 0 || !processRunning(info.get.pid))
+      lines ~= staleStatusLine(info.get, name);
+    else
+      lines ~= statusLines(info.get);
+  }
 
-  foreach (dirName; names) {
-    auto pidPath = buildPath(serversDir, dirName, "SERVER_PID");
-    if (!exists(pidPath))
-      continue;
-    auto pidStr = strip(readText(pidPath));
-    if (!pidStr.length)
-      continue;
-    int pid;
-    try
-      pid = pidStr.to!int;
-    catch (Exception) {
-      stderr.writeln(dirName, ": invalid SERVER_PID content");
-      continue;
-    }
-    if (!processRunning(pid))
-      continue;
-
-    auto ports = portsForPidOs(listenSnapshot, pid);
-    if (!shown) {
-      writeln("---------------running servers---------------");
-      shown = 1;
-    }
-    writeln(format!"%s(pid=%s port=%s)"(dirName, pid, ports.length ? ports.join(",") : "?"));
+  if (lines.length) {
+    writeln("---------------running servers---------------");
+    foreach (line; lines)
+      writeln(line);
   }
   return 0;
 }
 
-/** TCP 监听端口快照：POSIX 用 `ss -tlnp`，Windows 用 `netstat -ano`。 */
-string readListenSnapshot() @trusted {
-  version (Windows) {
-    auto res = execute(["netstat", "-ano", "-p", "tcp"], null, Config.stderrPassThrough);
-    if (res.status != 0)
-      res = execute(["netstat", "-ano"], null, Config.stderrPassThrough);
-    if (res.status != 0)
-      return "";
-    return res.output;
-  } else version (Posix) {
-    auto res = execute(["ss", "-tlnp"], null, Config.stderrPassThrough);
-    if (res.status != 0)
-      return "";
-    return res.output;
-  } else {
-    return "";
-  }
-}
-
-/** 按操作系统分派到对应的监听端口解析函数。 */
-private string[] portsForPidOs(string snapshot, int pid) {
-  version (Windows)
-    return portsFromNetstat(snapshot, pid);
-  else version (Posix)
-    return portsFromSs(snapshot, pid);
-  else
-    return [];
-}
-
-/** 解析 `ss -tlnp` 输出，返回 `pid` 的监听端口（去重）。 */
-public string[] portsFromSs(string ssOutput, int pid) {
-  auto rePid = regex(format!`pid=%s(,|\))`(pid));
-  string[] ports;
-  foreach (line; ssOutput.split('\n')) {
-    auto stripped = strip(line);
-    if (!stripped.length || stripped.canFind("State"))
-      continue;
-    if (!matchFirst(stripped, rePid).empty) {
-      auto local = extractLocalAddressBeforeUsers(stripped);
-      if (!local.length)
-        continue;
-      try {
-        auto p = extractListenPort(local);
-        bool dup;
-        foreach (ex; ports) {
-          if (ex == p) {
-            dup = true;
-            break;
-          }
-        }
-        if (!dup)
-          ports ~= p;
-      } catch (Exception) {
-        continue;
-      }
-    }
-  }
-  ports.sort();
-  return ports;
-}
-
 /**
- * 解析英文 `netstat -ano` 的 TCP 行（状态为 `LISTENING`）。
- * 非英文 Windows 区域的状态名不同，需用英文 netstat，或改用 ss 等价工具。
+ * 一个运行中实例的展示行：首行是标识（pid / 端口 / 引擎 / 启动时间），随后每个 webapp 一行
+ * `<context>  <uri>`；声明了对外 url 的再补 `urls=...`，便于一眼看出这个 webapp 从哪些路径
+ * 对外服务（未声明时按 context 对外）。
  */
-public string[] portsFromNetstat(string netstatOutput, int pid) {
-  auto reLine = regex(`^\s*TCP\s+(\S+)\s+\S+\s+LISTENING\s+(\d+)\s*$`);
-  string[] ports;
-  auto pidStr = pid.to!string;
-  foreach (line; netstatOutput.split('\n')) {
-    auto m = matchFirst(strip(line), reLine);
-    if (m.empty)
-      continue;
-    if (m[2] != pidStr)
-      continue;
-    try {
-      auto p = extractListenPort(m[1]);
-      bool dup;
-      foreach (ex; ports) {
-        if (ex == p) {
-          dup = true;
-          break;
-        }
-      }
-      if (!dup)
-        ports ~= p;
-    } catch (Exception) {
-      continue;
-    }
+public string[] statusLines(const ServerInfo info) {
+  string[] lines;
+  auto engine = info.engine.length ? " engine=" ~ info.engine : "";
+  auto started = info.started.length ? " started=" ~ info.started : "";
+  lines ~= format!"%s(pid=%s port=%s%s%s)"(info.id, info.pid, info.httpPort, engine, started);
+
+  size_t width;
+  foreach (app; info.webapps) {
+    if (app.context.length > width)
+      width = app.context.length;
   }
-  ports.sort();
-  return ports;
+  foreach (app; info.webapps) {
+    auto urls = app.urls.length ? "  urls=" ~ app.urls.join(",") : "";
+    lines ~= format!"  %s  %s%s"(leftJustify(app.context, width), app.uri, urls);
+  }
+  return lines;
 }
 
-/** 截取 `users:(` 之前的部分，等价于在整行上 grep 出 PID。 */
-string extractLocalAddressBeforeUsers(string line) {
-  enum marker = "users:(";
-  auto idx = line.indexOf(marker);
-  if (idx < 0)
-    return "";
-  auto left = strip(line[0 .. idx]);
-  auto parts = left.split();
-  if (parts.length < 2)
-    return "";
-  return parts[$ - 2];
-}
-
-/** 从 `host:port` 或 `[ipv6]:port` 中取出端口段。 */
-public string extractListenPort(string localAddrPort) {
-  auto bracketClose = lastIndexOf(localAddrPort, ']');
-  if (bracketClose >= 0) {
-    auto tail = localAddrPort[bracketClose + 1 .. $];
-    enforce(tail.length >= 2 && tail[0] == ':');
-    return strip(tail[1 .. $]);
-  }
-  auto colon = lastIndexOf(localAddrPort, ':');
-  enforce(colon > 0 && colon + 1 < localAddrPort.length);
-  return strip(localAddrPort[colon + 1 .. $]);
+/** 有运行信息但进程已不在的实例：信息还在，说明它是崩溃或被 `kill -9` 留下的。 */
+public string staleStatusLine(const ServerInfo info, string name) {
+  auto pid = info.pid > 0 ? " pid=" ~ info.pid.to!string : "";
+  return format!"%s(stale%s port=%s)"(info.id.length ? info.id : name, pid, info.httpPort);
 }

@@ -117,3 +117,46 @@ import std.algorithm : canFind;
       <webapps><webapp uri="gav://g:a:1" run-at="f" path="/"/></webapps></bas>`);
   assert(repoArgs(cfg) == ["--local=/m2snap"]);
 }
+
+@("describeInstance collects engine, port and webapps with their urls") unittest {
+  auto cfg = parseServerXml(`<bas version="1">
+      <engines><engine name="ts" type="tomcat-server" version="11.0.26"/></engines>
+      <hosts><host name="local" ip="127.0.0.1"/></hosts>
+      <farms><farm name="platform" engine="ts">
+        <server name="server1" http="8081"/></farm></farms>
+      <webapps>
+        <webapp uri="gav://org.beangle.ems:beangle-ems-portal:4.20.13" run-at="platform" path="/portal"/>
+        <webapp uri="gav://org.beangle.otk:beangle-otk-ws:war:0.0.30" run-at="platform" path="/">
+          <url path="/context1"/><url path="/context2"/>
+        </webapp>
+      </webapps></bas>`);
+
+  auto info = describeInstance(cfg, cfg.farms[0].servers[0], "2026-10-07T10:12:33+08:00");
+  assert(info.id == "platform.server1");
+  assert(info.engine == "tomcat-server-11.0.26");
+  assert(info.httpPort == 8081);
+  assert(info.started == "2026-10-07T10:12:33+08:00");
+  assert(info.pid == 0);
+  assert(info.webapps.length == 2);
+  // 段 id 与 spec 的 [subapp <id>] 同源：由 context path 推导
+  assert(info.webapps[0].id == "portal");
+  assert(info.webapps[0].context == "/portal");
+  assert(info.webapps[0].urls.length == 0);
+  assert(info.webapps[1].id == "ROOT");
+  assert(info.webapps[1].context == "/");
+  assert(info.webapps[1].urls == ["/context1", "/context2"]);
+  // 与 spec 的 [subapp <id>] 对上号
+  auto specs = subappSpecs(cfg.getWebapps(cfg.farms[0].servers[0]));
+  assert(specs.length == 2);
+  assert(specs[0].id == info.webapps[0].id);
+  assert(specs[1].id == info.webapps[1].id);
+}
+
+@("describeInstance leaves the port open for <server http=0>") unittest {
+  auto cfg = parseServerXml(`<bas version="1">
+      <engines><engine name="ts" type="tomcat-server" version="11.0.26"/></engines>
+      <hosts><host name="local" ip="127.0.0.1"/></hosts>
+      <farms><farm name="f" engine="ts"><server name="s1" http="0"/></farm></farms>
+      <webapps><webapp uri="gav://g:a:1" run-at="f" path="/"/></webapps></bas>`);
+  assert(describeInstance(cfg, cfg.farms[0].servers[0], "").httpPort == 0);
+}

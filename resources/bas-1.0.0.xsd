@@ -265,7 +265,9 @@ accept-count/connection-timeout；Undertow 只用 accept-count/connection-timeou
     <xs:attribute name="name" type="xs:string" use="required"/>
     <xs:attribute name="http" type="xs:nonNegativeInteger">
       <xs:annotation>
-        <xs:documentation>JVM 内的 http 端口；缺省 0。</xs:documentation>
+        <xs:documentation>JVM 内的 http 端口；缺省 0。为 0 时由 `basctl start` 在 --port-range
+（缺省 20000-29999）内挑一个空闲端口，并记进 servers/&lt;farm.server&gt;/server.info；
+端口是启动前就定下的，所以 status 与 setline 的对账都读得到。</xs:documentation>
       </xs:annotation>
     </xs:attribute>
     <xs:attribute name="host" type="xs:string">

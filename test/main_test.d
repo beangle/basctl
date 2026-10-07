@@ -14,10 +14,11 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-/** Unit tests for bas.main listener-snapshot parsing. */
+/** Unit tests for bas.main status rendering and setline config helpers. */
 module test.main_test;
 
-import bas.main : extractListenPort, portsFromNetstat, portsFromSs, setlineFileListen;
+import bas.main : setlineFileListen, staleStatusLine, statusLines;
+import bas.serverinfo : ServerInfo, WebappInfo;
 
 import std.file : remove, write;
 
@@ -38,19 +39,36 @@ import std.file : remove, write;
   assert(setlineFileListen(path) == "");
 }
 
-@("extractListenPort ipv4 and bracket ipv6") unittest {
-  assert(extractListenPort("127.0.0.1:8080") == "8080");
-  assert(extractListenPort("[::1]:8443") == "8443");
+@("statusLines shows identity plus one line per webapp") unittest {
+  ServerInfo info;
+  info.id = "platform.server1";
+  info.engine = "tomcat-server-11.0.26";
+  info.httpPort = 20001;
+  info.started = "2026-10-07T10:12:33+08:00";
+  info.pid = 23145;
+  info.webapps ~= WebappInfo("portal", "gav://org.beangle.ems:beangle-ems-portal:4.20.13",
+      "/portal", []);
+  info.webapps ~= WebappInfo("ROOT", "gav://org.beangle.otk:beangle-otk-ws:war:0.0.30", "/",
+      ["/context1", "/context2"]);
+
+  auto lines = statusLines(info);
+  assert(lines.length == 3);
+  assert(lines[0] == "platform.server1(pid=23145 port=20001 engine=tomcat-server-11.0.26"
+      ~ " started=2026-10-07T10:12:33+08:00)");
+  // 未声明 <url> 的 webapp 不写 urls（对外走 context），声明了的列出来
+  assert(lines[1] == "  /portal  gav://org.beangle.ems:beangle-ems-portal:4.20.13");
+  assert(lines[2] == "  /        gav://org.beangle.otk:beangle-otk-ws:war:0.0.30"
+      ~ "  urls=/context1,/context2");
 }
 
-@("portsFromSs finds port field") unittest {
-  auto sample = "tcp LISTEN 0 128 127.0.0.1:9090 0.0.0.0:* users:((\"java\",pid=4242,fd=99))";
-  auto ports = portsFromSs(sample ~ "\n", 4242);
-  assert(ports == ["9090"]);
-}
+@("staleStatusLine marks run info left behind by a dead process") unittest {
+  ServerInfo info;
+  info.id = "platform.server2";
+  info.httpPort = 20002;
+  info.pid = 999;
+  assert(staleStatusLine(info, "platform.server2") == "platform.server2(stale pid=999 port=20002)");
 
-@("portsFromNetstat English LISTENING") unittest {
-  auto sample = "  TCP    127.0.0.1:8088         0.0.0.0:0              LISTENING       805964\r";
-  auto ports = portsFromNetstat(sample ~ "\n", 805964);
-  assert(ports == ["8088"]);
+  info.id = "";
+  info.pid = 0;
+  assert(staleStatusLine(info, "platform.server2") == "platform.server2(stale port=20002)");
 }

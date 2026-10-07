@@ -20,7 +20,7 @@ usage() {
   echo "Usage: bas.sh <command> [args]"
   echo "commands:"
   echo "  version     Show logo, versions and local hosts  (basctl banner)"
-  echo "  status      Show running servers                 (basctl status)"
+  echo "  status      Running instances from server.info    (basctl status)"
   echo "  resolve     Resolve webapp deps only, no start   (basctl resolve <farm|server|all>)"
   echo "  start       Start instances via jstart           (basctl start <farm|server|all>)"
   echo "  stop        Stop instances started by start      (basctl stop <farm|server|all>)"

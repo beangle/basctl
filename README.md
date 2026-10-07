@@ -11,7 +11,8 @@
 [docs/setline.md](docs/setline.md)；围绕 setline 的后续设想（动态端口、自动注册、对账、容器化）
 见 [docs/setline-roadmap.md](docs/setline-roadmap.md)，其中的实例运行信息格式见
 [docs/server-info.md](docs/server-info.md)、入口配置与启用规则见
-[docs/setline-config.md](docs/setline-config.md)。
+[docs/setline-config.md](docs/setline-config.md)；basctl 自身的功能规划见
+[docs/roadmap.md](docs/roadmap.md)。
 
 ## 版本语义
 
@@ -61,12 +62,12 @@ dub test --compiler=ldc2
 |---|---|
 | `basctl version` | 打印 `basctl <版本>`（单行纯文本，便于脚本取值） |
 | `basctl banner [server.xml]` | 操作者横幅：logo + bas 引擎版本（取自 `<bas version>`）+ basctl 版本 + 本机地址；`bas.sh version` 调它。图形为纯 ASCII，只在交互终端出现，重定向到日志/管道时只剩版本行与本机地址 |
-| `basctl status` | 列出 `$BAS_HOME/servers` 下运行中的实例及其监听端口 |
+| `basctl status` | 列出 `$BAS_HOME/servers` 下运行中的实例：读 `server.info` 展示 pid、端口、引擎、启动时间与各 webapp 的对外 url；pid 已不在的显示为 `stale` |
 | `basctl init [--force] [--dry-run] [workdir]` | 初始化组件目录：把控制脚本铺到 `<workdir>/bin`，并建 `conf/` |
 | `basctl make [server.xml] <farm\|server\|all>` | 只准备不启动：生成 jstart spec 并 `jstart resolve` 预取依赖 |
 | `basctl resolve <server.xml> [pattern...]` | 只解析 webapp，不生成实例 |
-| `basctl start [server.xml] <farm\|server\|all>` | 按 farm 生成 jstart spec、resolve 并后台启动实例 |
-| `basctl stop [server.xml] <farm\|server\|all> [--force] [--timeout=<sec>]` | 停止 `start` 启动的实例（逐个 `jstart stop`） |
+| `basctl start [server.xml] <farm\|server\|all> [--port-range=<from>-<to>]` | 为实例定端口（`<server http="0">` 时在区间内分配，缺省 `20000-29999`）、写 `server.info`、生成 jstart spec、resolve 并后台启动 |
+| `basctl stop [server.xml] <farm\|server\|all> [--force] [--timeout=<sec>]` | 按 `server.info` 里的 pid 停止 `start` 启动的实例：SIGTERM 后等 `--timeout`（缺省 15 秒），`--force` 直接 SIGKILL |
 | `basctl run --engine=<type>-<version> <app>` | 嵌入式运行单个 webapp：`--engine=tomcat-11.0.25` 同时给出容器类型与版本，生成单应用 spec 后前台 `jstart run` |
 | `basctl setline [server.xml] [--output=<file>] [--listen=<addr>]` | 把服务拓扑渲染成 setline 配置（缺省写 `conf/setline.json` 并提示位置）：一个入口地址按路径前缀转发到各 server 的 http 端口，同一 webapp 的多实例自动成为端口列表，见 [docs/setline.md](docs/setline.md) |
 | `basctl setline --sync` / `--stop [--force]` | 把整组路由推给正在跑的 setline（入口空着就地拉起来）／停掉 basctl 就地启动的那个，见 [docs/setline.md](docs/setline.md) |
@@ -99,11 +100,16 @@ $BAS_HOME/
   conf/server.xml
   conf/setline.json             # 本机 setline 入口配置（<setline> 启用时，归 setline 进程所有）
   engines/<name>-<version>/     # 解压并按需裁剪后的 Tomcat
-  servers/<farm>.<server>/      # 单个实例的 catalina.base
+  servers/<farm>.<server>/      # 单个实例的 catalina.base（server.info 记运行信息：pid / 端口 / webapp / url）
   webapps/                      # http 直链与 SNAPSHOT 覆盖的落地目录
   run/                          # 机器级守护进程的运行态（如就地启动的 setline.pid）
   logs/
 ```
+
+实例的端口在启动前就定下来：`<server http>` 有值就用它，为 `0`（或缺省）时由 `basctl start` 在
+`--port-range`（缺省 `20000-29999`）内分配一个空闲端口，两种情况下都记进 `servers/<name>/server.info`
+——`start` / `stop` / `status` 与 setline 的路由对账都读这一份「现状」，不再用 `ss` 反查端口。
+格式与生命周期见 [docs/server-info.md](docs/server-info.md)。
 
 ## `make` 的两种模式
 

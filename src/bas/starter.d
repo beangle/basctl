@@ -15,26 +15,33 @@
  */
 
 /**
- * `basctl start`：按 farm 生成 jstart 启动 spec 并拉起实例。
+ * `basctl start` / `basctl stop`：按 farm 准备并拉起/停止实例，同时维护实例运行信息。
  *
- * 沿用 bas「按 farm 启动」的语义，启动本身交给 jstart：
+ * 启动沿用 bas「按 farm 启动」的语义，进程本身交给 jstart：
  *
  *  1. 从 `conf/server.xml` 选出匹配的本机 `<server>`（farm 名 / `farm.server` / `all`）；
- *  2. 逐个解析 webapp（沿用 `make`/`resolve` 的语义），为每个 `<server>` 生成一份
+ *  2. 定端口并写下第一段运行信息：`<server http>` 有值就用它，为 `0`（或缺省）时在
+ *     `--port-range` 区间内分配一个空闲端口（见 {@link bas.portalloc}）；随后写
+ *     `servers/<name>/server.info`（不含 pid，兼作端口预留，见 {@link bas.serverinfo}）；
+ *  3. 逐个解析 webapp（沿用 `make`/`resolve` 的语义），为每个 `<server>` 生成一份
  *     launch spec `conf/<farm.server>.jstart`——一个 `<server>` 一个 JVM：
  *     `type="tomcat-server"` 时每个 webapp 一段 `[subapp <id>]`（各自 docBase 与 `libs`，
  *     依赖互不串味），`tomcat` / `undertow` / `jetty` 时写单应用 `[app] entry`（只允许一个 webapp）；
- *  3. `jstart resolve <spec>` 校验 spec 与依赖齐备；
- *  4. 后台 `jstart run <spec>`：jstart 先运行 `[engine] init`（按引擎 `type` 写成对应的
+ *  4. `jstart resolve <spec>` 校验 spec 与依赖齐备；
+ *  5. 后台 `jstart run <spec>`：jstart 先运行 `[engine] init`（按引擎 `type` 写成对应的
  *     `make tomcat-server` / `make tomcat` / `make undertow` / `make jetty`）→ 它准备容器
- *     环境并写出最终启动命令，jstart 再 exec。
+ *     环境并写出最终启动命令，jstart 再 exec；确认存活后把 pid 补进运行信息。
  *
  * 实例目录沿用 `servers/<farm.server>`——spec 里写 `[app] base = $BAS_HOME/servers`
- * 加 `[app] instance = <farm.server>`，jstart 的直接组件目录就是它；`SERVER_PID` 与
- * `logs/console.out` 也与既有布局一致。
+ * 加 `[app] instance = <farm.server>`，jstart 的直接组件目录就是它；`logs/console.out`
+ * 也与既有布局一致。运行信息把 pid、实际端口、webapp 与对外 url 集中在一份文件里，
+ * `status` 与 setline 的路由对账都读它（见 docs/server-info.md）。
+ *
+ * `stop` 不再委托 `jstart stop`：pid 就在运行信息里，默认 SIGTERM 并按 `--timeout` 等待，
+ * `--force` 才直接 SIGKILL。
  *
  * `basctl make <pattern>` 复用同一套准备流程（{@link prepareServer}），只生成 spec 并
- * `jstart resolve`，不起进程。
+ * `jstart resolve`，不起进程、不写运行信息。
  */
 module bas.starter;
 
@@ -43,8 +50,11 @@ import bas.config;
 import bas.fsutil : linkIfMissing;
 import bas.jstart : jstartCommand;
 import bas.net : localAddresses;
+import bas.portalloc : PortRange, defaultPortRange, defaultPortRangeText, parsePortRange, reservePort;
 import bas.resolver : resolveArtifact, resolveWebapps;
-import bas.serverstatus : processRunning, rollLog;
+import bas.serverinfo : ServerInfo, WebappInfo, instancePid, liveInstancePid, localIsoTimestamp,
+  readInstanceInfo, removeInstanceInfo, writeInstanceInfo;
+import bas.serverstatus : pidLooksLikeInstance, processRunning, rollLog, signalProcess;
 import bas.spec : SubappSpec, engineInitCommand, renderLaunchSpec, shellQuote;
 
 import core.thread : Thread;
@@ -53,61 +63,81 @@ import core.time : msecs;
 import std.algorithm : canFind;
 import std.array : join, split;
 import std.conv : to;
+import std.datetime.systime : Clock;
 import std.file : exists, mkdirRecurse, readText, remove, write;
 import std.format : format;
 import std.path : absolutePath, buildPath, dirName;
 import std.process : Config, environment, execute;
 import std.stdio : stderr, writeln;
-import std.string : strip;
+import std.string : startsWith, strip;
 import std.typecons : Nullable, nullable;
 
 /** 启动后等待多久（毫秒）再确认进程存活，用于 Webapp 启动失败/依赖缺失的快速反馈。 */
 private enum startupProbeMs = 2000;
 
+/** `stop` 默认等进程退出的秒数（与 jstart 的历史缺省一致）。 */
+enum defaultStopTimeoutSec = 15;
+
 /**
- * `basctl start [server.xml] <farm|server|all>`：生成 spec、resolve，然后后台启动。
+ * `basctl start [server.xml] <farm|server|all> [--port-range=<from>-<to>]`：分配端口、写运行
+ * 信息、生成 spec、resolve，然后后台启动。
  *
- * 任一实例准备失败只跳过该实例（写 `servers/<name>/error`），其余照常启动。
+ * 任一实例准备失败只跳过该实例（写 `servers/<name>/error`，并撤销它的端口预留），其余照常启动。
  */
-int runStart(string configFile, string pattern) {
+int runStart(string configFile, string[] rest) {
+  auto range = defaultPortRange;
+  auto pattern = startPattern(rest, range);
+  if (pattern.isNull)
+    return 1;
   if (!exists(configFile)) {
     stderr.writeln("Cannot find config file " ~ configFile);
     return 1;
   }
   auto container = parseServerXmlFile(configFile);
   auto basHome = dirName(dirName(absolutePath(configFile)));
-  auto servers = localServers(container, pattern);
+  auto servers = localServers(container, pattern.get);
   if (!servers.length) {
-    stderr.writeln("No local server matches " ~ pattern);
+    stderr.writeln("No local server matches " ~ pattern.get);
     return 1;
   }
 
   applyEngineDefaults(container, servers);
+  auto startedAt = localIsoTimestamp(Clock.currTime());
 
-  // 1. 先准备（生成 spec + resolve），失败不启动；这样多个实例不会半启动
+  // 1. 先准备（分配端口 + 写运行信息 + 生成 spec + resolve），失败不启动，多个实例不会半启动
   PreparedServer[] prepared;
-  int alreadyRunning;
+  int alreadyRunning, failed;
   foreach (server; servers) {
-    auto pid = runningPid(basHome, server);
+    auto pid = liveInstancePid(basHome, server.qualifiedName);
     if (!pid.isNull) {
       writeln(server.qualifiedName ~ " appears to still be running with PID " ~ pid.get.to!string
           ~ ". Start skipped.");
       alreadyRunning++;
       continue;
     }
+    auto info = reserveInstance(basHome, container, server, range, startedAt);
+    if (info.isNull) {
+      failed++;
+      continue;
+    }
     auto spec = prepareServer(basHome, container, server);
-    if (!spec.isNull)
-      prepared ~= PreparedServer(server, spec.get);
+    if (spec.isNull) {
+      // 端口预留随失败的准备一起撤销，否则这个端口会被永久算作占用
+      removeInstanceInfo(basHome, server.qualifiedName);
+      failed++;
+      continue;
+    }
+    prepared ~= PreparedServer(server, spec.get, info.get);
   }
   if (!prepared.length) {
     // 目标都已在运行（幂等重入）：视为成功；否则是准备失败
-    if (alreadyRunning == servers.length)
+    if (!failed && alreadyRunning == servers.length)
       return 0;
     stderr.writeln("No instance was prepared; nothing started.");
     return 1;
   }
 
-  // 2. 后台启动，再统一确认存活
+  // 2. 后台启动，再统一确认存活并补写 pid
   int[] pids;
   foreach (ref p; prepared) {
     prepareLog(basHome, p.server);
@@ -119,17 +149,55 @@ int runStart(string configFile, string pattern) {
   int started;
   foreach (i, ref p; prepared) {
     if (pids[i] > 0 && processRunning(pids[i])) {
-      writePidFile(basHome, p.server, pids[i]);
-      writeln(format!"%s started (pid=%s, log=%s)"(p.server.qualifiedName, pids[i],
-          consoleLog(basHome, p.server)));
+      p.info.pid = pids[i];
+      writeInstanceInfo(basHome, p.server.qualifiedName, p.info);
+      writeln(format!"%s started (pid=%s, port=%s, log=%s)"(p.server.qualifiedName, pids[i],
+          p.server.http, consoleLog(basHome, p.server)));
       started++;
     } else {
+      // 起不来的实例不留运行信息，否则端口会被算作占用、status 也看不到真相
+      removeInstanceInfo(basHome, p.server.qualifiedName);
       stderr.writeln(p.server.qualifiedName ~ " failed to start, see " ~ consoleLog(basHome, p.server));
       printLogTail(consoleLog(basHome, p.server));
     }
   }
   writeln(started, " servers started.");
-  return started == prepared.length ? 0 : 1;
+  return started == prepared.length && !failed ? 0 : 1;
+}
+
+/** `start` 的位置参数与选项：`<farm|server|all>` 与 `--port-range=<from>-<to>`；给错即为空。 */
+private Nullable!string startPattern(const(string)[] args, ref PortRange range) {
+  string pattern;
+  foreach (arg; args) {
+    if (arg.startsWith("--port-range=")) {
+      try
+        range = parsePortRange(arg["--port-range=".length .. $]);
+      catch (Exception e) {
+        stderr.writeln(e.msg);
+        return Nullable!string.init;
+      }
+    } else if (arg.startsWith("-")) {
+      stderr.writeln("Unknown option " ~ arg);
+      return Nullable!string.init;
+    } else if (!pattern.length)
+      pattern = arg;
+    else {
+      stderr.writeln("Too many arguments: " ~ arg);
+      return Nullable!string.init;
+    }
+  }
+  if (!pattern.length) {
+    startUsage();
+    return Nullable!string.init;
+  }
+  return nullable(pattern);
+}
+
+/** `start` 的用法。 */
+private void startUsage() {
+  stderr.writeln("Usage: basctl start [server.xml] <farm|server|all> [--port-range=<from>-<to>]");
+  stderr.writeln("  <server http=\"0\"> (or no http attribute) gets a free port from the range");
+  stderr.writeln("  (default " ~ defaultPortRangeText ~ "), recorded in servers/<name>/server.info.");
 }
 
 /**
@@ -176,14 +244,39 @@ private void applyEngineDefaults(Container container, const(Server)[] servers) {
 }
 
 /**
- * `basctl stop [server.xml] <farm|server|all> [--force] [--timeout=<sec>]`：
- * 逐个 `jstart stop conf/<name>.jstart`，与 `start` 生成/使用同一份 spec。
+ * `basctl stop [server.xml] <farm|server|all> [--force] [--timeout=<sec>]`：按运行信息里的 pid
+ * 停止实例。
  *
- * 实例由 jstart 记录 pid；本命令不直接杀进程，`--force`/`--timeout` 原样交给 jstart。
+ * pid 取自 `servers/<name>/server.info`，不再委托 `jstart stop`。默认 SIGTERM 并等 `--timeout`
+ * 秒（缺省 15），进程不退时报错退出，加 `--force` 直接 SIGKILL（同时跳过身份核对）。停止后删除
+ * 运行信息。
  */
 int runStop(string configFile, string[] rest) {
-  if (!rest.length) {
-    stderr.writeln("Usage: basctl stop [server.xml] <farm|server|all> [--force] [--timeout=<sec>]");
+  string pattern;
+  bool force;
+  auto timeoutSec = defaultStopTimeoutSec;
+  foreach (arg; rest) {
+    if (arg == "--force")
+      force = true;
+    else if (arg.startsWith("--timeout=")) {
+      try
+        timeoutSec = parseTimeout(arg["--timeout=".length .. $]);
+      catch (Exception e) {
+        stderr.writeln(e.msg);
+        return 1;
+      }
+    } else if (arg.startsWith("-")) {
+      stopUsage();
+      return 1;
+    } else if (!pattern.length)
+      pattern = arg;
+    else {
+      stopUsage();
+      return 1;
+    }
+  }
+  if (!pattern.length) {
+    stopUsage();
     return 1;
   }
   if (!exists(configFile)) {
@@ -192,37 +285,119 @@ int runStop(string configFile, string[] rest) {
   }
   auto container = parseServerXmlFile(configFile);
   auto basHome = dirName(dirName(absolutePath(configFile)));
-  auto servers = localServers(container, rest[0]);
+  auto servers = localServers(container, pattern);
   if (!servers.length) {
-    stderr.writeln("No local server matches " ~ rest[0]);
+    stderr.writeln("No local server matches " ~ pattern);
     return 1;
   }
-  auto extra = rest[1 .. $];
 
   int stopped, skipped;
   foreach (server; servers) {
-    auto spec = buildPath(basHome, "conf", server.qualifiedName ~ ".jstart");
-    if (!exists(spec)) {
-      stderr.writeln(server.qualifiedName ~ ": no spec " ~ spec
-          ~ " (started outside basctl? use the legacy stop.sh)");
-      skipped++;
-      continue;
+    final switch (stopInstance(basHome, server, force, timeoutSec)) {
+    case StopOutcome.stopped: stopped++; break;
+    case StopOutcome.notRunning:
+    case StopOutcome.failed: skipped++; break;
     }
-    auto res = execute([jstartCommand(), "stop", spec] ~ extra, null,
-        Config.stderrPassThrough);
-    if (res.status != 0) {
-      stderr.writeln(server.qualifiedName ~ ": jstart stop failed with exit code "
-          ~ res.status.to!string);
-      skipped++;
-      continue;
-    }
-    writeln(server.qualifiedName ~ ": stopped");
-    removeStalePid(basHome, server);
-    stopped++;
   }
   writeln(stopped, " servers stopped.",
       skipped ? format!"(%s skipped)"(skipped) : "");
   return skipped ? 1 : 0;
+}
+
+/** `stop` 的用法。 */
+private void stopUsage() {
+  stderr.writeln("Usage: basctl stop [server.xml] <farm|server|all> [--force] [--timeout=<sec>]");
+  stderr.writeln("  SIGTERMs the pid recorded in servers/<name>/server.info and waits "
+      ~ defaultStopTimeoutSec.to!string
+      ~ "s by default; --force SIGKILLs at once.");
+}
+
+/** 单个实例的停止结果。 */
+private enum StopOutcome {
+  /** 已发出信号并确认退出。 */
+  stopped,
+  /** 本来就没在跑（陈旧信息顺手清掉）。 */
+  notRunning,
+  /** 停不掉：进程不退、身份不符或发不出信号。 */
+  failed,
+}
+
+/**
+ * 停一个实例：先看运行信息，已经不在就直接清掉陈旧信息（重复 `stop` 不会越做越乱）。
+ *
+ * 默认先核对身份（{@link bas.serverstatus.pidLooksLikeInstance}）再发 SIGTERM——pid 会被系统
+ * 回收，照着一个陈旧 pid 发信号可能伤及无辜。`--force` 跳过核对直接 SIGKILL，留作逃生门。
+ */
+private StopOutcome stopInstance(string basHome, Server server, bool force, int timeoutSec) {
+  auto name = server.qualifiedName;
+  auto pid = instancePid(basHome, name);
+  if (pid.isNull) {
+    stderr.writeln(name ~ ": no run info (servers/" ~ name ~ "/server.info); "
+        ~ "nothing basctl started is running.");
+    return StopOutcome.notRunning;
+  }
+  if (!processRunning(pid.get)) {
+    removeRunInfo(basHome, name);
+    writeln(name ~ ": not running; removed stale run info (pid=" ~ pid.get.to!string ~ ").");
+    return StopOutcome.notRunning;
+  }
+  if (!force && !pidLooksLikeInstance(pid.get, name)) {
+    stderr.writeln(name ~ ": pid " ~ pid.get.to!string ~ " does not look like this instance "
+        ~ "(no -Dbas.server=" ~ name ~ " in its command line); leaving it alone. "
+        ~ "Use --force to kill it anyway.");
+    return StopOutcome.failed;
+  }
+  if (force) {
+    if (!signalProcess(pid.get, true)) {
+      stderr.writeln(name ~ ": cannot SIGKILL pid " ~ pid.get.to!string ~ ".");
+      return StopOutcome.failed;
+    }
+    Thread.sleep(msecs(500));
+    if (processRunning(pid.get)) {
+      stderr.writeln(name ~ ": pid " ~ pid.get.to!string ~ " is still alive after SIGKILL.");
+      return StopOutcome.failed;
+    }
+  } else {
+    if (!signalProcess(pid.get, false)) {
+      stderr.writeln(name ~ ": cannot SIGTERM pid " ~ pid.get.to!string ~ ".");
+      return StopOutcome.failed;
+    }
+    if (!waitForExit(pid.get, timeoutSec)) {
+      stderr.writeln(name ~ ": pid " ~ pid.get.to!string ~ " did not exit in "
+          ~ timeoutSec.to!string ~ "s; rerun with --force to SIGKILL it.");
+      return StopOutcome.failed;
+    }
+  }
+  removeRunInfo(basHome, name);
+  writeln(name ~ ": stopped (pid=" ~ pid.get.to!string ~ ").");
+  return StopOutcome.stopped;
+}
+
+/** 等进程退出，最多 `timeoutSec` 秒；已经退出返回 true。 */
+private bool waitForExit(int pid, int timeoutSec) {
+  auto waited = 0;
+  while (processRunning(pid) && waited < timeoutSec * 1000) {
+    Thread.sleep(msecs(100));
+    waited += 100;
+  }
+  return !processRunning(pid);
+}
+
+/** 删除实例的运行信息 `servers/<name>/server.info`。 */
+private void removeRunInfo(string basHome, string name) {
+  removeInstanceInfo(basHome, name);
+}
+
+/** 解析 `--timeout=<sec>`，非法或负数即抛异常。 */
+private int parseTimeout(string text) {
+  int seconds;
+  try
+    seconds = strip(text).to!int;
+  catch (Exception)
+    throw new Exception("Invalid timeout: " ~ text);
+  if (seconds < 0)
+    throw new Exception("Invalid timeout: " ~ text);
+  return seconds;
 }
 
 /** 选择部署在本机、且匹配 pattern（`all` / farm 名 / `farm.server`）的 server。 */
@@ -240,24 +415,66 @@ Server[] localServers(Container container, string pattern) {
   return servers;
 }
 
-/** 停止后清理残留 `SERVER_PID`（进程已不在时）。 */
-private void removeStalePid(string basHome, Server server) {
-  auto path = buildPath(basHome, "servers", server.qualifiedName, "SERVER_PID");
-  if (!exists(path))
-    return;
-  try {
-    auto pid = strip(readText(path)).to!int;
-    if (!processRunning(pid))
-      remove(path);
-  } catch (Exception) {
-    // 内容非法时保留，交给 status/用户排查
-  }
-}
-
 /** 一个已备好 spec 的实例。 */
 private struct PreparedServer {
   Server server;
   string spec;
+  /** 启动前写下的运行信息（无 pid），确认存活后补上 pid 整文件重写。 */
+  ServerInfo info;
+}
+
+/**
+ * 启动前写第一段运行信息（不含 pid），兼作端口预留：动态端口在这里定下并回填 `server.http`，
+ * 随后生成 spec 就能带上 `--port=`（与静态端口同一条参数）。
+ *
+ * 失败（区间没有空闲端口、拿不到端口锁）返回空，调用方跳过这个实例。
+ */
+private Nullable!ServerInfo reserveInstance(string basHome, Container container, Server server,
+    PortRange range, string startedAt) {
+  auto name = server.qualifiedName;
+  auto info = describeInstance(container, server, startedAt);
+  if (server.http > 0) {
+    writeInstanceInfo(basHome, name, info);
+    return nullable(info);
+  }
+
+  // 上次记录的端口（可能是崩溃残留）：重启后优先复用它，端口稳定，书签与路由都不用重记
+  auto previous = readInstanceInfo(basHome, name);
+  auto reservation = reservePort(basHome, name, range, previous.isNull ? 0 : previous.get.httpPort,
+      (port) {
+        auto reserved = info;
+        reserved.httpPort = port;
+        writeInstanceInfo(basHome, name, reserved);
+      });
+  if (reservation.port.isNull) {
+    stderr.writeln(name ~ ": cannot allocate a port, " ~ reservation.reason);
+    return Nullable!ServerInfo.init;
+  }
+  info.httpPort = reservation.port.get;
+  writeln(format!"%s: port %s (range %s)"(name, info.httpPort, range));
+  return nullable(info);
+}
+
+/**
+ * 由配置推导实例运行信息：id / engine（`<type>-<version>`）/ http 端口 / 各 webapp 及其对外 url。
+ *
+ * webapp 段的 id 与 launch spec 的 `[subapp <id>]` 同源（都由 context path 推导），运行信息与
+ * spec 因此能按 id 对上号；`url` 未声明时读者回退 `context`，与路由渲染的规则一致。
+ */
+ServerInfo describeInstance(Container container, Server server, string startedAt) {
+  ServerInfo info;
+  info.id = server.qualifiedName;
+  info.engine = engineRefText(server.farm.engine);
+  info.httpPort = server.http > 0 ? cast(ushort) server.http : 0;
+  info.started = startedAt;
+  string[] used;
+  foreach (app; container.getWebapps(server)) {
+    auto id = subappId(app.contextPath, used);
+    used ~= id;
+    info.webapps ~= WebappInfo(id, app.uri, app.contextPath.length ? app.contextPath : "/",
+        app.urls.dup);
+  }
+  return info;
 }
 
 /**
@@ -493,26 +710,6 @@ private int launchBackground(string spec, string log, const(string)[] repos) {
 /** 实例控制台日志：`logs/<farm.server>/console.out`（`servers/<name>/logs` 为其软链）。 */
 string consoleLog(string basHome, Server server) {
   return buildPath(basHome, "logs", server.qualifiedName, "console.out");
-}
-
-/** 运行中的实例 pid（`servers/<name>/SERVER_PID` 指向一个存活进程时）。 */
-Nullable!int runningPid(string basHome, Server server) {
-  auto path = buildPath(basHome, "servers", server.qualifiedName, "SERVER_PID");
-  if (!exists(path))
-    return Nullable!int.init;
-  try {
-    auto pid = strip(readText(path)).to!int;
-    return processRunning(pid) ? nullable(pid) : Nullable!int.init;
-  } catch (Exception) {
-    return Nullable!int.init;
-  }
-}
-
-/** 记录实例 pid（`servers/<name>/SERVER_PID`，供 `status`/`stop` 使用）。 */
-private void writePidFile(string basHome, Server server, int pid) {
-  auto serverDir = buildPath(basHome, "servers", server.qualifiedName);
-  mkdirRecurse(serverDir);
-  write(buildPath(serverDir, "SERVER_PID"), pid.to!string);
 }
 
 /** 启动前准备日志：`servers/<name>/logs` → `logs/<name>`，并归档旧 console.out。 */

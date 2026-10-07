@@ -4,7 +4,7 @@
 哪个端口、跑了哪些 webapp、对外暴露哪些 url**。`basctl status` 与 setline 的路由对账都读它，不再
 各自去猜（`ss`/`netstat` 反查端口）或重新解析 `server.xml`。
 
-**状态：格式已定稿，尚未实现。** 落地后回填实现说明。
+**状态：已落地**（basctl 的 `start` / `stop` / `status`，见文末「实现说明」）。
 
 ## 为什么要有这个文件
 
@@ -13,8 +13,8 @@
   **实例启动时的样子**，这正是对账要的语义。
 - **端口不再是猜出来的**：由 basctl 分配（见下）并记录，`status` 不必依赖 `ss`/`netstat`
   （Windows 开发环境同样可用）。
-- **取代 `SERVER_PID`**：pid 只是其中一行。`SERVER_PID` 的读者只有 basctl 自己，可以整体替换；
-  webapp 与 url 是顺带多记的，不是新引入的状态。
+- **单一现状来源**：pid 只是其中一行；`status` / `stop` 要的端口、webapp、对外 url 都在这里，
+  读者不必再去 `ss` / `netstat` 反查端口，也不必重新解析 `server.xml`。
 
 ## 位置与生命周期
 
@@ -55,7 +55,7 @@
 | 键 | 必填 | 说明 |
 |---|---|---|
 | `uri` | 是 | 应用坐标（`gav://`、`http(s)://` 或本地路径，与 `<webapp uri>` 一致） |
-| `context` | 是 | 容器内的上下文路径（`/` 或空表示 ROOT） |
+| `context` | 是 | 容器内的上下文路径；ROOT 记作 `/`（`<webapp path>` 未声明或为 `/`） |
 | `url` | 否 | 对外暴露的 URL 前缀，可重复；对应 `<webapp><url path="..."/></webapp>`，缺省回退 `context` |
 
 `engine` 由 `<engine type>` 与 `<engine version>` 拼成，形如 `tomcat-server-11.0.26`、
@@ -113,28 +113,31 @@ url = /context2
 `bind` 探测与真正的 bind 之间仍有理论上的竞争窗口，属可接受（dev/单机场景），且失败会在启动日志里
 直接体现。启动失败必须删除文件，否则这个端口会被永久算作占用。
 
-## 对 jstart 的要求（精简为纯 `run`）
+判定"某个端口已经被别的实例占着"时看两点：别的实例的 `server.info` 记着它（进程活着，或文件
+还没有 `pid`——那是一次正在进行中的启动预留），或本机已经有人在监听（`bind` 探测）。自己上次的
+端口不参与判定，它正是第 1 步要复用的候选。
 
-本设计以 jstart 只负责"解析 + 准备 + exec"为前提：
+没有 `pid` 的预留文件久留不下，说明 basctl 自己在启动过程中被杀了（正常路径都会撤销）；那个端口
+重跑该实例的 `basctl start` 就会收回来——它只影响同一份 `BAS_HOME` 的区间分配，不占系统意义上的
+端口（预留期间没人监听）。
 
-- **不再写 `app.pid`**：pid 的记录归 basctl（写进本文件）。
-- **不再提供 `stop`**：`stop` 的 `--timeout` / `--force` 一并去掉；`run` 原有的"同一实例在运行就
-  拒绝启动"也随之消失——幂等改由 basctl 读 `server.info` 判断。
+`--port-range` 只出现在 `basctl start` 上，`stop` / `status` / `setline` 都不需要它——端口已经记在
+运行信息里了。
+
+## 与 jstart 的分工（jstart 只负责 `run`）
+
+jstart 只负责"解析 + 准备 + exec"，实例身份与停止交给 basctl（R8，已落地）：
+
+- **jstart 不写 pid 文件**：pid 的记录归 basctl（写进本文件）。
+- **jstart 不提供 `stop`**：`--timeout` / `--force` 一并去掉；`run` 原有的"同一实例在运行就
+  拒绝启动"也随之消失——幂等由 basctl 读 `server.info` 判断。
 - `run` 保持 exec 语义：exec 之后进程就是应用本身，pid 不变，所以 basctl 拿到的 pid 就是应用 pid。
-
-需要同步改的地方：
 
 | 位置 | 变化 |
 |---|---|
-| `basctl stop` | 不再调 `jstart stop`；按 `server.info` 的 pid 发 SIGTERM，`--timeout` 超时后 SIGKILL，`--force` 直接 SIGKILL |
-| `basctl start` | 幂等判断改读 `server.info`（pid 存活即视为已运行） |
-| jstart 自身 | 去掉 pid 文件与 `stop` 子命令（待同步的文件见下） |
-
-jstart 内要同步的地方：`source/app.d`（usage）、`source/jstart/base.d`（`pidFileName` 与 stop 逻辑）、
-`docs/commands.md` 的「组件 base 与 pid 文件」一节、`README.md`、`beangle.github.io/jstart` 页面、
-`test/smoke.sh`。
-
-去掉 `stop` 对 jstart 的使用者是破坏性变更，建议随 jstart 0.1.0 发布并在 CHANGELOG 标注。
+| `basctl stop` | 不调 `jstart stop`；按 `server.info` 的 pid 发 SIGTERM，`--timeout` 超时后报错，`--force` 直接 SIGKILL |
+| `basctl start` | 幂等判断读 `server.info`（pid 存活即视为已运行） |
+| jstart 自身 | 已去掉 `app.pid` 与 `stop` 子命令；这是破坏性变更，记在 jstart 的 CHANGELOG |
 
 ### 写入要求
 
@@ -143,12 +146,33 @@ jstart 内要同步的地方：`source/app.d`（usage）、`source/jstart/base.d
 - **唯一写者**：同一实例的运行信息只由 basctl 写；jstart 与引擎的产物（`engine-*.classpath`、
   `engine-entry.argv`、`webapps/`）各自独立，互不覆盖。
 
-## 与 `SERVER_PID` 的关系
+## 与旧 pid 文件的关系
 
-`SERVER_PID`（一行 pid 的纯文本）被本文件取代。迁移期内 basctl 读文件时**先看 `server.info`**，
-没有再看 `SERVER_PID`（方便升级时已有实例继续被 `status`/`stop` 识别）；写完 `server.info` 后
-不再写 `SERVER_PID`。
+更早的 basctl 在 `servers/<name>/SERVER_PID` 里只记一行 pid。本文件把它整体取代，**不保留兼容
+读取**：多一条只在少数机器上才走的路径，还要处理"两处 pid 不一致"，得不偿失。由旧版 basctl
+启动、升级时仍在运行的实例，升级后 `status` 不再列出；重新 `start` / `stop` 即可回到本文件。
 
-## 待定
+## 实现说明
 
-1. `SERVER_PID` 的兼容读取保留多久（一个发布周期还是长期）。
+| 位置 | 职责 |
+|---|---|
+| `src/bas/serverinfo.d` | 模型、INI 读写、原子替换 |
+| `src/bas/portalloc.d` | 端口区间、`flock` 内的"探测 + 预留"、顺序挑选与复用 |
+| `src/bas/starter.d` | `start` 写运行信息（含补 pid）、`stop` 按 pid 停止、`describeInstance` 从配置推导内容 |
+| `src/bas/main.d` | `status` 按运行信息展示（`port` / `engine` / `started` / 各 webapp 的 `url`） |
+
+启动时先写第一段（无 `pid`，兼作端口预留）发生在解析 webapp **之前**：动态端口必须先定下来，
+随后生成的 spec 才能带上 `--port=`。准备失败（webapp 解析不出来、引擎依赖缺件）时撤销预留，避免
+这个端口被永久占着。
+
+`stop` 的动作顺序：读 pid → 进程不在就直接清掉陈旧信息（重复 `stop` 不会越做越乱）→ 核对身份 →
+SIGTERM 并等 `--timeout`（缺省 15 秒）→ 仍在则报错退出（`--force` 才 SIGKILL）。**身份核对**
+（`pidLooksLikeInstance`）看 Linux 的 `/proc/<pid>/cmdline` 里有没有 `-Dbas.server=<name>`：
+pid 会被系统回收，照着一个陈旧 pid 发信号可能伤及无辜；判定不了时（非 Linux、读不到 cmdline）
+不拦。`--force` 跳过核对，直接 SIGKILL，留作逃生门。
+
+`status` 对 pid 已不在的实例打印 `name(stale pid=... port=...)`：信息还在说明它崩溃或被
+`kill -9` 了；`status` 只读，不清理（清理交给 `stop`，或者用 `--force` 直接杀）。
+
+`stop` 按 `server.xml` 选实例，所以**已经从配置里删掉**的实例它选不到：那种情况下直接删掉
+`servers/<name>/`（连同 `server.info`）即可。

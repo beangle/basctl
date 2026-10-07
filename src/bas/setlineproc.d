@@ -27,7 +27,8 @@
  */
 module bas.setlineproc;
 
-import bas.serverstatus : processRunning;
+import bas.net : canBindPort;
+import bas.serverstatus : processRunning, signalProcess;
 import bas.spec : shellQuote;
 
 import core.thread : Thread;
@@ -38,7 +39,6 @@ import std.file : exists, mkdirRecurse, readText, remove, write;
 import std.format : format;
 import std.path : buildPath, dirName;
 import std.process : Config, environment, execute;
-import std.socket : Socket, SocketOption, SocketOptionLevel, SocketType, parseAddress;
 import std.stdio : stderr, writeln;
 import std.string : lastIndexOf, strip;
 
@@ -85,26 +85,10 @@ string probeHost(ListenEndpoint endpoint) {
 /**
  * 入口是否空闲：能独立 `bind` 一次就说明没有进程在监听（随即释放，不占端口）。
  *
- * 用绑定探测而不是「连一下试试」：连接成功只能说明有东西在，连接失败却可能是超时、防火墙或
- * 对端拒绝；而 `bind` 失败（EADDRINUSE）是「有人听着」的确定性答案。SO_REUSEADDR 让上次的
- * TIME_WAIT 残留不妨碍判断——那种情况下 setline 确实能重新起来。
+ * `*` / 空 host 监听所有地址，绑定同一地址才探得准，语义见 {@link bas.net.canBindPort}。
  */
 bool portFree(ListenEndpoint endpoint) @trusted {
-  Socket sock;
-  try {
-    auto addr = parseAddress(endpoint.host.length ? endpoint.host : "0.0.0.0", endpoint.port);
-    sock = new Socket(addr.addressFamily, SocketType.STREAM);
-    sock.setOption(SocketOptionLevel.SOCKET, SocketOption.REUSEADDR, 1);
-    sock.bind(addr);
-    return true;
-  }
-  catch (Exception) {
-    return false;
-  }
-  finally {
-    if (sock !is null)
-      sock.close();
-  }
+  return canBindPort(endpoint.host, endpoint.port);
 }
 
 /** 路由推送结果：写成功 / 有应答被拒 / 连不上。 */
@@ -289,16 +273,4 @@ private int parsePid(string text) {
     return strip(text).to!int;
   catch (Exception)
     return 0;
-}
-
-/** 给进程发信号：`force` 为真发 SIGKILL，否则 SIGTERM。 */
-private bool signalProcess(int pid, bool force) @trusted {
-  version (Windows) {
-    auto res = execute(["taskkill", "/PID", pid.to!string, force ? "/F" : "/T"], null, Config.none);
-    return res.status == 0;
-  } else {
-    import core.sys.posix.signal : SIGKILL, SIGTERM, kill;
-
-    return kill(pid, force ? SIGKILL : SIGTERM) == 0;
-  }
 }

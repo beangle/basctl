@@ -14,11 +14,12 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-/** 本机地址枚举。 */
+/** 本机地址枚举与端口探测。 */
 module bas.net;
 
 import std.algorithm : canFind;
 import std.format : format;
+import std.socket : Socket, SocketOption, SocketOptionLevel, SocketType, parseAddress;
 
 /**
  * 返回 `127.0.0.1` 与本机所有非回环 IPv4 地址。
@@ -55,4 +56,31 @@ string[] localAddresses() {
     }
   }
   return result;
+}
+
+/**
+ * 能否独占绑定 `host:port` 一次（随即释放）：能就说明没有进程在监听。
+ *
+ * 用绑定探测而不是「连一下试试」：连接成功只能说明有东西在，连接失败却可能是超时、防火墙或对端
+ * 拒绝；而 `bind` 失败（EADDRINUSE）是「有人听着」的确定性答案。SO_REUSEADDR 让上次的
+ * TIME_WAIT 残留不妨碍判断——那种情况下确实可以重新监听。
+ *
+ * `host` 为空表示所有地址（`0.0.0.0`）；系统调用失败一律当作「不可用」（保守）。
+ */
+bool canBindPort(string host, ushort port) @trusted {
+  Socket sock;
+  try {
+    auto addr = parseAddress(host.length ? host : "0.0.0.0", port);
+    sock = new Socket(addr.addressFamily, SocketType.STREAM);
+    sock.setOption(SocketOptionLevel.SOCKET, SocketOption.REUSEADDR, 1);
+    sock.bind(addr);
+    return true;
+  }
+  catch (Exception) {
+    return false;
+  }
+  finally {
+    if (sock !is null)
+      sock.close();
+  }
 }

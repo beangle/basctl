@@ -1,5 +1,5 @@
 #!/bin/bash
-# 停止 `start.sh` 启动的实例：直接交给 `basctl stop`（逐个 jstart stop 对应的 spec）。
+# 停止 `start.sh` 启动的实例：直接交给 `basctl stop`（按 servers/<name>/server.info 里的 pid 停）。
 PRGDIR=$(dirname "$0")
 export BAS_HOME=$(cd "$PRGDIR/../" >/dev/null; pwd)
 . "$BAS_HOME/bin/env.sh"

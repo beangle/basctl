@@ -239,6 +239,16 @@ string containerTypeOf(Engine engine) {
       ~ "\" is not supported (expected " ~ supportedEngineTypes.join(", ") ~ ")");
 }
 
+/**
+ * 引擎引用：`<type>-<version>`，如 `tomcat-server-11.0.26`、`jetty-12.0.30`。
+ *
+ * 与 `basctl run --engine=` 同形（解析规则见 `bas.embed.EngineRef`），也是 `server.info` 里
+ * `engine` 字段的取值：一个字符串同时说出容器形态与版本。
+ */
+string engineRefText(Engine engine) {
+  return engine.typ ~ "-" ~ engine.version_;
+}
+
 /** `<engine><jar>` 归一化成 jstart `[engine]` 依赖行（gav 去掉前缀，其余原样）。 */
 private string jarDepLine(Jar jar) {
   if (isGav(jar.uri))

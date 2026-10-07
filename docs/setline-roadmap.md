@@ -1,20 +1,20 @@
 # setline 集成 roadmap
 
-本文件跟踪 bas / basctl 与 setline 的集成设想，供后续核对与跟踪。**除「已完成的前置」外，全部
-条目都还没实现**（R2 / R9 的 CLI 部分已落地，见各自小节）；每项用复选框表示进度，落地后回填
-commit。
+本文件跟踪 bas / basctl 与 setline 的集成设想，供后续核对与跟踪。每项用复选框表示进度，落地后
+回填 commit。**当前的落地情况**：R0 / R1 / R8 / R9 已完成，R2 的命令行部分已完成（启停挂接
+未做），其余尚未开始。
 
 | 编号 | 主题 | 状态 | 依赖 |
 |---|---|---|---|
-| R0 | 实例运行信息 `server.info` | 格式已定稿 | — |
-| R1 | 动态端口与端口分配 | 未开始 | R0 |
+| R0 | 实例运行信息 `server.info` | 已落地 | — |
+| R1 | 动态端口与端口分配 | 已落地 | R0 |
 | R2 | `start` / `stop` 自动注册路由 | CLI 已落地（`--sync`/`--stop`），启停挂接未开始 | R0、R1（可先支持静态端口） |
 | R3 | 对账（`--watch` / `--sync`） | 未开始 | R0、R1、R2 |
 | R4 | basctl 容器化：一机器一出口 | 未开始 | R1-R3 |
 | R5 | host 分组（多人 / 多项目共享） | 未开始 | R2、R3 |
 | R6 | 生产侧 agent manifest 通道 | 未开始 | 独立 |
 | R7 | 命令面融合 | 未开始 | R1-R3 |
-| R8 | jstart 精简：去掉 `app.pid` 与 `stop` | 未开始 | 独立 |
+| R8 | jstart 精简：去掉 `app.pid` 与 `stop` | 已落地 | 独立 |
 | R9 | setline 管理面：写只认本机、读保留 `adminToken` | 已落地 | 独立 |
 
 ## 术语
@@ -42,21 +42,29 @@ commit。
 **目标**：每个实例一份运行信息（pid、实际端口、webapp、对外 url），作为 `status` 与路由对账
 共用的「现状」视图。格式见 [server-info.md](server-info.md)。
 
-- 取代今天的 `SERVER_PID`（一行 pid）；webapp 与 `url` 顺带记录，供对账直接算出路由。
+**进度**：已落地（`src/bas/serverinfo.d`，`start` / `stop` / `status` 全部改读它）。
+
+- 取代旧的一行 pid 文件（`SERVER_PID`）；webapp 与 `url` 顺带记录，供对账直接算出路由。
 - 只有 basctl 写：`start` 分配好端口先写第一段（无 `pid`，兼作端口预留），确认存活后补 `pid`；
   启动失败或 `stop` 后删除。
 - 状态不进文件：running / stale 由 pid 是否存活推导，少一个需要同步的字段。
 
 **验收**
 
-- [ ] `start` 后 `server.info` 含 id / engine（`<type>-<version>`）/ http.port / started / pid / 每个 webapp 的 url
-- [ ] 启动过程中（端口已分配、进程未就绪）文件已存在但无 `pid`；启动失败后文件被删除
-- [ ] `status` 与 `stop` 不再依赖 `SERVER_PID`，且能识别升级前留下的旧实例
-- [ ] 文件为原子替换，任何时刻读到的都是完整内容
+- [x] `start` 后 `server.info` 含 id / engine（`<type>-<version>`）/ http.port / started / pid / 每个 webapp 的 url
+- [x] 启动过程中（端口已分配、进程未就绪）文件已存在但无 `pid`；准备失败与启动失败都会删除它
+- [x] `status` 与 `stop` 只读 `server.info`，不再依赖 `ss` / `netstat` 反查端口
+- [x] 文件为原子替换（写临时文件再 `rename`），任何时刻读到的都是完整内容
+
+**待手工验证**：真起一个 JVM，确认「准备中文件无 pid → 存活后补 pid → 失败/停止后文件消失」这条
+时间线（单测只覆盖到渲染、写入与删除三个动作本身）。
 
 ## R1 动态端口与端口分配
 
 **目标**：`<server http="0">`（或缺省）时由 basctl 分配端口并传给应用，端口在启动前就已知。
+
+**进度**：已落地（`src/bas/portalloc.d`；`--port-range` 缺省 `20000-29999`，锁文件
+`servers/.ports.lock`）。
 
 - 分配区间缺省 `20000-29999`：避开特权端口、Linux 临时端口 `32768-60999`、k8s NodePort
   `30000-32767` 与常见开发端口；用 `--port-range=<from>-<to>` 覆盖。区间是机器环境，不写进
@@ -69,10 +77,13 @@ commit。
 
 **验收**
 
-- [ ] 两个 `http="0"` 的 server 同时启动，各自拿到区间内不同端口，且都写进 `server.info`
-- [ ] 同一实例重启后优先复用原端口
-- [ ] 区间占满时报错清晰，不静默换区间
-- [ ] 静态端口（`>0`）行为不变：`basctl setline` 的输出与今天完全一致
+- [x] 同一实例重启后优先复用原端口（`reservePort` 传上次记录的端口；单测覆盖）
+- [x] 区间占满时报错清晰（`no free port in <from>-<to>`），不静默换区间
+- [x] 静态端口（`>0`）行为不变：`basctl setline` 的输出与今天完全一致（`setlinePlan` 未改动）
+- [x] 端口占用判定同时看「别的实例的 `server.info`（含未启动完的预留）」与「本机 `bind` 探测」
+
+**待手工验证**：两个 `http="0"` 的 server 同时启动，各自拿到区间内不同端口并写进 `server.info`
+（需要真实实例；单测覆盖的是挑选与预留逻辑）。
 
 **风险**：端口可连 ≠ 应用可用。注册时机需要一个 readiness 判定，见 R2。
 
@@ -87,11 +98,11 @@ commit。
 - **配置即开关**：`server.xml` 的 `<setline listen="..."/>` 出现才启用（等价于
   `setline_enabled=false` 的反面），地址、就地启动、systemd 的取舍见
   [setline-config.md](setline-config.md)。不配置就什么都不做。
-- 启用时 `start` 先确保入口可用（探测 `/__setline/routes`：已有实例则复用，否则就地启动），再
-  `--sync`；`stop` 之后再 `--sync` 摘除。失败只警告，不改启停的退出码。需要停掉就地实例时用
-  `basctl setline --stop [--force]`。
-- 注册内容：webapp 的 `routePaths()` → 端口；同前缀多实例写成端口数组，交给 setline 健康检查 +
-  随机选。
+- 启用时 `start` 先确保入口可用（探测入口：已在跑则复用，否则就地启动；探测走**写**接口，它只认
+  本机且不需要 token），再 `--sync`；`stop` 之后再 `--sync` 摘除。失败只警告，不改启停的退出码。
+  需要停掉就地实例时用 `basctl setline --stop [--force]`。
+- 注册内容：R0 之后直接由 `servers/*/server.info` 得到「实例 → 端口 → webapp → 对外 url」，
+  不必重新解析 `server.xml`；同前缀多实例写成端口数组，交给 setline 健康检查 + 随机选。
 - 命名空间固定 `*`（除非 R5 引入分组）。
 - 冲突前置：注册前先跑 `setlinePlan`，同路径被端口集合不同的多个 webapp 认领就**拒绝启动**——把
   今天的 `Route conflict` 从"生成配置时"提前到"启动前"。
@@ -199,21 +210,20 @@ haproxy / nginx。
 
 ## R8 jstart 精简：去掉 `app.pid` 与 `stop`
 
-**目标**：jstart 只负责"解析 + 准备 + exec"，实例身份与停止交给 basctl。
+**状态：已落地**。jstart 只负责"解析 + 准备 + exec"，实例身份与停止交给 basctl。
 
-- 不再写 `<base>/app.pid`；不再提供 `stop`（`--timeout` / `--force` 的 stop 语义一并去掉），
+- jstart 不再写 `<base>/app.pid`；不再提供 `stop`（`--timeout` / `--force` 一并去掉），
   `run` 原有的"同一实例在运行就拒绝启动"随之消失。
-- basctl 接管停止：按 `server.info` 的 pid 发 SIGTERM，`--timeout` 超时后 SIGKILL，`--force`
-  直接 SIGKILL；幂等判断改读 `server.info`。
-- 跨仓库同步：jstart 的 usage / `docs/commands.md`（「组件 base 与 pid 文件」）/ README、
-  `beangle.github.io/jstart` 页面、`test/smoke.sh`；对 jstart 的使用者是破坏性变更，建议随
-  0.1.0 发布并在 CHANGELOG 标注。
+- basctl 接管停止：按 `server.info` 的 pid 发 SIGTERM，`--timeout` 超时后报错，
+  `--force` 直接 SIGKILL（同时跳过 pid 身份核对）。
+- 同步范围：jstart 的 usage / `docs/commands.md`（原「组件 base 与 pid 文件」）/ README、
+  `beangle.github.io/jstart` 页面、`test/smoke.sh`；破坏性变更记在 jstart 的 CHANGELOG。
 
 **验收**
 
-- [ ] jstart 运行后实例目录里不再出现 `app.pid`，`jstart stop` 不再存在
-- [ ] `basctl stop` 不依赖 jstart 也能停干净（含 `--force` 强杀）
-- [ ] jstart 文档与站点不再出现 `stop` / `app.pid` 的使用说明
+- [x] jstart 运行后实例目录里不再出现 `app.pid`，`jstart stop` 不再存在
+- [x] `basctl stop` 不依赖 jstart 也能停干净（含 `--force` 强杀）
+- [x] jstart 文档与站点不再出现 `stop` / `app.pid` 的使用说明
 
 ## R9 setline 管理接口：写只认本机，读保留 token
 
@@ -239,7 +249,10 @@ localhost，不认凭据（路由变即流量变）；**读**接口（`GET /__se
 
 - [x] webapp `<url path>` 声明对外路径，`routePaths()` 未声明时回退 context path（basctl `2d6f33e`）
 - [x] `setlinePlan` 冲突检测：同路径被端口集合不同的多个 webapp 认领即报错
-- [x] `basctl setline` 渲染单一 `*` 命名空间；`basctl status` 的 pid → 端口反查
+- [x] `basctl setline` 渲染单一 `*` 命名空间
+- [x] 实例运行信息 `server.info` 与端口分配（R0 / R1）：`start` 分配端口并记录，`status` 按它展示
+      （不保留 `SERVER_PID` 兼容读取），`stop` 按其中的 pid 停止
+- [x] jstart 精简（R8）：去掉 `app.pid` 与 `stop`，实例身份与停止归 basctl
 - [x] setline 的运行期路由接口：管理接口仅 localhost 可调；路由写回配置文件（重读→只替换 `routes`
       →tmp+rename），仍被引用端口的健康状态会保留（见 setline `doc/runtime-routes-api.md`）
 - [x] `server.xml` 的 `<setline listen>` 解析（xsd + config.d）与 `--sync`/`--stop` 的命令面
@@ -262,5 +275,3 @@ localhost，不认凭据（路由变即流量变）；**读**接口（`GET /__se
 3. **是否引入 `--group`**：引入后如何映射到 setline 的 host 匹配语义。
 4. **守护进程的运行身份**：单份 `BAS_HOME` 还是多份（一台机器上多个 bas 实例），以及以什么账号
    运行（要能对实例进程发信号）。
-
-R0 剩下的待定项（`SERVER_PID` 的兼容读取保留多久）见 [server-info.md](server-info.md) 的「待定」。

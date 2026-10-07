@@ -15,12 +15,14 @@
  */
 
 /**
- * 实例进程存活判断与日志滚动。
+ * 实例进程存活判断、身份核对、信号发送与日志滚动。
  */
 module bas.serverstatus;
 
 import bas.config : Server;
 
+import std.conv : to;
+import std.array : split;
 import std.datetime.systime : Clock;
 import std.file;
 import std.format : format;
@@ -52,6 +54,52 @@ bool processRunning(int pid) @trusted {
     return errno != ESRCH;
   } else {
     return false;
+  }
+}
+
+/**
+ * pid 的命令行是否确实是实例 `instance` 的进程。
+ *
+ * 运行信息里只记 pid，而 pid 会被系统回收：实例被 `kill -9` 之后再起别的进程，同一个 pid 可能
+ * 落到别人头上，照 pid 发信号就会伤及无辜。Linux 上核对 `/proc/<pid>/cmdline` 里的
+ * `-Dbas.server=<instance>`——basctl 生成 spec 时必带的 JVM 参数，正好是实例身份。
+ *
+ * 判定不了时（非 Linux、读不到 cmdline）返回 true：宁可放过，也不因为平台差异拦住正常停止；
+ * 要绝对确认用 `basctl stop --force`（不做身份核对，直接 SIGKILL）。
+ */
+bool pidLooksLikeInstance(int pid, string instance) @trusted {
+  version (linux) {
+    import std.file : readText;
+
+    if (pid <= 0 || !instance.length)
+      return false;
+    string cmdline;
+    try
+      cmdline = readText("/proc/" ~ pid.to!string ~ "/cmdline");
+    catch (Exception)
+      return true;
+    auto marker = "-Dbas.server=" ~ instance;
+    foreach (arg; cmdline.split('\0')) {
+      if (arg == marker)
+        return true;
+    }
+    return false;
+  } else {
+    return true;
+  }
+}
+
+/** 给进程发信号：`force` 为真发 SIGKILL，否则 SIGTERM；返回是否成功。 */
+bool signalProcess(int pid, bool force) @trusted {
+  version (Windows) {
+    import std.process : Config, execute;
+
+    auto res = execute(["taskkill", "/PID", pid.to!string, force ? "/F" : "/T"], null, Config.none);
+    return res.status == 0;
+  } else {
+    import core.sys.posix.signal : SIGKILL, SIGTERM, kill;
+
+    return kill(pid, force ? SIGKILL : SIGTERM) == 0;
   }
 }
 

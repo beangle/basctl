@@ -1,13 +1,14 @@
 # start：按 farm 生成 jstart spec 并启动
 
 `basctl start [server.xml] <farm|server|all>` 把 `conf/server.xml` 里的一个 farm（或某个
-`farm.server`、全部本机实例）变成运行中的容器。**容器启动本身交给 jstart**：basctl 只负责
-把配置翻译成 launch spec，并委托 `jstart resolve` / `jstart run`。
+`farm.server`、全部本机实例）变成运行中的容器。**容器启动本身交给 jstart**：basctl 负责定端口、
+把配置翻译成 launch spec、记下实例运行信息，并委托 `jstart resolve` / `jstart run`。
 
 ```sh
 basctl start conf/server.xml platform   # 启动 platform farm 在本机的实例
 basctl start platform                   # 简写：用 $BAS_HOME/conf/server.xml
 basctl start all
+basctl start all --port-range=21000-21999   # <server http="0"> 的实例改在这个区间里取端口
 ```
 
 单应用、不起 `conf/server.xml` 的快速运行用 [`basctl run`](run.md)：一个
@@ -17,28 +18,40 @@ basctl start all
 
 1. **选实例**：从 `<farms>` 中挑出匹配 pattern（farm 名 / `farm.server` / `all`）、且
    `<server>` 所属 host 在本机的实例；
-2. **解析 webapp**：沿用 `make` / `resolve` 的语义（`gav://`、http(s) 直链、本地路径、
+2. **定端口并写运行信息**：`<server http>` 有值就用它，为 `0`（或缺省）时在 `--port-range`
+   区间内分配一个空闲端口（缺省 `20000-29999`）；随后写 `servers/<farm.server>/server.info`
+   的第一段——不含 `pid`，同时兼作端口预留。端口先定下来，第 3 步生成的 spec 才能带上
+   `--port=`。格式见 [server-info.md](server-info.md)；
+3. **解析 webapp**：沿用 `make` / `resolve` 的语义（`gav://`、http(s) 直链、本地路径、
    SNAPSHOT 本地覆盖）；失败写 `servers/<farm.server>/error` 并跳过该实例；
-3. **生成 spec**：`conf/<farm.server>.jstart`——一个 `<server>` 一份 spec（一个 JVM），
+4. **生成 spec**：`conf/<farm.server>.jstart`——一个 `<server>` 一份 spec（一个 JVM），
    并按 `<engine type>` 把 `[engine] init` 写成对应 creator 的 `make <type>` 命令行
    （`tomcat-server` / `tomcat` / `undertow` / `jetty`，与 type 同名）；
-4. **`jstart resolve <spec>`**：校验 spec 与各 webapp 的依赖齐备，失败即不启动该实例；
-5. **后台 `jstart run <spec>`**：jstart 先运行 `[engine] init` → creator 准备容器环境
+5. **`jstart resolve <spec>`**：校验 spec 与各 webapp 的依赖齐备，失败即不启动该实例；
+6. **后台 `jstart run <spec>`**：jstart 先运行 `[engine] init` → creator 准备容器环境
    （`tomcat-server`：解压并裁剪 Tomcat、逐 webapp 解压 docBase、生成容器 `server.xml`；
    嵌入式：解压单个 webapp 并拼出内嵌容器启动命令）并写出最终启动命令，jstart
    再 exec 它（进程变为容器）。
 
-启动后写 `servers/<farm.server>/SERVER_PID`，控制台输出进
+确认存活（启动后约 2 秒探一次）后把 `pid` 补进 `servers/<farm.server>/server.info`，控制台输出进
 `logs/<farm.server>/console.out`（`servers/<farm.server>/logs` 是指向它的软链），
 `basctl status` 与 `make` 流程共用这套布局。目标已在运行时不再重复启动（幂等，退出码 0）。
+准备失败（端口没得挑、webapp 解析不出来、依赖缺件）或启动失败（进程没起来）的实例不留运行信息，
+端口预留随之撤销；同一批里其余实例照常启动，此时退出码非 0。
 
 ## 停止
 
-`basctl stop [server.xml] <farm|server|all> [--force] [--timeout=<sec>]` 对匹配的每个实例执行
-`jstart stop conf/<farm.server>.jstart`，再清理残留的 `SERVER_PID`。spec 里的 `[app] base`
-（根）与 `[app] instance`（组件目录名）就是实例身份，stop 从 spec 读出来，所以**别删
-`conf/<farm.server>.jstart`**；已经有实例先停了会让 `jstart stop` 报非 0，`basctl stop`
-记为 skipped 并以非 0 退出。
+`basctl stop [server.xml] <farm|server|all> [--force] [--timeout=<sec>]` 逐个按运行信息里的
+`pid` 停止，不再委托 `jstart stop`：
+
+1. 没在跑（信息还在但进程已死）→ 清掉陈旧信息，记 skipped；
+2. 核对身份（Linux 上看 `/proc/<pid>/cmdline` 里有没有 `-Dbas.server=<farm.server>`）——
+   pid 会被系统回收，照着一个陈旧 pid 发信号可能伤及无辜；不匹配就报错退出，不动它；
+3. SIGTERM → 等 `--timeout`（缺省 15 秒）→ 还没退就报错退出（**不会**自动升级成 SIGKILL）；
+4. `--force` 跳过第 2、3 步，直接 SIGKILL。
+
+停完删除 `server.info`。因为 pid 记在运行信息里，`conf/<farm.server>.jstart` 删了也能停；
+反过来，**未由 basctl 启动**的实例没有 `server.info`，停不掉，会报 `no run info`。
 
 ## 生成的 spec
 
@@ -136,7 +149,10 @@ org.beangle.bas:beangle-bas-engine:0.14.0
   `/proc/self/exe`，可用环境变量 `bas_basctl` 覆盖，含空格时会加引号）；`jstart` 仍用
   `bas_jstart` 指定；
 - 实例目录靠 `[app] instance` 显式命名（`servers/<farm.server>`），与 `make`/`status`/`logs`
-  的布局一致；`instance` 是 spec-only 的键，stop 也从 spec 读，删了 spec 就停不掉该实例；
+  的布局一致；
 - 生成物是派生物：改配置后重跑 `basctl start` 会覆盖 spec；
-- `start` 不接管日志轮转以外的生命周期：进程由 jstart 记录（`app.pid`），`SERVER_PID`
-  只是给 `basctl status` 用的副本。
+- `<server http="0">` 的实例在 spec 里拿到的仍是 `--port=<n>`——端口由 basctl 启动前分配，
+  引擎侧看不出差别；同一实例重启时优先复用上次的端口（区间没变的话）；
+- 实例身份与停止归 basctl：pid 记在 `servers/<farm.server>/server.info`，运行信息是 `status`
+  与 setline 对账共用的「现状」（见 [server-info.md](server-info.md)）；jstart 已不写
+  `app.pid`、也不再提供 `stop`。
