@@ -21,9 +21,9 @@
  *
  *  - `java`：`make`（creator 与只准备）写出的启动命令、以及 jstart 最终 exec 的都是 java，
  *    按 `JAVA_HOME/bin/java` > `PATH` 解析（与 creator 里 `javaExecutable` 同一顺序）；
- *  - `jstart`：`start` / `make` / `resolve` 用它解析下载构件，命令名可用 `bas_jstart` 覆盖；
+ *  - `jstart`：`start` / `make` / `resolve` 用它解析下载构件，命令名可用 `beangle_jstart` 覆盖；
  *  - `setline`：只有 `server.xml` 里声明了 `<setline>` 才必需（没有它就不会被调用），
- *    命令名可用 `bas_setline` 覆盖。
+ *    命令名可用 `beangle_setline` 覆盖。
  *
  * 只检查“命令存在且可执行”，**不校验版本**：java / jstart / 容器的版本策略分别属于各自的
  * 发布节奏，basctl 掺和只会制造漂移。缺件时打印安装提示，并让退出码非 0。
@@ -34,8 +34,8 @@
 module bas.doctor;
 
 import bas.config : parseServerXmlFile;
-import bas.jstart : jstartCommand;
-import bas.setlineproc : setlineCommand;
+import bas.jstart : jstartEnvVar;
+import bas.setlineproc : setlineEnvVar;
 
 import std.array : join, split;
 import std.conv : to;
@@ -61,7 +61,7 @@ struct ToolCheck {
   CheckState state;
   /** 找到时的绝对路径（`ok` 才有值）。 */
   string path;
-  /** 解析来源：`JAVA_HOME` / `PATH` / `bas_jstart` / `bas_setline`。 */
+  /** 解析来源：`JAVA_HOME` / `PATH` / `beangle_jstart` / `beangle_setline`。 */
   string source;
   /** `missing` / `skipped` 的一句话说明。 */
   string note;
@@ -80,15 +80,41 @@ struct ToolCheck {
 }
 
 /**
+ * 解析命令时要用到的环境。默认取自进程环境（{@link ToolEnv.fromProcess}）；也允许显式构造，
+ * 好让本模块的检查保持纯函数——测试并行跑时不必去改进程级环境变量这种共享状态。
+ */
+struct ToolEnv {
+  /** `JAVA_HOME`；空串表示没设，退回 `PATH`。 */
+  string javaHome;
+  /** `PATH`，按平台分隔符拆分。 */
+  string path;
+  /** {@link jstartEnvVar} 的值；空串表示按 `PATH` 找 `jstart`。 */
+  string jstart;
+  /** {@link setlineEnvVar} 的值；空串表示按 `PATH` 找 `setline`。 */
+  string setline;
+
+  /** 取当前进程环境（`basctl doctor` 走这条）。 */
+  static ToolEnv fromProcess() {
+    return ToolEnv(strip(environment.get("JAVA_HOME", "")), environment.get("PATH", ""),
+        strip(environment.get(jstartEnvVar, "")), strip(environment.get(setlineEnvVar, "")));
+  }
+}
+
+/**
  * 检查 basctl 需要的命令；`confFile` 只用于判断 setline 是否必需
  * （文件缺失或解析失败都按“未启用 setline”处理，不因此报错）。
  */
 ToolCheck[] checkTools(string confFile) {
+  return checkTools(confFile, ToolEnv.fromProcess());
+}
+
+/// ditto
+ToolCheck[] checkTools(string confFile, in ToolEnv env) {
   ToolCheck[] checks;
-  checks ~= checkJava();
-  checks ~= checkJstart();
+  checks ~= checkJava(env);
+  checks ~= checkJstart(env);
   auto setline = setlineConfigState(confFile);
-  checks ~= checkSetline(setline.enabled, setline.note);
+  checks ~= checkSetline(env, setline.enabled, setline.note);
   return checks;
 }
 
@@ -116,47 +142,48 @@ private SetlineConfigState setlineConfigState(string confFile) {
 }
 
 /** java：`JAVA_HOME/bin/java` 优先，其次 `PATH`。 */
-private ToolCheck checkJava() {
+private ToolCheck checkJava(in ToolEnv env) {
   version (Windows)
     enum exe = "java.exe";
   else
     enum exe = "java";
 
-  auto home = strip(environment.get("JAVA_HOME", ""));
+  auto home = env.javaHome;
   if (home.length) {
     auto bin = buildPath(home, "bin", exe);
-    if (exists(bin) && isFile(bin))
+    if (isRegularFile(bin))
       return available("java", absolutePath(bin), "JAVA_HOME");
   }
-  auto found = findOnPath(exe);
+  auto found = findOnPath(exe, env.path);
   if (found.length)
     return available("java", found, "PATH");
   auto why = home.length ? "JAVA_HOME/bin/" ~ exe ~ " does not exist" : "not on PATH";
   return unavailable("java", "install a JDK (" ~ why ~ "), or set JAVA_HOME");
 }
 
-/** jstart：`bas_jstart` 指向的命令 > `PATH` 上的 `jstart`。 */
-private ToolCheck checkJstart() {
-  auto source = strip(environment.get("bas_jstart", "")).length ? "bas_jstart" : "PATH";
-  auto found = resolveCommand(jstartCommand());
+/** jstart：`beangle_jstart` 指向的命令 > `PATH` 上的 `jstart`。 */
+private ToolCheck checkJstart(in ToolEnv env) {
+  auto source = env.jstart.length ? jstartEnvVar : "PATH";
+  auto found = resolveCommand(env.jstart.length ? env.jstart : "jstart", env.path);
   if (found.length)
     return available("jstart", found, source);
-  return unavailable("jstart", source == "bas_jstart"
-      ? "bas_jstart points to " ~ jstartCommand() ~ ", but that command was not found"
-      : "install jstart, or set bas_jstart to its path");
+  return unavailable("jstart", source == jstartEnvVar
+      ? jstartEnvVar ~ " points to " ~ env.jstart ~ ", but that command was not found"
+      : "install jstart, or set " ~ jstartEnvVar ~ " to its path");
 }
 
-/** setline：只有启用时才必需；`bas_setline` 指向的命令 > `PATH` 上的 `setline`。 */
-private ToolCheck checkSetline(bool required, string configNote) {
-  auto source = strip(environment.get("bas_setline", "")).length ? "bas_setline" : "PATH";
-  auto found = resolveCommand(setlineCommand());
+/** setline：只有启用时才必需；`beangle_setline` 指向的命令 > `PATH` 上的 `setline`。 */
+private ToolCheck checkSetline(in ToolEnv env, bool required, string configNote) {
+  auto source = env.setline.length ? setlineEnvVar : "PATH";
+  auto found = resolveCommand(env.setline.length ? env.setline : "setline", env.path);
   if (found.length)
     return available("setline", found, source);
   if (!required)
     return ToolCheck("setline", CheckState.skipped, "", "", "not required: " ~ configNote);
-  return unavailable("setline", source == "bas_setline"
-      ? "bas_setline points to " ~ setlineCommand() ~ ", but that command was not found (" ~ configNote ~ ")"
-      : "install setline or set bas_setline to its path (" ~ configNote ~ ")");
+  return unavailable("setline", source == setlineEnvVar
+      ? setlineEnvVar ~ " points to " ~ env.setline ~ ", but that command was not found ("
+          ~ configNote ~ ")"
+      : "install setline or set " ~ setlineEnvVar ~ " to its path (" ~ configNote ~ ")");
 }
 
 /** 组装一条“找到”的结果。 */
@@ -173,7 +200,7 @@ private ToolCheck unavailable(string name, string note) {
  * 按 `PATH` 查找命令（Windows 追加 `PATHEXT`），找不到返回空串。与 jstart 同一约定：
  * 只要求“是文件”，不检查 POSIX 可执行位（Windows 上本来就没有）。
  */
-string findOnPath(string name) {
+string findOnPath(string name, string path) {
   version (Windows) {
     immutable string[] exts = environment.get("PATHEXT", ".COM;.EXE;.BAT;.CMD").split(";");
     immutable sep = ';';
@@ -181,29 +208,40 @@ string findOnPath(string name) {
     immutable string[] exts = [""];
     immutable sep = ':';
   }
-  foreach (dir; environment.get("PATH", "").split(sep)) {
+  foreach (dir; path.split(sep)) {
     if (dir.length == 0)
       continue;
     foreach (ext; exts) {
       auto candidate = buildPath(dir, name ~ ext);
-      if (exists(candidate) && isFile(candidate))
+      if (isRegularFile(candidate))
         return candidate;
     }
   }
   return "";
 }
 
+/**
+ * 是存在的普通文件。`exists`（lstat）与 `isFile`（再 lstat 一次）之间文件可能被删，而 `isFile`
+ * 对缺失文件会抛 `FileException`；扫 `PATH` 不该因为某个候选在扫描途中消失就整体报错，吞掉即可。
+ */
+private bool isRegularFile(string path) @trusted {
+  try
+    return exists(path) && isFile(path);
+  catch (Exception)
+    return false;
+}
+
 /** 解析一个“命令或路径”：含分隔符按路径（存在才用），否则查 `PATH`。 */
-private string resolveCommand(string value) {
+private string resolveCommand(string value, string path) {
   auto cmd = strip(value);
   if (cmd.length == 0)
     return "";
   if (cmd.indexOf('/') >= 0 || cmd.indexOf('\\') >= 0) {
-    if (exists(cmd) && isFile(cmd))
+    if (isRegularFile(cmd))
       return absolutePath(cmd);
     return "";
   }
-  auto found = findOnPath(cmd);
+  auto found = findOnPath(cmd, path);
   return found.length ? absolutePath(found) : "";
 }
 

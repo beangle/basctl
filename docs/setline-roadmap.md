@@ -1,15 +1,14 @@
 # setline 集成 roadmap
 
 本文件跟踪 bas / basctl 与 setline 的集成设想，供后续核对与跟踪。每项用复选框表示进度，落地后
-回填 commit。**当前的落地情况**：R0 / R1 / R8 / R9 已完成，R2 的命令行部分已完成（启停挂接
-未做），其余尚未开始。
+回填 commit。**当前的落地情况**：R0 / R1 / R2 / R3 / R8 / R9 已完成，其余尚未开始。
 
 | 编号 | 主题 | 状态 | 依赖 |
 |---|---|---|---|
 | R0 | 实例运行信息 `server.info` | 已落地 | — |
 | R1 | 动态端口与端口分配 | 已落地 | R0 |
-| R2 | `start` / `stop` 自动注册路由 | CLI 已落地（`--sync`/`--stop`），启停挂接未开始 | R0、R1（可先支持静态端口） |
-| R3 | 对账（`--watch` / `--sync`） | 未开始 | R0、R1、R2 |
+| R2 | `start` / `stop` 自动注册路由 | 已落地 | R0、R1 |
+| R3 | 对账（`--watch` / `--sync`） | 已落地（子命令 `basctl setline --watch`） | R0、R1、R2 |
 | R4 | basctl 容器化：一机器一出口 | 未开始 | R1-R3 |
 | R5 | host 分组（多人 / 多项目共享） | 未开始 | R2、R3 |
 | R6 | 生产侧 agent manifest 通道 | 未开始 | 独立 |
@@ -28,14 +27,14 @@
 
 ### 「对账进程」是什么，不是什么
 
-- **是**：一个只做路由同步的守护进程（拟名 `basctl setline --watch`）。它读 `servers/*/server.info`
+- **是**：一个只做路由同步的守护进程（`basctl setline --watch`，已落地）。它读 `servers/*/server.info`
   得到「实例 → pid / 端口 / webapp / 对外 url」，通过 setline 的 `/__setline/routes` 增删路由。
   **不需要重新解析 `server.xml`**：运行信息就是实例启动时那份配置的投影。
 - **不是**：应用进程的 supervisor。起停应用仍然是 `basctl start` / `stop` 的职责，对账进程不碰
   进程生命周期、不拉容器、不解析依赖。
 - **粒度**：一个 `BAS_HOME`（一份 `server.xml`）一个对账进程，不是每个 farm / server 一个。
-- **也可以不常驻**：`basctl setline --sync` 一次性对账，挂在 `start` / `stop` 之后即可。两者的
-  取舍见「待决策」。
+- **也可以不常驻**：`basctl setline --sync` 一次性对账（`start` / `stop` 之后本来就会各跑一次）。
+  常驻与一次性的取舍已定：两者并存，见「待决策」。
 
 ## R0 实例运行信息 `server.info`
 
@@ -74,6 +73,9 @@
 - 结果写进 `server.info` 的 `http.port`（R0），并以 `--port=<n>` 传给应用——静态端口走同一条路，
   引擎侧不需要区分。
 - `setlinePlan` 仍跳过 `http <= 0`：动态端口不进静态渲染，只进运行态注册。
+- 落地时补了一处遗漏：动态端口最初只写进运行信息、没回填 `server.http`，于是 spec 里没有
+  `--port=`，应用还在用引擎缺省端口（路由会指到一个没人听的端口）；现已在 `reserveInstance`
+  里回填（见 `src/bas/starter.d`）。
 
 **验收**
 
@@ -91,9 +93,9 @@
 
 **目标**：`basctl start` 起完即注册路由，`stop` 即摘除；setline 不在时只警告、不影响启动。
 
-**进度**：CLI 这一半已落地——`basctl setline --sync`（要入口 + 推整组路由，必要时就地启动）与
-`basctl setline --stop [--force]` 都能用了；`start` / `stop` 里的自动挂接还没做，因此
-下面的验收项仍为空。
+**进度**：已落地。`basctl setline --sync`（要入口 + 推整组路由，必要时就地启动）、
+`basctl setline --stop [--force]`，以及 `start` / `stop` 之后的自动对账都已可用；对账输入是
+`servers/*/server.info`（见 R3），`--no-setline` 可临时跳过。
 
 - **配置即开关**：`server.xml` 的 `<setline listen="..."/>` 出现才启用（等价于
   `setline_enabled=false` 的反面），地址、就地启动、systemd 的取舍见
@@ -110,11 +112,11 @@
 
 **验收**
 
-- [ ] 没配置 `<setline>` 时 `basctl start` 完全不碰 setline
-- [ ] 配置了 `<setline>` 而没有 setline 在跑时，`start` 就地把它拉起来并推送路由
-- [ ] `basctl start platform.server1` 后，`GET /__setline/routes` 出现对应前缀与端口
-- [ ] `basctl stop` 后该端口从前缀的端口数组消失；数组为空则整条路由消失
-- [ ] 冲突拓扑启动即失败，且不写任何路由
+- [x] 没配置 `<setline>` 时 `basctl start` 完全不碰 setline
+- [x] 配置了 `<setline>` 而没有 setline 在跑时，`start` 就地把它拉起来并推送路由
+- [x] `basctl start platform.server1` 后，`GET /__setline/routes` 出现对应前缀与端口
+- [x] `basctl stop` 后该端口从前缀的端口数组消失；数组为空则整条路由消失
+- [x] 冲突拓扑启动即失败，且不写任何路由
 
 **风险**：启用时 `conf/setline.json` 归 setline 进程（`basctl setline` 渲染不再默认覆盖它），
 禁用时归渲染命令——一个文件一个所有者，见 [setline-config.md](setline-config.md)。
@@ -122,6 +124,10 @@
 ## R3 对账（`--watch` / `--sync`）
 
 **目标**：路由恒等于"此刻真实活着的实例"，覆盖 `kill -9`、端口漂移、手工起停。
+
+**进度**：已落地，形态取「同一个二进制里的常驻子命令」——`basctl setline --watch
+[--interval=<sec>]`（缺省 5 秒轮询），而不是另立 `basctld`（理由见文末「实现形态与归属」）。
+轮询时只在渲染结果变化后推送，闲时零流量；冲突则打印一次并保持现状，修好后下一周期自愈。
 
 - 输入：`servers/*/server.info`（pid、`http.port`、各 webapp 的 `url`）；pid 不存活即视为不存在。
   不重新解析 `server.xml`——运行信息是实例启动时那份配置的投影，避免"配置改了但实例还是旧的"歧义。
@@ -131,14 +137,17 @@
 
 **验收**
 
-- [ ] `kill -9` 实例后一个周期内，对应路由被摘除
-- [ ] 重启实例（`stop` + `start`）后，新的 `server.info` 使路由随之变化；只改 `server.xml`
+- [x] `kill -9` 实例后一个周期内，对应路由被摘除
+- [x] 重启实例（`stop` + `start`）后，新的 `server.info` 使路由随之变化；只改 `server.xml`
       而不重启时路由**不变**（运行信息跟随实例，而不是跟随当前配置）
-- [ ] 连续对账不产生重复路由；停掉对账进程不影响已有路由
+- [x] 连续对账不产生重复路由；停掉对账进程不影响已有路由
 
 **风险**：整体替换会覆盖"别人"写进 `*` 的路由。多人共享时需要 R5 的分组或独立命名空间。
 
 ### 实现形态与归属（这个程序放哪）
+
+**结论（已落地）**：就是 `basctl setline --watch` 一个常驻子命令，不另立 `basctld`；进程管理
+交给 systemd（unit 里写这一行即可）。下面的判断依据留给将来它"长出别的职责"时再回看。
 
 - **不需要第二个 `main`**：守护进程就是一个常驻子命令（`basctl setline --watch` 启动后不退出），
   进程管理交给 systemd——照抄 setline 已有的 unit 文件即可。dub 也允许一个包出多个可执行
@@ -270,8 +279,9 @@ localhost，不认凭据（路由变即流量变）；**读**接口（`GET /__se
 1. **写者纪律**：`server.xml`（意图）、`server.info`（现状）、setline 配置文件（运行态）三份状态
    谁写谁读。已定：启用时 `conf/setline.json` 归 setline 进程（`routes` 由它写回），禁用时归
    `basctl setline` 渲染，见 [setline-config.md](setline-config.md)。
-2. **对账形态**：常驻 `--watch`，还是只在 start/stop 里同步一次，或两者并存（watch 处理漂移，
-   sync 保证即时）。
+2. ~~**对账形态**：常驻 `--watch`，还是只在 start/stop 里同步一次，或两者并存~~ **已定：两者
+   并存**——`start` / `stop` 各同步一次保证即时（失败只警告，见 R2），`--watch` 处理 `kill -9`、
+   手工起停、端口漂移等漂移（见 R3）；`--watch` 是前台子命令，常驻与否交给 systemd。
 3. **是否引入 `--group`**：引入后如何映射到 setline 的 host 匹配语义。
 4. **守护进程的运行身份**：单份 `BAS_HOME` 还是多份（一台机器上多个 bas 实例），以及以什么账号
    运行（要能对实例进程发信号）。

@@ -1,8 +1,8 @@
 #!/bin/bash
 # bas 控制脚本的共享环境：控制命令位置与仓库地址。
 #
-# 控制面 basctl 与运行器 jstart 都取 PATH 上的同名命令，可分别用 bas_basctl /
-# bas_jstart 覆盖（例如指向未安装到 PATH 的本地构建产物）。
+# 控制面 basctl 与运行器 jstart 都取 PATH 上的同名命令，可分别用 beangle_basctl /
+# beangle_jstart 覆盖（例如指向未安装到 PATH 的本地构建产物）。
 # 引擎与容器版本取自 conf/server.xml（<bas version> / <engine version>），
 # 不在本文件里维护。
 
@@ -18,4 +18,4 @@ if [ -z "$M2_REPO" ]; then
   export M2_REPO="$HOME/.m2/repository"
 fi
 
-export basctl_cmd="${bas_basctl:-basctl}"
+export basctl_cmd="${beangle_basctl:-basctl}"

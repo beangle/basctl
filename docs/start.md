@@ -9,6 +9,7 @@ basctl start conf/server.xml platform   # 启动 platform farm 在本机的实�
 basctl start platform                   # 简写：用 $BAS_HOME/conf/server.xml
 basctl start all
 basctl start all --port-range=21000-21999   # <server http="0"> 的实例改在这个区间里取端口
+basctl start all --no-setline                # 临时不把这批实例的路由推给 setline
 ```
 
 单应用、不起 `conf/server.xml` 的快速运行用 [`basctl run`](run.md)：一个
@@ -39,10 +40,14 @@ basctl start all --port-range=21000-21999   # <server http="0"> 的实例改在�
 准备失败（端口没得挑、webapp 解析不出来、依赖缺件）或启动失败（进程没起来）的实例不留运行信息，
 端口预留随之撤销；同一批里其余实例照常启动，此时退出码非 0。
 
+配了 `<setline>` 时，最后还会按 `servers/*/server.info` 对账一次路由——把存活的实例推给 setline
+（入口空着就地拉起），没起来的实例不进路由。对账失败**只警告**，不影响退出码；`--no-setline`
+跳过。详见 [setline.md](setline.md)。
+
 ## 停止
 
-`basctl stop [server.xml] <farm|server|all> [--force] [--timeout=<sec>]` 逐个按运行信息里的
-`pid` 停止，不再委托 `jstart stop`：
+`basctl stop [server.xml] <farm|server|all> [--force] [--timeout=<sec>] [--no-setline]` 逐个按
+运行信息里的 `pid` 停止，不再委托 `jstart stop`：
 
 1. 没在跑（信息还在但进程已死）→ 清掉陈旧信息，记 skipped；
 2. 核对身份（Linux 上看 `/proc/<pid>/cmdline` 里有没有 `-Dbas.server=<farm.server>`）——
@@ -52,6 +57,8 @@ basctl start all --port-range=21000-21999   # <server http="0"> 的实例改在�
 
 停完删除 `server.info`。因为 pid 记在运行信息里，`conf/<farm.server>.jstart` 删了也能停；
 反过来，**未由 basctl 启动**的实例没有 `server.info`，停不掉，会报 `no run info`。
+配了 `<setline>` 时，停完还会按 `servers/*/server.info` 对账一次路由（摘除这些端口），
+失败同样是只警告；`--no-setline` 跳过。
 
 ## 生成的 spec
 
@@ -64,7 +71,7 @@ instance = platform.server1                  # 组件目录名 → jstart 实例
 working_dir = /opt/bas
 
 [engine]
-init = basctl make tomcat-server              # 当前 basctl（可用 bas_basctl 覆盖路径）
+init = basctl make tomcat-server              # 当前 basctl（可用 beangle_basctl 覆盖路径）
 org.apache.tomcat:tomcat:zip:11.0.26         # 发行包（creator 取 classpath 上的 zip 解压）
 org.beangle.bas:beangle-bas-engine:0.14.0    # 引擎 jar（会被装进 dist 的 lib/）
 org.beangle.bas:beangle-bas-juli:0.14.0      # 容器日志桥接（放 Catalina 系统 classpath，不进 lib/）
@@ -146,8 +153,8 @@ org.beangle.bas:beangle-bas-engine:0.14.0
 - `tomcat-server` 走多应用全量发行包（`org.apache.tomcat:tomcat:zip`）；
   `tomcat` / `undertow` / `jetty` 只支持单应用，多于一个 webapp 时报错；
 - `[engine] init` 直接写当前 `basctl` 的 `make tomcat-server` 命令行（路径取自
-  `/proc/self/exe`，可用环境变量 `bas_basctl` 覆盖，含空格时会加引号）；`jstart` 仍用
-  `bas_jstart` 指定；
+  `/proc/self/exe`，可用环境变量 `beangle_basctl` 覆盖，含空格时会加引号）；`jstart` 仍用
+  `beangle_jstart` 指定；
 - 实例目录靠 `[app] instance` 显式命名（`servers/<farm.server>`），与 `make`/`status`/`logs`
   的布局一致；
 - 生成物是派生物：改配置后重跑 `basctl start` 会覆盖 spec；

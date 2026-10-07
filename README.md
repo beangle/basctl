@@ -7,9 +7,10 @@
 
 `engine` 模块的**容器入口**（creator，配合 jstart 的 war 运行协议）也由 basctl 提供，
 见 [docs/engine-creator.md](docs/engine-creator.md)；`start` 的流程与生成的 spec 见
-[docs/start.md](docs/start.md)；`setline` 把拓扑渲染成本地 setline 代理配置，见
-[docs/setline.md](docs/setline.md)；围绕 setline 的后续设想（动态端口、自动注册、对账、容器化）
-见 [docs/setline-roadmap.md](docs/setline-roadmap.md)，其中的实例运行信息格式见
+[docs/start.md](docs/start.md)；`setline` 把拓扑渲染成本地 setline 代理配置，并把运行中实例的
+路由同步给它（动态端口、自动注册、`--watch` 对账），见 [docs/setline.md](docs/setline.md)；
+围绕 setline 的集成设计与后续设想（容器化单出口、host 分组等）见
+[docs/setline-roadmap.md](docs/setline-roadmap.md)，其中的实例运行信息格式见
 [docs/server-info.md](docs/server-info.md)、入口配置与启用规则见
 [docs/setline-config.md](docs/setline-config.md)；basctl 自身的功能规划见
 [docs/roadmap.md](docs/roadmap.md)，运行所需外部命令的检查（`basctl doctor`）见
@@ -64,15 +65,17 @@ dub test --compiler=ldc2
 |---|---|
 | `basctl version` | 打印 `basctl <版本>`（单行纯文本，便于脚本取值） |
 | `basctl banner [server.xml]` | 操作者横幅：logo + bas 引擎版本（取自 `<bas version>`）+ basctl 版本 + 本机地址；`bas.sh version` 调它。图形为纯 ASCII，只在交互终端出现，重定向到日志/管道时只剩版本行与本机地址 |
-| `basctl status` | 列出 `$BAS_HOME/servers` 下运行中的实例：读 `server.info` 展示 pid、端口、引擎、启动时间与各 webapp 的对外 url；pid 已不在的显示为 `stale` |
+| `basctl status` | 列出 `$BAS_HOME/servers` 下运行中的实例：读 `server.info` 展示 pid、端口、引擎、启动时间与各 webapp 的对外 url；pid 已不在的显示为 `stale`。配了 `<setline>` 时另起一节报入口地址与状态（pid / `down` / 被别的进程占用） |
 | `basctl init [--force] [--dry-run] [workdir]` | 初始化组件目录：把控制脚本铺到 `<workdir>/bin`，并建 `conf/` |
 | `basctl make [server.xml] <farm\|server\|all>` | 只准备不启动：生成 jstart spec 并 `jstart resolve` 预取依赖 |
 | `basctl resolve <server.xml> [pattern...]` | 只解析 webapp，不生成实例 |
-| `basctl start [server.xml] <farm\|server\|all> [--port-range=<from>-<to>]` | 为实例定端口（`<server http="0">` 时在区间内分配，缺省 `20000-29999`）、写 `server.info`、生成 jstart spec、resolve 并后台启动 |
-| `basctl stop [server.xml] <farm\|server\|all> [--force] [--timeout=<sec>]` | 按 `server.info` 里的 pid 停止 `start` 启动的实例：SIGTERM 后等 `--timeout`（缺省 15 秒），`--force` 直接 SIGKILL |
+| `basctl start [server.xml] <farm\|server\|all> [--port-range=<from>-<to>] [--no-setline]` | 为实例定端口（`<server http="0">` 时在区间内分配，缺省 `20000-29999`）、写 `server.info`、生成 jstart spec、resolve 并后台启动；配了 `<setline>` 时启动后对账路由（`--no-setline` 跳过） |
+| `basctl stop [server.xml] <farm\|server\|all> [--force] [--timeout=<sec>] [--no-setline]` | 按 `server.info` 里的 pid 停止 `start` 启动的实例：SIGTERM 后等 `--timeout`（缺省 15 秒），`--force` 直接 SIGKILL；配了 `<setline>` 时停完对账路由（`--no-setline` 跳过） |
 | `basctl run --engine=<type>-<version> <app>` | 嵌入式运行单个 webapp：`--engine=tomcat-11.0.25` 同时给出容器类型与版本，生成单应用 spec 后前台 `jstart run` |
-| `basctl setline [server.xml] [--output=<file>] [--listen=<addr>]` | 把服务拓扑渲染成 setline 配置（缺省写 `conf/setline.json` 并提示位置）：一个入口地址按路径前缀转发到各 server 的 http 端口，同一 webapp 的多实例自动成为端口列表，见 [docs/setline.md](docs/setline.md) |
-| `basctl setline --sync` / `--stop [--force]` | 把整组路由推给正在跑的 setline（入口空着就地拉起来）／停掉 basctl 就地启动的那个，见 [docs/setline.md](docs/setline.md) |
+| `basctl setline [server.xml] [--output=<file>] [--listen=<addr>]` | 把 `server.xml` 的静态拓扑渲染成 setline 配置（缺省写 `conf/setline.json` 并提示位置）：一个入口地址按路径前缀转发到各 server 的 http 端口，同一 webapp 的多实例自动成为端口列表，见 [docs/setline.md](docs/setline.md) |
+| `basctl setline --sync` | 按运行中的实例（`server.info`，含动态端口）推整组路由给 setline：入口空着就地拉起来，已在跑就复用；与 `basctl start` / `stop` 之后的自动对账同一条路 |
+| `basctl setline --watch [--interval=<sec>]` | 常驻轮询对账（缺省每 5 秒；路由无变化就不推），直到 Ctrl-C；适合交给 systemd |
+| `basctl setline --stop [--force]` | 停掉 basctl 就地启动的那个（`$BAS_HOME/run/setline.pid`），`--force` 直接 SIGKILL |
 | `basctl make <type> [options]` | 容器入口（creator）：把 jstart 的 `[engine] init` 协议翻译成容器启动命令 |
 | `basctl firewall [workdir]` | 按配置交互式配置 firewalld 端口 |
 | `basctl pull [--remote=<url>] [workdir]` | 从控制端拉取 `conf/server.xml`（请求带 `ip:` 头，旧配置备份为 `server_old.xml`） |
@@ -129,7 +132,7 @@ $BAS_HOME/
 ## 与 jstart 的关系
 
 构件的解析与下载委托给本机 `jstart` 命令（`fetch` / `resolve`）；`basctl` 只负责配置模型、
-目录编排与配置渲染。`jstart` 不在 `PATH` 时可用环境变量 `bas_jstart` 指定其路径。
+目录编排与配置渲染。`jstart` 不在 `PATH` 时可用环境变量 `beangle_jstart` 指定其路径。
 
 运行 war 时，jstart 按 `[engine] init` 协议调用 basctl 的 `make <type>` 并把 war 交给它：它准备
 webapp、写出最终启动命令，jstart 再 exec。`basctl make tomcat` / `undertow` / `jetty` /

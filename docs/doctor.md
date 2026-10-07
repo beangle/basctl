@@ -13,8 +13,8 @@ basctl doctor /opt/bas/conf/server.xml
 | 命令 | 什么时候需要 | 从哪找 |
 |------|--------------|--------|
 | `java` | `make` / `start` / `run` 都要（creator 写出的启动命令与 jstart 最终 exec 的都是 java） | `$JAVA_HOME/bin/java` 优先，其次 `PATH` |
-| `jstart` | `start` / `make` / `resolve` 用它解析下载构件 | `bas_jstart` 指向的命令优先，其次 `PATH` 上的 `jstart` |
-| `setline` | **只有** `server.xml` 里声明了 `<setline listen="...">` 才必需 | `bas_setline` 指向的命令优先，其次 `PATH` 上的 `setline` |
+| `jstart` | `start` / `make` / `resolve` 用它解析下载构件 | `beangle_jstart` 指向的命令优先，其次 `PATH` 上的 `jstart` |
+| `setline` | **只有** `server.xml` 里声明了 `<setline listen="...">` 才必需 | `beangle_setline` 指向的命令优先，其次 `PATH` 上的 `setline` |
 
 `<setline>` 的判定与 [setline-config.md](setline-config.md) 一致：出现即启用，没有独立的开关。
 配置文件不存在或解析失败时按「未启用 setline」处理（不因此报错），说明会打在 `config` 行上。
@@ -25,7 +25,7 @@ basctl doctor /opt/bas/conf/server.xml
 config  /opt/bas/conf/server.xml (<setline listen="127.0.0.1:18080">)
 java     ok      /usr/lib/jvm/java-17-openjdk/bin/java (JAVA_HOME)
 jstart   ok      /usr/local/bin/jstart (PATH)
-setline  MISSING install setline or set bas_setline to its path (<setline listen="127.0.0.1:18080">)
+setline  MISSING install setline or set beangle_setline to its path (<setline listen="127.0.0.1:18080">)
 doctor: 1 required command(s) missing.
 ```
 

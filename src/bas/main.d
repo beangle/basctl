@@ -17,6 +17,9 @@
 /**
  * basctl 命令行入口：`version` / `banner` / `status` / `init` / `make` / `resolve` /
  * `start` / `stop` / `run` / `setline` / `doctor` / `firewall` / `pull`。
+ *
+ * `start` / `stop` 在 `server.xml` 配了 `<setline>` 时还会自动对账路由（见 bas.setlineproc），
+ * `--no-setline` 可临时跳过。
  */
 module bas.main;
 
@@ -29,10 +32,12 @@ import bas.firewall;
 import bas.init;
 import bas.net;
 import bas.pull;
+import bas.shellenv : readContainer;
 import bas.resolver;
-import bas.serverinfo : ServerInfo, readInstanceInfo;
+import bas.serverinfo : ServerInfo, liveInstances, readInstanceInfo;
 import bas.serverstatus;
-import bas.setline;
+import bas.setline : SetlineConflict, conflictLines, defaultSetlineListen, renderSetlineConfig,
+  runningPlan, setlinePlan;
 import bas.setlineproc;
 import bas.starter;
 
@@ -40,7 +45,6 @@ import std.algorithm : canFind, sort;
 import std.conv : to;
 import std.file : SpanMode, dirEntries, exists, isDir, mkdirRecurse, readText, write;
 import std.format : format;
-import std.json : JSONType, parseJSON;
 import std.path : absolutePath, baseName, buildPath, dirName;
 import std.process : environment;
 import std.stdio : stderr, stdout, writeln;
@@ -115,16 +119,19 @@ void printUsage() {
   stderr.writeln("  resolve <server.xml> [pattern...]  Resolve webapps only");
   stderr.writeln("  start [server.xml] <pattern>  Allocate ports, generate a jstart spec per server and start it");
   stderr.writeln("                                (--port-range=<from>-<to>, default 20000-29999, when");
-  stderr.writeln("                                <server http=\"0\">: basctl picks and records the port)");
+  stderr.writeln("                                <server http=\"0\">: basctl picks and records the port;");
+  stderr.writeln("                                --no-setline: do not register routes)");
   stderr.writeln("  stop [server.xml] <pattern>   Stop the instances started by `start` (pid from server.info)");
-  stderr.writeln("                                (--timeout=<sec> default 15, --force: SIGKILL at once)");
+  stderr.writeln("                                (--timeout=<sec> default 15, --force: SIGKILL at once;");
+  stderr.writeln("                                --no-setline: do not unregister routes)");
   stderr.writeln("  run [options] <app>           Run one webapp in embedded mode");
   stderr.writeln("                                (--engine=<type>-<version>, e.g. tomcat-11.0.25;");
   stderr.writeln("                                bas engine version defaults to " ~ defaultBasVersion ~ ")");
   stderr.writeln("  setline [server.xml]          Render the setline config for the whole topology:");
   stderr.writeln("                                one entry address routes to every server's http port");
   stderr.writeln("                                (writes conf/setline.json; --output=<file>)");
-  stderr.writeln("                                (--listen=<addr>)");
+  stderr.writeln("                                (--listen=<addr>; --sync/--watch push the live");
+  stderr.writeln("                                 instances' routes; --stop stops the local one)");
   stderr.writeln("  doctor [server.xml]           Check that java / jstart are on this machine");
   stderr.writeln("                                (setline too, but only when <setline> is configured)");
   stderr.writeln("  firewall [workdir]            Configure firewalld ports from conf/server.xml");
@@ -263,7 +270,8 @@ int cmdSetline(string[] args) {
   string confFile;
   string outFile;
   string listen;
-  bool sync, stop, force;
+  bool sync, watch, stop, force;
+  auto intervalSec = defaultWatchIntervalSec;
   foreach (arg; args) {
     if (arg.startsWith("--listen="))
       listen = arg["--listen=".length .. $];
@@ -271,6 +279,16 @@ int cmdSetline(string[] args) {
       outFile = arg["--output=".length .. $];
     else if (arg == "--sync")
       sync = true;
+    else if (arg == "--watch")
+      watch = true;
+    else if (arg.startsWith("--interval=")) {
+      try
+        intervalSec = parseWatchInterval(arg["--interval=".length .. $]);
+      catch (Exception e) {
+        stderr.writeln(e.msg);
+        return 1;
+      }
+    }
     else if (arg == "--stop")
       stop = true;
     else if (arg == "--force")
@@ -296,6 +314,10 @@ int cmdSetline(string[] args) {
     stderr.writeln("--sync pushes routes to the running setline; it does not use --output.");
     return 1;
   }
+  if (watch && outFile.length) {
+    stderr.writeln("--watch keeps syncing routes; it does not use --output.");
+    return 1;
+  }
 
   if (!confFile.length)
     confFile = buildPath(basHome, "conf", "server.xml");
@@ -308,17 +330,25 @@ int cmdSetline(string[] args) {
   if (!listen.length)
     listen = container.setlineListen.isNull ? defaultSetlineListen : strip(container.setlineListen.get);
 
+  // --sync / --watch 对的是「现状」（servers/<name>/server.info），不是 server.xml：配置改了但
+  // 实例没重启时路由不该跟着变，动态端口也只有运行信息里才有。
+  if (watch)
+    return watchRoutes(basHome, listen, intervalSec);
+  if (sync) {
+    auto running = runningPlan(liveInstances(basHome));
+    if (running.conflicts.length) {
+      printConflicts(running.conflicts);
+      return 1;
+    }
+    return syncRoutesToSetline(basHome, running.routes, listen);
+  }
+
   auto plan = setlinePlan(container);
   if (plan.conflicts.length) {
-    foreach (c; plan.conflicts)
-      stderr.writeln("Route conflict on " ~ c.path ~ ": declared by " ~ c.webapps.join(", "));
-    stderr.writeln("Give each webapp its own <url path=\"...\"/> so no two share a path.");
+    printConflicts(plan.conflicts);
     return 1;
   }
   auto routes = plan.routes;
-
-  if (sync)
-    return syncSetlineRoutes(basHome, routes, listen);
 
   auto text = renderSetlineConfig(routes, listen);
   if (outFile == "-") {
@@ -347,72 +377,25 @@ int cmdSetline(string[] args) {
   return 0;
 }
 
-/**
- * `--sync`：先要一份 `conf/setline.json`（就地启动要用它；不存在才写骨架，已有的一律不改——
- * 那是 setline 进程的配置，里面有 `adminToken` 这类 basctl 不该碰的东西），再确保入口可用
- * （在跑就复用，空闲就地启动），最后把整组路由推过去。路由由 setline 自己写回文件，重启不丢。
- */
-private int syncSetlineRoutes(string basHome, const(SetlineRoute)[] routes, string listen) {
-  ListenEndpoint endpoint;
-  try
-    endpoint = parseListenEndpoint(listen);
-  catch (Exception e) {
-    stderr.writeln(e.msg);
-    return 1;
-  }
-
-  auto confFile = buildPath(basHome, "conf", "setline.json");
-  if (!exists(confFile)) {
-    mkdirRecurse(dirName(confFile));
-    try
-      write(confFile, renderSetlineConfig(null, listen));
-    catch (Exception e) {
-      stderr.writeln("Cannot write " ~ confFile ~ ": " ~ e.msg);
-      return 1;
-    }
-  } else {
-    auto fileListen = setlineFileListen(confFile);
-    bool differs;
-    try
-      differs = fileListen.length > 0 && parseListenEndpoint(fileListen) != endpoint;
-    catch (Exception)
-      differs = false;
-    if (differs)
-      stderr.writeln("Note: " ~ confFile ~ " says listen=" ~ fileListen ~ " but this command uses "
-          ~ listen ~ "; the running setline follows the file. The routes below go to " ~ listen ~ ".");
-  }
-
-  if (syncSetline(basHome, endpoint, renderRouteMap(routes)) != 0)
-    return 1;
-  writeln(format!"%s routes synced to http://%s"(routes.length, endpoint.toString()));
-  return 0;
-}
-
-/** 读 `conf/setline.json` 里 `listen` 的原始写法；文件或字段不可用时返回空串。 */
-public string setlineFileListen(string path) {
-  try {
-    auto root = parseJSON(readText(path));
-    if (!("listen" in root.object))
-      return "";
-    auto listen = root["listen"];
-    if (listen.type == JSONType.string)
-      return strip(listen.str);
-    if (listen.type == JSONType.integer)
-      return listen.integer.to!string;
-  }
-  catch (Exception) {
-  }
-  return "";
+/** 打印路由冲突并给出修法（渲染与对账共用）。 */
+private void printConflicts(const(SetlineConflict)[] conflicts) {
+  foreach (line; conflictLines(conflicts))
+    stderr.writeln(line);
+  stderr.writeln("Give each webapp its own <url path=\"...\"/> so no two share a path.");
 }
 
 /** `setline` 的用法。 */
 private void setlineUsage() {
   stderr.writeln("Usage: basctl setline [server.xml] [--output=<file>] [--listen=<addr>] [--sync]");
+  stderr.writeln("       basctl setline [server.xml] --watch [--interval=<sec>]");
   stderr.writeln("       basctl setline --stop [--force]");
   stderr.writeln("  Renders the setline config for the whole topology: one entry address routes");
   stderr.writeln("  by path prefix to every server's http port. Output defaults to conf/setline.json");
   stderr.writeln("  (--output=- writes the JSON to stdout instead; --listen sets the entry address.)");
-  stderr.writeln("  --sync pushes the routes to a running setline, starting one if the entry is free;");
+  stderr.writeln("  --sync pushes the routes of the live instances (servers/<name>/server.info) to");
+  stderr.writeln("  a running setline, starting one if the entry is free;");
+  stderr.writeln("  --watch keeps doing that (default every " ~ defaultWatchIntervalSec.to!string
+      ~ "s) until stopped;");
   stderr.writeln("  --stop stops the instance basctl started ($BAS_HOME/run/setline.pid), --force SIGKILLs it.");
   stderr.writeln("  Routes go under setline's fallback namespace \"*\": server.xml has no hostname,");
   stderr.writeln("  so the whole topology is a single group matching any Host by path.");
@@ -443,6 +426,34 @@ private string takeConfigFile(ref string[] rest) {
 }
 
 /**
+ * `status` 的 setline 行：入口地址（`server.xml` 的 `<setline listen>`）与它的当前状态。没配
+ * `<setline>` 返回空串，`status` 就不打这一节。
+ *
+ * 状态取自两处，先看是不是 basctl 自己拉起来的（`$BAS_HOME/run/setline.pid`），再看入口有没有人
+ * 在监听——外置的（systemd / 手工 / 别的 BAS_HOME）同样要如实报出来，别让运维以为它没跑。
+ */
+public string setlineStatusLine(const Container container, string basHome) {
+  if (container.setlineListen.isNull)
+    return "";
+  auto listen = strip(container.setlineListen.get);
+  if (!listen.length)
+    return "";
+
+  ListenEndpoint endpoint;
+  try
+    endpoint = parseListenEndpoint(listen);
+  catch (Exception)
+    return format!"listen=%s (invalid address)"(listen);
+
+  auto pid = runningSetlinePid(basHome);
+  if (!pid.isNull)
+    return format!"listen=%s pid=%s"(endpoint.toString(), pid.get);
+  if (!portFree(endpoint))
+    return format!"listen=%s (in use by another process)"(endpoint.toString());
+  return format!"listen=%s (down)"(endpoint.toString());
+}
+
+/**
  * `status`：列出 `$BAS_HOME/servers` 下仍在运行的实例。
  *
  * 有运行信息（`server.info`）的实例按它展示端口、引擎、启动时间与各 webapp 的对外 url——端口是
@@ -454,9 +465,12 @@ int cmdStatus() {
   writeln(banner(basctlVersion, deployedBasVersion(buildPath(basHome, "conf", "server.xml"))));
   stdout.flush();
   auto serversDir = buildPath(basHome, "servers");
+  auto container = readContainer(basHome);
+  auto setlineLine = container.isNull ? "" : setlineStatusLine(container.get, basHome);
 
   if (!exists(serversDir) || !isDir(serversDir)) {
     stderr.writeln("No servers directory: ", serversDir);
+    printSetlineStatus(setlineLine);
     return 1;
   }
 
@@ -483,7 +497,16 @@ int cmdStatus() {
     foreach (line; lines)
       writeln(line);
   }
+  printSetlineStatus(setlineLine);
   return 0;
+}
+
+/** 打印 setline 那一节（未配置 `<setline>` 时什么都不打）。 */
+private void printSetlineStatus(string line) {
+  if (!line.length)
+    return;
+  writeln("---------------setline---------------");
+  writeln(line);
 }
 
 /**

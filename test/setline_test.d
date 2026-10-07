@@ -18,6 +18,7 @@
 module test.setline_test;
 
 import bas.config;
+import bas.serverinfo : ServerInfo, WebappInfo;
 import bas.setline;
 
 import std.algorithm : canFind;
@@ -177,4 +178,52 @@ import std.file : readText;
   auto text = renderSetlineConfig([], "127.0.0.1:8080");
   assert(text.canFind(`"*": {}`));
   assert(text.canFind(`"listen": "127.0.0.1:8080"`));
+}
+
+@("runningPlan merges the ports of one webapp across instances") unittest {
+  auto infos = [
+    runningInfo("platform.server1", 9001,
+        [WebappInfo("ROOT", "gav://a:b:1", "/", ["/context1", "/context2"])]),
+    runningInfo("platform.server2", 9002,
+        [WebappInfo("ROOT", "gav://a:b:1", "/", ["/context1", "/context2"])]),
+  ];
+  auto plan = runningPlan(infos);
+  // 同一个 webapp（uri 相同）的两个实例：端口并集，不是冲突
+  assert(plan.conflicts.length == 0);
+  assert(plan.routes.length == 2);
+  assert(plan.routes[0].path == "/context1" && plan.routes[0].ports == [9001, 9002]);
+  assert(plan.routes[1].path == "/context2" && plan.routes[1].ports == [9001, 9002]);
+}
+
+@("runningPlan falls back to the context path and skips portless or webappless instances") unittest {
+  auto infos = [
+    runningInfo("a.s1", 9001, [WebappInfo("portal", "gav://a:p:1", "/portal", [])]),
+    runningInfo("a.s2", 0, [WebappInfo("portal", "gav://a:p:1", "/portal", [])]),
+    runningInfo("a.s3", 9003, []),
+  ];
+  auto plan = runningPlan(infos);
+  assert(plan.routes.length == 1);
+  assert(plan.routes[0].path == "/portal" && plan.routes[0].ports == [9001]);
+}
+
+@("runningPlan reports two different webapps claiming one path on different ports") unittest {
+  auto infos = [
+    runningInfo("a.s1", 9001, [WebappInfo("x", "gav://a:x:1", "/", ["/api"])]),
+    runningInfo("a.s2", 9002, [WebappInfo("y", "gav://a:y:1", "/", ["/api"])]),
+  ];
+  auto plan = runningPlan(infos);
+  assert(plan.routes.length == 1);
+  assert(plan.routes[0].ports == [9001, 9002]);
+  assert(plan.conflicts.length == 1 && plan.conflicts[0].path == "/api");
+  assert(conflictLines(plan.conflicts)[0].canFind("gav://a:x:1, gav://a:y:1"));
+}
+
+/** 一份实例运行信息，只填对账关心的字段。 */
+private ServerInfo runningInfo(string id, int port, WebappInfo[] webapps) {
+  ServerInfo info;
+  info.id = id;
+  info.httpPort = cast(ushort) port;
+  info.pid = 1;
+  info.webapps = webapps;
+  return info;
 }

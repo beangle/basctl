@@ -22,7 +22,7 @@
  *  - `jstart fetch <target>`：只取回一个构件（gav / url），回显本地绝对路径。
  *
  * `--remote=` 是正式版上游，`--snapshot-remote=` 是开发版上游（两者独立）；读取受保护仓库的
- * 令牌按 jstart 的约定通过子进程环境变量 `micdn_token` 传递。命令位置可用 `bas_jstart` 覆盖。
+ * 令牌按 jstart 的约定通过子进程环境变量 `micdn_token` 传递。命令位置可用 `beangle_jstart` 覆盖。
  */
 module bas.jstart;
 
@@ -35,9 +35,12 @@ import std.stdio : stderr, writeln;
 import std.string : empty, strip;
 import std.typecons : Nullable, nullable;
 
-/** jstart 可执行文件；缺省 `jstart`，可用 `bas_jstart` 指定其它路径。 */
+/** 覆盖 jstart 可执行文件位置的环境变量名；命令相关的覆盖一律用 `beangle_<command>`。 */
+enum jstartEnvVar = "beangle_jstart";
+
+/** jstart 可执行文件；缺省 `jstart`，可用 {@link jstartEnvVar} 指定其它路径。 */
 string jstartCommand() {
-  auto cmd = environment.get("bas_jstart", "");
+  auto cmd = environment.get(jstartEnvVar, "");
   return strip(cmd).length ? strip(cmd) : "jstart";
 }
 
@@ -99,7 +102,8 @@ private Nullable!string exec(string sub, string target, Nullable!string local, c
   try
     result = execute(args, null, Config.stderrPassThrough);
   catch (ProcessException) {
-    stderr.writeln("Cannot run " ~ jstartCommand() ~ ", install jstart or set bas_jstart to its path.");
+    stderr.writeln("Cannot run " ~ jstartCommand() ~ ", install jstart or set " ~ jstartEnvVar
+        ~ " to its path.");
     return Nullable!string.init;
   }
 

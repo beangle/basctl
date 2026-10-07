@@ -3,8 +3,8 @@
 入口地址写在 `conf/server.xml` 里，出现即启用、不出现即禁用。basctl 不再固定 `8080`，也不再需要
 `--setline=` 之类的参数：**配置就是开关**。
 
-**状态**：`<setline>` 元素、`--sync`、就地启动、`--stop [--force]` 都已落地；`start` / `stop`
-里的自动对账（下一节）还没挂上，暂时由 `basctl setline --sync` 手工触发。
+**状态**：`<setline>` 元素、`--sync` / `--watch`、就地启动、`--stop [--force]`，以及
+`start` / `stop` 里的自动对账都已落地（`--no-setline` 可临时跳过）。
 
 ## `<setline>` 元素
 
@@ -30,13 +30,15 @@ basctl 内部完成（它本来就解析 `server.xml`），**不引入 shell 变
 
 ### `start` / `stop`
 
-**尚未实现**：等 `start` / `stop` 接上，这一段才有意义；在那之前用 `basctl setline --sync`
-手工同步。
-
-- `start`：实例存活 → 确保入口可用（见下）→ `basctl setline --sync` 推一次路由；
-- `stop`：实例停掉 → 再 `--sync` 一次（摘除）；
-- `--sync` 失败**只警告**（打印原因），不改 `start`/`stop` 的退出码：setline 挂了不该挡住应用启停；
-- `--no-setline` 可临时跳过（一次性覆盖，不写进 `server.xml`）。
+- `start`：实例存活 → 对账一次（确保入口可用见下 + 推整组路由）；
+- `stop`：实例停掉 → 再对账一次（摘除）；
+- 对账输入是 `servers/*/server.info`（见 [server-info.md](server-info.md)），不是当场重解析
+  `server.xml`——路由跟实例走，配置改了但实例没重启时路由不变，动态端口也只有运行信息里才有；
+- `start` 还会在**启动前**用静态拓扑跑一次冲突预检：同一对外路径被端口集合不同的 webapp 认领
+  就拒绝启动，把 `Route conflict` 从"生成配置时"提前到"启动前"；动态端口的冲突在对账时判定；
+- 对账失败（setline 不可用、路由冲突）**只警告**（打印原因），不改 `start`/`stop` 的退出码：
+  setline 挂了不该挡住应用启停，下一个 `--sync` / `--watch` 会补上；
+- `--no-setline` 可临时跳过这一次对账（一次性覆盖，不写进 `server.xml`）。
 
 ### 就地启动 setline
 
@@ -50,13 +52,14 @@ basctl 内部完成（它本来就解析 `server.xml`），**不引入 shell 变
 | 端口在用、路由写成功 | 已有 setline 在跑（systemd、手工或另一个 BAS_HOME 起的）→ **复用**（路由已顺带推好） |
 | 端口在用、写不通（连不上或非 setline） | 报错并提示：改 `<setline listen>`，或停掉占用者 |
 
-setline 可执行文件按 `PATH` 上的 `setline` 查找，可用环境变量 `bas_setline` 覆盖（与 `bas_jstart`
+setline 可执行文件按 `PATH` 上的 `setline` 查找，可用环境变量 `beangle_setline` 覆盖（与 `beangle_jstart`
 同一约定）。
 
 **已实现**：`basctl setline --sync` 先要一份 `conf/setline.json`——只在不存在时写骨架（`listen`
 + 空 `routes`），已有的不动（`adminToken` 等设置归 setline）；再按上表要入口；最后
 `PUT /__setline/routes/all?host=*` 整组替换兜底命名空间的路由。路由由 setline 写回文件，重启
-不丢；每次调用都是瞬时的，basctl 不常驻。
+不丢；`--sync` 每次调用都是瞬时的，`--watch` 才以缺省 5 秒的间隔常驻轮询（见
+[setline.md](setline.md)）。
 
 ### 停止与归属
 
@@ -76,6 +79,8 @@ pid 文件不存在或进程已不在不算错，顺手清掉陈旧的 pid 文�
   不替机器做主。
 - **外置模式被自动复用**（上表「端口在用、路由写成功」一行）：生产上把 setline 交给 systemd 完全
   可行，basctl 不需要知道是谁启动的——只要求同一地址上的写接口可用。
+- **常驻对账交给 systemd**：`basctl setline --watch` 启动后不退出，unit 里写这一行即可
+  （`--interval` 调轮询间隔）。它不是应用 supervisor，只把 `server.info` 的现状同步成路由。
 - 可选后续：`basctl init --setline-unit` 生成 unit 模板（指向 `$BAS_HOME/conf/setline.json`），
   仍不自动 enable。
 

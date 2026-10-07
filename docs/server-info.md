@@ -159,7 +159,9 @@ jstart 只负责"解析 + 准备 + exec"，实例身份与停止交给 basctl（
 | `src/bas/serverinfo.d` | 模型、INI 读写、原子替换 |
 | `src/bas/portalloc.d` | 端口区间、`flock` 内的"探测 + 预留"、顺序挑选与复用 |
 | `src/bas/starter.d` | `start` 写运行信息（含补 pid）、`stop` 按 pid 停止、`describeInstance` 从配置推导内容 |
-| `src/bas/main.d` | `status` 按运行信息展示（`port` / `engine` / `started` / 各 webapp 的 `url`） |
+| `src/bas/main.d` | `status` 按运行信息展示（`port` / `engine` / `started` / 各 webapp 的 `url`）；配了 `<setline>` 时另起一节报入口状态 |
+| `src/bas/setline.d` | `runningPlan`：由运行信息（而非 `server.xml`）算路由与冲突 |
+| `src/bas/setlineproc.d` | 把现状推给 setline：`--sync` / `--watch`、`start` / `stop` 之后的对账 |
 
 启动时先写第一段（无 `pid`，兼作端口预留）发生在解析 webapp **之前**：动态端口必须先定下来，
 随后生成的 spec 才能带上 `--port=`。准备失败（webapp 解析不出来、引擎依赖缺件）时撤销预留，避免
@@ -167,7 +169,8 @@ jstart 只负责"解析 + 准备 + exec"，实例身份与停止交给 basctl（
 
 `stop` 的动作顺序：读 pid → 进程不在就直接清掉陈旧信息（重复 `stop` 不会越做越乱）→ 核对身份 →
 SIGTERM 并等 `--timeout`（缺省 15 秒）→ 仍在则报错退出（`--force` 才 SIGKILL）。**身份核对**
-（`pidLooksLikeInstance`）看 Linux 的 `/proc/<pid>/cmdline` 里有没有 `-Dbas.server=<name>`：
+（`pidLooksLikeInstance`）看 Linux 的 `/proc/<pid>/cmdline` 里有没有 `-Dbas.server=<name>`
+（jstart 把长参数写进 `@argfile` 时，跟着这个文件再看一层，见 `src/bas/serverstatus.d`）：
 pid 会被系统回收，照着一个陈旧 pid 发信号可能伤及无辜；判定不了时（非 Linux、读不到 cmdline）
 不拦。`--force` 跳过核对，直接 SIGKILL，留作逃生门。
 

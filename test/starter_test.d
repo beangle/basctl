@@ -160,3 +160,17 @@ import std.algorithm : canFind;
       <webapps><webapp uri="gav://g:a:1" run-at="f" path="/"/></webapps></bas>`);
   assert(describeInstance(cfg, cfg.farms[0].servers[0], "").httpPort == 0);
 }
+
+@("appArgsFor passes the instance port to the engine") unittest {
+  auto cfg = parseServerXml(`<bas version="1">
+      <engines><engine name="tc" type="tomcat" version="11.0.21"/></engines>
+      <farms><farm name="f" engine="tc"><server name="s1" http="20000"/></farm></farms>
+      <webapps><webapp uri="gav://g:a:1" run-at="f" path="/"/></webapps></bas>`);
+  // 动态端口在 reserveInstance 里回填 server.http 后走的就是这条路（见 starter.d 的注释）
+  assert(appArgsFor(cfg.farms[0].servers[0]).canFind("--port=20000"));
+  assert(parseServerXml(`<bas version="1">
+      <engines><engine name="tc" type="tomcat" version="11.0.21"/></engines>
+      <farms><farm name="f" engine="tc"><server name="s1" http="0"/></farm></farms>
+      <webapps><webapp uri="gav://g:a:1" run-at="f" path="/"/></webapps></bas>`)
+      .farms[0].servers[0].http == 0);
+}

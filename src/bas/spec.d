@@ -90,12 +90,15 @@ string engineInitCommand(string containerType = "tomcat-server") {
   return shellQuote(basctlExecutable()) ~ " make " ~ containerType;
 }
 
+/** 覆盖 basctl 可执行文件位置的环境变量名（与 `beangle_jstart` / `beangle_setline` 同约定）。 */
+enum basctlEnvVar = "beangle_basctl";
+
 /**
- * basctl 可执行文件路径：优先环境变量 `bas_basctl`，否则用 `/proc/self/exe`，
+ * basctl 可执行文件路径：优先环境变量 {@link basctlEnvVar}，否则用 `/proc/self/exe`，
  * 最后退回 `PATH` 上的 `basctl`。
  */
 string basctlExecutable() @trusted {
-  auto fromEnv = strip(environment.get("bas_basctl", ""));
+  auto fromEnv = strip(environment.get(basctlEnvVar, ""));
   if (fromEnv.length)
     return fromEnv;
   version (linux) {

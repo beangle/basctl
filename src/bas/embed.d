@@ -31,7 +31,7 @@ module bas.embed;
 
 import bas.artifact : isRemote;
 import bas.config : Container, Engine, containerTypeOf, resolveEngineDeps, supportedEngineTypes;
-import bas.jstart : jstartCommand;
+import bas.jstart : jstartCommand, jstartEnvVar;
 import bas.spec : engineInitCommand, renderLaunchSpec;
 
 import std.array : join, split;
@@ -288,7 +288,8 @@ int execJstart(string[] args) {
   try {
     return wait(spawnProcess(jstartCommand() ~ args));
   } catch (ProcessException) {
-    stderr.writeln("Cannot run " ~ jstartCommand() ~ ", install jstart or set bas_jstart to its path.");
+    stderr.writeln("Cannot run " ~ jstartCommand() ~ ", install jstart or set " ~ jstartEnvVar
+        ~ " to its path.");
     return 1;
   }
 }

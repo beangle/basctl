@@ -37,15 +37,15 @@ cd bas && sbt 'juli/publishM2'            # 仅 --engine=tomcat-server-<ver> 需
 3. 用环境变量把两个开发态二进制接上，再跑 `run`：
 
 ```sh
-export bas_jstart=$HOME/workspace/beangle/jstart/target/jstart
-export bas_basctl=$HOME/workspace/beangle/basctl/target/basctl
+export beangle_jstart=$HOME/workspace/beangle/jstart/target/jstart
+export beangle_basctl=$HOME/workspace/beangle/basctl/target/basctl
 
 basctl run --engine=tomcat-11.0.26 --port=8080 /repo/app.war
 ```
 
-- `bas_jstart`：jstart 可执行文件路径，缺省按 `PATH` 找 `jstart`（见 `src/bas/jstart.d`）。
+- `beangle_jstart`：jstart 可执行文件路径，缺省按 `PATH` 找 `jstart`（见 `src/bas/jstart.d`）。
   开发态没装到 `PATH`，**必须**显式指定（或写 `PATH=$(dirname ...):$PATH`）。
-- `bas_basctl`：写进 spec 的 `[engine] init` 命令行，缺省依次取 `/proc/self/exe`、`basctl`
+- `beangle_basctl`：写进 spec 的 `[engine] init` 命令行，缺省依次取 `/proc/self/exe`、`basctl`
   （见 `src/bas/spec.d`）。直接调用 `target/basctl` 时 `/proc/self/exe` 已指向它，通常不设也
   可以；显式设一份更稳。
 - `M2_REPO` / `M2_REMOTE_REPO` 都不是必须的：jstart 的本地仓库缺省就是 `~/.m2/repository`；

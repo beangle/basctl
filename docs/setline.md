@@ -4,15 +4,18 @@
 [setline](https://github.com/beangle/setline) 的 JSON 配置：setline 在本地监听**一个入口地址**，
 按 Host + 路径前缀把请求转发到各 server 的 http 端口，从而用一个地址访问全部 webapp。
 
-默认只渲染配置、不碰进程；`--sync` 会把路由推给正在跑的 setline（入口空着就地拉起来），
-`--stop` 停掉 basctl 自己起的那个。
+默认只渲染配置、不碰进程；`--sync` 会把**运行中实例**的路由推给正在跑的 setline（入口空着就地
+拉起来），`--watch` 常驻轮询对账，`--stop` 停掉 basctl 自己起的那个。配了 `<setline>` 时
+`basctl start` / `stop` 会各自自动对账一次（`--no-setline` 跳过）。
 
 setline 的后端按约定固定为 `127.0.0.1:<port>`，因此这条路径面向「所有实例都跑在本机」的开发场景。
 
 ## 用法
 
 ```sh
-basctl setline [server.xml] [--output=<file>] [--listen=<addr>] [--sync]
+basctl setline [server.xml] [--output=<file>] [--listen=<addr>]
+basctl setline [server.xml] [--listen=<addr>] --sync
+basctl setline [server.xml] [--listen=<addr>] --watch [--interval=<sec>]
 basctl setline --stop [--force]
 ```
 
@@ -21,9 +24,15 @@ basctl setline --stop [--force]
 | `server.xml` | `$BAS_HOME/conf/server.xml` | 拓扑来源 |
 | `--output` | `$BAS_HOME/conf/setline.json` | 配置写出位置；`-` 表示写 stdout（取片段用） |
 | `--listen` | `<setline listen>`，都没有时 `127.0.0.1:8080` | 入口地址：`8080` / `*:8080` / `127.0.0.1:8080` 都可以，与 setline 的 `listen` 一致 |
-| `--sync` | 关 | 确保入口可用，再把整组路由推给 setline（幂等） |
+| `--sync` | 关 | 确保入口可用，再把**运行中实例**（`servers/<name>/server.info`）的整组路由推给 setline（幂等） |
+| `--watch` | 关 | 常驻轮询，把运行中实例的路由持续推给 setline，直到 Ctrl-C；与 `--output` 互斥 |
+| `--interval` | `5` | 只配 `--watch`：轮询间隔秒数（正整数） |
 | `--stop` | 关 | 停掉 basctl 就地启动的 setline（按 `$BAS_HOME/run/setline.pid`） |
 | `--force` | 关 | 只配 `--stop`：SIGTERM 后仍不退时用 SIGKILL |
+
+渲染与同步的**输入不同**：不带 `--sync` / `--watch` 时读 `server.xml` 的静态拓扑（用于取片段、
+并入全局代理）；`--sync` / `--watch` 读运行信息，配置改了但实例没重启时路由不变，动态端口也只有
+运行信息里才有。
 
 setline 的 `routes` 以 Host 分组，而 `server.xml` 里没有 hostname，basctl 无从得知分组依据，
 因此全部路由固定写进兜底命名空间 `*`——整个拓扑就是**一个分组**，按路径匹配任意 Host。要把它
@@ -59,7 +68,10 @@ setline 的 `adminToken` 只管**读**（路由表与状态页），留给将来
 路由渲染成 haproxy / nginx 配置的同步程序。basctl 只走**写**接口（只认本机、不需要 token），
 所以 `server.xml` 里不放凭据。
 
-## 运行期同步（`--sync`）
+## 运行期同步（`--sync` / `--watch`）
+
+**同步的输入是「现状」而不是 `server.xml`**：路由由 `servers/<name>/server.info` 算出（存活的
+pid、实际端口、各 webapp 的对外 url），因此配置改了但实例没重启时路由不变，动态端口也能被覆盖。
 
 `--sync` 按「先落文件、再要入口、最后推路由」三步走：
 
@@ -70,11 +82,37 @@ setline 的 `adminToken` 只管**读**（路由表与状态页），留给将来
    被别的进程占用则报错退出，不改动任何东西；
 3. `PUT /__setline/routes/all?host=*` 整组替换兜底命名空间的路由（幂等，别的 host 分组不受影响）。
 
+`--watch` 把第 2、3 步放进轮询循环：每 `--interval`（缺省 5 秒）读一次运行信息，路由表有变化才
+推送（渲染结果相同就跳过），闲时因此不产生流量。遇到**路由冲突**时打印一次原因并**保持现状**
+（现有路由继续服务，不动 setline），改好 `<url path>` 后下一个周期自动推。Ctrl-C 退出；它只写
+路由，不碰应用进程，也不写 `server.info`（唯一写者仍是 `start` / `stop`）。
+
+配了 `<setline>` 时，`start` / `stop` 各自在动作之后跑一次对账；失败**只警告**，不改启停的退出码
+——setline 挂了不该挡住应用启停，下一个 `--sync` / `--watch` 会补上。`--no-setline` 可临时跳过
+这一次对账。
+
 就地启动的 setline：`nohup setline -f <conf/setline.json>`，pid 记 `$BAS_HOME/run/setline.pid`，
 日志写 `$BAS_HOME/logs/setline.out`。可执行文件按 `PATH` 上的 `setline` 查找，可用环境变量
-`bas_setline` 覆盖（与 `bas_jstart` 同一约定）。每次调用都是瞬时的——basctl **没有**常驻进程。
+`beangle_setline` 覆盖（与 `beangle_jstart` 同一约定）。`--sync` 每次调用都是瞬时的，`--watch` 才会常驻。
 路由由 setline 在收到推送后写回该文件（只替换 `routes`），所以重启不丢；文件里的 `listen`
 与 `<setline listen>` 不一致时只提示一句，实际监听以文件为准。
+
+## 状态（`basctl status`）
+
+配了 `<setline>` 时，`basctl status` 在实例列表之后另起一节，一行给出入口地址与状态：
+
+```
+---------------setline---------------
+listen=127.0.0.1:8080 pid=12345
+```
+
+- `pid=`：basctl 自己就地启动的那个（读 `$BAS_HOME/run/setline.pid`，且进程还活着）；
+- `(down)`：没记 pid，入口也没人监听；
+- `(in use by another process)`：入口被别的进程占着（外置的 systemd / 手工实例也是这个结果）
+  ——它可能正是我们的 setline，只是不是 basctl 起的；
+- `(invalid address)`：`<setline listen>` 写坏了，`status` 报出来而不是崩掉。
+
+`status` 只读：它不启动、不停止、也不修改任何东西。
 
 ## 停止（`--stop`）
 
@@ -92,6 +130,9 @@ setline 的 `adminToken` 只管**读**（路由表与状态页），留给将来
 - 同一路径被**端口集合不同**的多个 webapp 认领时无法判定归属，命令报冲突并退出，不写配置；
   端点集合相同时合并，不算冲突（同一 webapp 的多实例部署）。
 - 路由按路径排序，输出稳定，便于纳入版本管理或 diff。
+
+以上规则对渲染与 `--sync` / `--watch` 一致，区别只在数据来源：渲染读 `server.xml`，`--sync` /
+`--watch` 读 `server.info`（因此 `http="0"` 的实例在运行期同样有路由，端口是分配出来的那个）。
 
 ### 上下文为 `/` 的 webapp
 
@@ -170,5 +211,5 @@ setline 的 `adminToken` 只管**读**（路由表与状态页），留给将来
 
 ## 后续演进
 
-动态端口与自动注册、运行期对账、basctl 容器化单出口、host 分组等设想都在
+basctl 容器化单出口、host 分组等设想都在
 [setline-roadmap.md](setline-roadmap.md)，本文件只描述已经存在的行为。

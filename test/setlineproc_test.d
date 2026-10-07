@@ -50,20 +50,34 @@ import std.string : endsWith;
 }
 
 @("portFree reflects whether something is listening") unittest {
-  auto sock = new Socket(AddressFamily.INET, SocketType.STREAM);
-  scope (exit) sock.close();
-  sock.setOption(SocketOptionLevel.SOCKET, SocketOption.REUSEADDR, 1);
-  sock.bind(new InternetAddress("127.0.0.1", 0));
-  sock.listen(1);
+  // 用例与别的用例并行跑，端口是共享资源：刚释放的端口有可能被别的用例抢走，换一个再试。
+  foreach (attempt; 0 .. 5) {
+    auto sock = new Socket(AddressFamily.INET, SocketType.STREAM);
+    scope (exit) sock.close();
+    sock.setOption(SocketOptionLevel.SOCKET, SocketOption.REUSEADDR, 1);
+    sock.bind(new InternetAddress("127.0.0.1", 0));
+    sock.listen(1);
 
-  auto port = (cast(InternetAddress) sock.localAddress).port;
-  assert(!portFree(ListenEndpoint("127.0.0.1", port)));
+    auto port = (cast(InternetAddress) sock.localAddress).port;
+    assert(!portFree(ListenEndpoint("127.0.0.1", port)));
 
-  sock.close();
-  assert(portFree(ListenEndpoint("127.0.0.1", port)));
+    sock.close();
+    if (portFree(ListenEndpoint("127.0.0.1", port)))
+      return;
+  }
+  assert(false, "a just-closed port stayed busy across 5 attempts");
 }
 
 @("pidFile lives under run/") unittest {
   assert(pidFile("/opt/bas").endsWith("setline.pid"));
   assert(pidFile("/opt/bas") == buildPath("/opt/bas", "run", "setline.pid"));
+}
+
+@("parseWatchInterval accepts positive seconds and rejects the rest") unittest {
+  assert(parseWatchInterval("5") == 5);
+  assert(parseWatchInterval(" 30 ") == 30);
+  assertThrown(parseWatchInterval("0"));
+  assertThrown(parseWatchInterval("-1"));
+  assertThrown(parseWatchInterval("abc"));
+  assert(defaultWatchIntervalSec > 0);
 }

@@ -28,19 +28,24 @@
 module bas.setlineproc;
 
 import bas.net : canBindPort;
+import bas.serverinfo : liveInstances;
 import bas.serverstatus : processRunning, signalProcess;
+import bas.setline : SetlineRoute, renderRouteMap, renderSetlineConfig, runningPlan;
 import bas.spec : shellQuote;
 
 import core.thread : Thread;
 import core.time : msecs;
 
+import std.array : join;
 import std.conv : to;
 import std.file : exists, mkdirRecurse, readText, remove, write;
 import std.format : format;
+import std.json : JSONType, parseJSON;
 import std.path : buildPath, dirName;
 import std.process : Config, environment, execute;
-import std.stdio : stderr, writeln;
+import std.stdio : stderr, stdout, writeln;
 import std.string : lastIndexOf, strip;
+import std.typecons : Nullable, nullable;
 
 /** 入口地址：`*` / 空 host 表示监听所有地址（探测时走回环）。 */
 struct ListenEndpoint {
@@ -53,9 +58,12 @@ struct ListenEndpoint {
   }
 }
 
-/** setline 可执行文件；缺省 `setline`，可用 `bas_setline` 指定其它路径（与 `bas_jstart` 同约定）。 */
+/** 覆盖 setline 可执行文件位置的环境变量名（与 `beangle_jstart` 同约定）。 */
+enum setlineEnvVar = "beangle_setline";
+
+/** setline 可执行文件；缺省 `setline`，可用 {@link setlineEnvVar} 指定其它路径。 */
 string setlineCommand() {
-  auto cmd = environment.get("bas_setline", "");
+  auto cmd = environment.get(setlineEnvVar, "");
   return strip(cmd).length ? strip(cmd) : "setline";
 }
 
@@ -102,12 +110,13 @@ enum RouteSync {
  * 确保入口可用并把整组路由推过去：空闲就地启动，已在跑则复用（systemd、手工或别的 BAS_HOME
  * 起的），被别的进程占用则报错退出。返回 0 表示路由已经推到位。
  */
-int syncSetline(string basHome, ListenEndpoint endpoint, string routeMapJson) {
+int syncSetline(string basHome, ListenEndpoint endpoint, string routeMapJson, bool quiet = false) {
   if (!portFree(endpoint)) {
     // 有人在监听：写接口只认本机、不要 token，能写进去就说明是我的 setline
     auto result = syncRoutes(endpoint, routeMapJson);
     if (result == RouteSync.synced) {
-      writeln("setline already listening on " ~ endpoint.toString() ~ ", reusing it.");
+      if (!quiet)
+        writeln("setline already listening on " ~ endpoint.toString() ~ ", reusing it.");
       return 0;
     }
     stderr.writeln(result == RouteSync.unreachable
@@ -147,7 +156,8 @@ int launchSetline(string basHome, ListenEndpoint endpoint) {
     ~ " >> " ~ shellQuote(log) ~ " 2>&1 < /dev/null & echo $!";
   auto res = execute(["/bin/sh", "-c", cmd]);
   if (res.status != 0) {
-    stderr.writeln("Cannot launch " ~ setlineCommand() ~ ", install setline or set bas_setline to its path.");
+    stderr.writeln("Cannot launch " ~ setlineCommand() ~ ", install setline or set "
+        ~ setlineEnvVar ~ " to its path.");
     return 1;
   }
 
@@ -243,8 +253,152 @@ string pidFile(string basHome) {
   return buildPath(basHome, "run", "setline.pid");
 }
 
+/**
+ * 就地启动的 setline 的 pid（`$BAS_HOME/run/setline.pid`）；文件不存在、内容不可解析或进程已经
+ * 不在时为空（陈旧文件不在这里清理，`--stop` 才负责）。
+ */
+Nullable!int runningSetlinePid(string basHome) {
+  auto path = pidFile(basHome);
+  if (!exists(path))
+    return Nullable!int.init;
+  int pid;
+  try
+    pid = parsePid(readText(path));
+  catch (Exception)
+    return Nullable!int.init;
+  if (pid <= 0 || !processRunning(pid))
+    return Nullable!int.init;
+  return nullable(pid);
+}
+
+/**
+ * 把整组路由推到 setline：`--sync` 与 `start` / `stop` / `--watch` 共用的一条路。
+ *
+ * 缺 `conf/setline.json` 时写一份骨架（`listen` + 空 `routes`）——就地启动要用它；已有的一律
+ * 不改（那是 setline 进程的配置，里面有 `adminToken` 这类 basctl 不该碰的东西）。随后确保入口
+ * 可用（在跑就复用，空闲就地启动）再推路由，路由由 setline 自己写回文件，重启不丢。
+ */
+int syncRoutesToSetline(string basHome, const(SetlineRoute)[] routes, string listen, bool quiet = false) {
+  ListenEndpoint endpoint;
+  try
+    endpoint = parseListenEndpoint(listen);
+  catch (Exception e) {
+    stderr.writeln(e.msg);
+    return 1;
+  }
+
+  auto confFile = buildPath(basHome, "conf", "setline.json");
+  if (!exists(confFile)) {
+    mkdirRecurse(dirName(confFile));
+    try
+      write(confFile, renderSetlineConfig(null, listen));
+    catch (Exception e) {
+      stderr.writeln("Cannot write " ~ confFile ~ ": " ~ e.msg);
+      return 1;
+    }
+  } else {
+    auto fileListen = setlineFileListen(confFile);
+    bool differs;
+    try
+      differs = fileListen.length > 0 && parseListenEndpoint(fileListen) != endpoint;
+    catch (Exception)
+      differs = false;
+    if (differs && !quiet)
+      stderr.writeln("Note: " ~ confFile ~ " says listen=" ~ fileListen ~ " but this command uses "
+          ~ listen ~ "; the running setline follows the file. The routes below go to " ~ listen ~ ".");
+  }
+
+  if (syncSetline(basHome, endpoint, renderRouteMap(routes), quiet) != 0)
+    return 1;
+  writeln(format!"%s routes synced to http://%s"(routes.length, endpoint.toString()));
+  return 0;
+}
+
+/**
+ * `basctl setline --watch`：轮询 `servers/<name>/server.info`，把「现状」路由整组推给 setline。
+ *
+ * 输入只有运行信息：pid 不存活即视为不存在，因此 `kill -9`、手工起停、端口漂移都会在下一个周期
+ * 被纠正；只改 `server.xml` 而实例没重启时路由不变（跟随实例，而不是跟随当前配置）。路由只在
+ * 算出的结果与上次推过的不一样时才推，连续对账不产生多余请求。
+ *
+ * 不退出（交给 systemd / 终端），停掉它不影响 setline 已有的路由。push 失败只警告：setline 挂了
+ * 不该让对账进程死掉，下一个周期会重试。
+ */
+int watchRoutes(string basHome, string listen, int intervalSec) {
+  ListenEndpoint endpoint;
+  try
+    endpoint = parseListenEndpoint(listen);
+  catch (Exception e) {
+    stderr.writeln(e.msg);
+    return 1;
+  }
+
+  writeln(format!"watching %s for route changes (interval=%ss, listen=%s; ctrl-c to stop)"(
+      buildPath(basHome, "servers"), intervalSec, endpoint.toString()));
+
+  string pushed;
+  string reportedConflict;
+  for (;;) {
+    auto plan = runningPlan(liveInstances(basHome));
+    if (plan.conflicts.length) {
+      // 冲突时不动路由：现有路由继续服务，修好冲突（改 <url path>）后下一周期自然会推
+      string[] lines;
+      foreach (conflict; plan.conflicts)
+        lines ~= "route conflict on " ~ conflict.path ~ ": declared by " ~ conflict.webapps.join(", ");
+      auto text = lines.join("\n");
+      if (text != reportedConflict) {
+        stderr.writeln(text);
+        reportedConflict = text;
+      }
+    } else {
+      reportedConflict = "";
+      auto routeMap = renderRouteMap(plan.routes);
+      if (routeMap != pushed) {
+        if (syncRoutesToSetline(basHome, plan.routes, listen, true) == 0)
+          pushed = routeMap;
+      }
+    }
+    // 守护进程的 stdout 常常重定向到文件（systemd / nohup），默认全缓冲会把日志攥在手里，
+    // 每轮显式刷一次，日志才跟得上。
+    stdout.flush();
+    Thread.sleep(msecs(intervalSec * 1000));
+  }
+}
+
+/** 读 `conf/setline.json` 里 `listen` 的原始写法；文件或字段不可用时返回空串。 */
+string setlineFileListen(string path) {
+  try {
+    auto root = parseJSON(readText(path));
+    if (!("listen" in root.object))
+      return "";
+    auto listen = root["listen"];
+    if (listen.type == JSONType.string)
+      return strip(listen.str);
+    if (listen.type == JSONType.integer)
+      return listen.integer.to!string;
+  }
+  catch (Exception) {
+  }
+  return "";
+}
+
+/** 解析 `--interval=<sec>`：正整数秒，非法即抛异常（带上 `--interval=` 的写法）。 */
+int parseWatchInterval(string text) {
+  int seconds;
+  try
+    seconds = strip(text).to!int;
+  catch (Exception)
+    throw new Exception("Invalid --interval value: " ~ text);
+  if (seconds <= 0)
+    throw new Exception("Invalid --interval value: " ~ text);
+  return seconds;
+}
+
 /** 启动后等待进程稳定下来的时间。 */
 private enum probeDelayMs = 1000;
+
+/** `--watch` 的缺省轮询周期（秒）：够短以覆盖 `kill -9`，又不至于让日志刷屏。 */
+enum defaultWatchIntervalSec = 5;
 
 /** Windows 上没有 `/dev/null`。 */
 version (Windows) private enum nullSink = "NUL";

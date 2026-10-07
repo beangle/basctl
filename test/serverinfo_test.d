@@ -18,14 +18,15 @@
 module test.serverinfo_test;
 
 import bas.serverinfo;
+import bas.serverstatus : processRunning;
 
 import core.time : hours;
 import std.algorithm : canFind;
 import std.array : split;
 import std.datetime : DateTime, SimpleTimeZone, SysTime, UTC;
-import std.file : exists, mkdirRecurse, rmdirRecurse, tempDir;
+import std.file : exists, mkdirRecurse, rmdirRecurse, tempDir, write;
 import std.path : buildPath;
-import std.process : thisProcessID;
+import std.process : spawnProcess, thisProcessID, wait;
 import std.string : startsWith, strip;
 import std.uuid : randomUUID;
 
@@ -196,4 +197,40 @@ private string readOneKey(string text, string key) {
       return trimmed[key.length + 3 .. $].strip;
   }
   return "";
+}
+
+@("liveInstances keeps only instances whose pid is alive and whose port is known") unittest {
+  auto home = newHome("live");
+  scope (exit) rmdirRecurse(home);
+
+  auto live = sample();
+  live.id = "f.live";
+  live.pid = thisProcessID;
+  writeInstanceInfo(home, "f.live", live);
+
+  auto stale = sample();
+  stale.id = "f.stale";
+  stale.pid = deadPid();
+  writeInstanceInfo(home, "f.stale", stale);
+
+  auto portless = sample();
+  portless.id = "f.portless";
+  portless.pid = thisProcessID;
+  portless.httpPort = 0;
+  writeInstanceInfo(home, "f.portless", portless);
+
+  serverDir(home, "f.nodata"); // 目录存在但没有 server.info
+
+  auto infos = liveInstances(home);
+  assert(infos.length == 1 && infos[0].id == "f.live");
+  assert(liveInstances(buildPath(home, "nowhere")).length == 0);
+}
+
+/** 一个确定已经死掉的 pid：起一个立刻退出的子进程，收尸之后这个号就空出来了。 */
+private int deadPid() {
+  auto child = spawnProcess(["/bin/sh", "-c", "exit 0"]);
+  auto pid = child.processID;
+  wait(child);
+  assert(!processRunning(pid));
+  return pid;
 }

@@ -103,7 +103,7 @@ jstart run --print app.jstart    # 只打印最终启动命令，不 exec
 ```
 
 `basctl start` 会自动按 `server.xml` 生成 spec（`[engine] init` 按 `<engine type>` 写成
-当前 basctl 的同名 `make <type>`，可用 `bas_basctl` 覆盖路径），再委托 `jstart run`。
+当前 basctl 的同名 `make <type>`，可用 `beangle_basctl` 覆盖路径），再委托 `jstart run`。
 
 ### 必要参数
 

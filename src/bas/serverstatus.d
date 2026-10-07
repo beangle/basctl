@@ -21,6 +21,8 @@ module bas.serverstatus;
 
 import bas.config : Server;
 
+import std.algorithm : canFind, splitter;
+import std.string : startsWith;
 import std.conv : to;
 import std.array : split;
 import std.datetime.systime : Clock;
@@ -64,12 +66,15 @@ bool processRunning(int pid) @trusted {
  * 落到别人头上，照 pid 发信号就会伤及无辜。Linux 上核对 `/proc/<pid>/cmdline` 里的
  * `-Dbas.server=<instance>`——basctl 生成 spec 时必带的 JVM 参数，正好是实例身份。
  *
+ * 命令过长时 creator 会把参数折成 java 参数文件（`java @<file>`，见 `docs/engine-creator.md`），
+ * 此时 cmdline 里看不到 `-D` 参数，所以还要跟进这些 `@file` 的内容。
+ *
  * 判定不了时（非 Linux、读不到 cmdline）返回 true：宁可放过，也不因为平台差异拦住正常停止；
  * 要绝对确认用 `basctl stop --force`（不做身份核对，直接 SIGKILL）。
  */
 bool pidLooksLikeInstance(int pid, string instance) @trusted {
   version (linux) {
-    import std.file : readText;
+    import std.file : exists, isFile, readText;
 
     if (pid <= 0 || !instance.length)
       return false;
@@ -82,6 +87,16 @@ bool pidLooksLikeInstance(int pid, string instance) @trusted {
     foreach (arg; cmdline.split('\0')) {
       if (arg == marker)
         return true;
+      // java 参数文件：内容里每行一个参数，`-Dbas.server=` 就在其中
+      if (arg.startsWith("@")) {
+        auto file = arg[1 .. $];
+        try {
+          if (exists(file) && isFile(file) && readText(file).splitter("\n").canFind(marker))
+            return true;
+        } catch (Exception) {
+          // 读不到参数文件就只按 cmdline 判断
+        }
+      }
     }
     return false;
   } else {

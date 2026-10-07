@@ -32,13 +32,13 @@ module bas.serverinfo;
 
 import bas.serverstatus : processRunning;
 
-import std.algorithm : canFind;
+import std.algorithm : canFind, sort;
 import std.array : appender;
 import std.conv : to;
 import std.datetime : SysTime;
-import std.file : exists, mkdirRecurse, readText, remove, rename, write;
+import std.file : SpanMode, dirEntries, exists, isDir, mkdirRecurse, readText, remove, rename, write;
 import std.format : format;
-import std.path : buildPath, dirName;
+import std.path : baseName, buildPath, dirName;
 import std.string : indexOf, replace, split, startsWith, strip, toLower;
 import std.typecons : Nullable, nullable;
 
@@ -228,6 +228,39 @@ Nullable!int liveInstancePid(string basHome, string instance) {
   if (pid.isNull || !processRunning(pid.get))
     return Nullable!int.init;
   return pid;
+}
+
+/**
+ * 本机所有**活着**的实例运行信息：`servers/<name>/server.info` 里 pid 存活且端口已定的那些，
+ * 按实例名排序（输出稳定）。
+ *
+ * 这是 setline 对账的输入——路由恒等于「此刻真实活着的实例」，pid 不在即视为不存在。陈旧信息
+ * （进程已死）不在这里清理：清理是 `stop` / `status` 的事，对账只读。
+ */
+ServerInfo[] liveInstances(string basHome) {
+  auto serversDir = buildPath(basHome, "servers");
+  if (!exists(serversDir) || !isDir(serversDir))
+    return [];
+
+  string[] names;
+  foreach (entry; dirEntries(serversDir, SpanMode.shallow)) {
+    if (entry.isDir)
+      names ~= baseName(entry.name);
+  }
+  names.sort();
+
+  ServerInfo[] infos;
+  foreach (name; names) {
+    auto info = readInstanceInfo(basHome, name);
+    if (info.isNull)
+      continue;
+    if (info.get.pid <= 0 || !processRunning(info.get.pid))
+      continue;
+    if (info.get.httpPort <= 0)
+      continue;
+    infos ~= info.get;
+  }
+  return infos;
 }
 
 /**

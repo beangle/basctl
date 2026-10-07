@@ -32,6 +32,7 @@
 module bas.setline;
 
 import bas.config;
+import bas.serverinfo : ServerInfo, WebappInfo;
 
 import std.algorithm : canFind, sort;
 import std.array : appender, join;
@@ -71,6 +72,14 @@ private struct PathClaim {
   int[] ports;
 }
 
+/** 冲突的展示行（打印与测试共用；调用方决定是报错还是只警告）。 */
+string[] conflictLines(const(SetlineConflict)[] conflicts) {
+  string[] lines;
+  foreach (c; conflicts)
+    lines ~= "Route conflict on " ~ c.path ~ ": declared by " ~ c.webapps.join(", ");
+  return lines;
+}
+
 /**
  * 从拓扑算路由：遍历每个 webapp 的 run-at 目标，取其 server 的 http 端口。
  *
@@ -101,29 +110,96 @@ SetlinePlan setlinePlan(Container conf) {
     }
   }
   paths.sort();
+  return mergeClaims(paths, claimsByPath);
+}
 
-  SetlinePlan plan;
-  foreach (path; paths) {
-    auto claims = claimsByPath[path];
-    auto ports = claims[0].ports.dup;
-    string[] owners = [claims[0].owner];
-    bool conflicted;
-    foreach (claim; claims[1 .. $]) {
-      if (!owners.canFind(claim.owner))
-        owners ~= claim.owner;
-      if (claim.ports != claims[0].ports)
-        conflicted = true;
-      foreach (port; claim.ports) {
-        if (!ports.canFind(port))
-          ports ~= port;
+/**
+ * 从**实例运行信息**（`servers/<name>/server.info`）算路由，也就是「现状」：只有 pid 存活、端口
+ * 已定的实例参与，每个 webapp 按它的 `url`（未声明回退 context）认领端口。
+ *
+ * 与 {@link setlinePlan} 共用同一套合并/冲突规则，区别只在数据来源——一个来自 `server.xml`
+ * （意图），一个来自运行信息（现状）。对账用后者：配置改了但实例没重启时，路由不该跟着变。
+ */
+SetlinePlan runningPlan(const(ServerInfo)[] infos) {
+  string[] paths;
+  PathClaim[][string] claimsByPath;
+  foreach (info; infos) {
+    if (info.httpPort <= 0)
+      continue;
+    foreach (app; info.webapps) {
+      foreach (path; webappRoutes(app)) {
+        if (!(path in claimsByPath)) {
+          claimsByPath[path] = [];
+          paths ~= path;
+        }
+        claimsByPath[path] ~= PathClaim(app.uri, [cast(int) info.httpPort]);
       }
     }
+  }
+  paths.sort();
+  return mergeClaims(paths, claimsByPath);
+}
+
+/** 运行信息里一个 webapp 的对外路径：`url` 优先，未声明回退 context（ROOT 记作 `/`）。 */
+private string[] webappRoutes(const WebappInfo app) {
+  if (app.urls.length)
+    return app.urls.dup;
+  return [app.context.length ? app.context : "/"];
+}
+
+/**
+ * 合并同一路径的多条认领：同一个 webapp（`uri` 相同）的多实例端口取并集，不同 webapp 之间
+ * 端口集合不一致即冲突（无法按路径判定归属）；端口集合相同则合并无害。
+ *
+ * 按 `owner` 先合并是必须的：多实例部署时每个实例只报自己的端口，直接比 `ports` 会把
+ * 「同一个 webapp 跑在两台机器/两个端口」误判成冲突。
+ */
+private SetlinePlan mergeClaims(string[] paths, PathClaim[][string] claimsByPath) {
+  SetlinePlan plan;
+  foreach (path; paths) {
+    string[] owners;
+    int[][] ownerPorts;
+    foreach (claim; claimsByPath[path]) {
+      auto index = ownerIndex(owners, claim.owner);
+      if (index < 0) {
+        owners ~= claim.owner;
+        ownerPorts ~= claim.ports.dup;
+        ownerPorts[$ - 1].sort();
+        continue;
+      }
+      foreach (port; claim.ports) {
+        if (!ownerPorts[index].canFind(port)) {
+          ownerPorts[index] ~= port;
+          ownerPorts[index].sort();
+        }
+      }
+    }
+
+    int[] ports;
+    foreach (candidate; ownerPorts)
+      foreach (port; candidate)
+        if (!ports.canFind(port))
+          ports ~= port;
     ports.sort();
+
+    bool conflicted;
+    foreach (candidate; ownerPorts[1 .. $])
+      if (candidate != ownerPorts[0])
+        conflicted = true;
+
     plan.routes ~= SetlineRoute(path, ports);
     if (conflicted)
       plan.conflicts ~= SetlineConflict(path, owners);
   }
   return plan;
+}
+
+/** `owners` 里 `owner` 的下标，找不到返回 -1。 */
+private ptrdiff_t ownerIndex(const(string)[] owners, string owner) {
+  foreach (i, candidate; owners)
+    if (candidate == owner)
+      return cast(ptrdiff_t) i;
+  return -1;
 }
 
 /** 只要路由，忽略冲突（保留给只关心渲染的调用方与测试）。 */

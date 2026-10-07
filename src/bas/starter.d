@@ -52,9 +52,11 @@ import bas.jstart : jstartCommand;
 import bas.net : localAddresses;
 import bas.portalloc : PortRange, defaultPortRange, defaultPortRangeText, parsePortRange, reservePort;
 import bas.resolver : resolveArtifact, resolveWebapps;
-import bas.serverinfo : ServerInfo, WebappInfo, instancePid, liveInstancePid, localIsoTimestamp,
-  readInstanceInfo, removeInstanceInfo, writeInstanceInfo;
+import bas.serverinfo : ServerInfo, WebappInfo, instancePid, liveInstancePid, liveInstances,
+  localIsoTimestamp, readInstanceInfo, removeInstanceInfo, writeInstanceInfo;
 import bas.serverstatus : pidLooksLikeInstance, processRunning, rollLog, signalProcess;
+import bas.setline : SetlineConflict, conflictLines, runningPlan, setlinePlan;
+import bas.setlineproc : syncRoutesToSetline;
 import bas.spec : SubappSpec, engineInitCommand, renderLaunchSpec, shellQuote;
 
 import core.thread : Thread;
@@ -84,9 +86,41 @@ enum defaultStopTimeoutSec = 15;
  *
  * 任一实例准备失败只跳过该实例（写 `servers/<name>/error`，并撤销它的端口预留），其余照常启动。
  */
+/** `<setline>` 出现即启用（配置就是开关，见 docs/setline-config.md）。 */
+private bool setlineEnabled(const Container container) {
+  return !container.setlineListen.isNull && strip(container.setlineListen.get).length > 0;
+}
+
+/** 打印路由冲突与修法。 */
+private void printRouteConflicts(const(SetlineConflict)[] conflicts) {
+  foreach (line; conflictLines(conflicts))
+    stderr.writeln(line);
+  stderr.writeln("Give each webapp its own <url path=\"...\"/> so no two share a path.");
+}
+
+/**
+ * 启停之后对账路由：把「现状」（`servers/<name>/server.info`）推给 setline。
+ *
+ * 路由跟着实例走，不跟着 `server.xml` 走——配置改了但实例没重启时，路由不该变。失败**只警告**，
+ * 不改启停的退出码：setline 挂了不该挡住应用启停，下一个 `--sync` / `--watch` 周期会补上。
+ */
+private void reconcileRoutes(const Container container, string basHome, bool noSetline) {
+  if (noSetline || !setlineEnabled(container))
+    return;
+  auto plan = runningPlan(liveInstances(basHome));
+  if (plan.conflicts.length) {
+    printRouteConflicts(plan.conflicts);
+    stderr.writeln("Routes not updated; fix the conflict and run `basctl setline --sync`.");
+    return;
+  }
+  if (syncRoutesToSetline(basHome, plan.routes, strip(container.setlineListen.get), true) != 0)
+    stderr.writeln("Routes not updated (setline unavailable); the instances themselves are fine.");
+}
+
 int runStart(string configFile, string[] rest) {
   auto range = defaultPortRange;
-  auto pattern = startPattern(rest, range);
+  bool noSetline;
+  auto pattern = startPattern(rest, range, noSetline);
   if (pattern.isNull)
     return 1;
   if (!exists(configFile)) {
@@ -103,6 +137,16 @@ int runStart(string configFile, string[] rest) {
 
   applyEngineDefaults(container, servers);
   auto startedAt = localIsoTimestamp(Clock.currTime());
+
+  // setline 启用时先把静态拓扑的冲突挡在启动前：同一条对外路径被端口集合不同的 webapp 认领，
+  // 起来之后无法判定归属，与其起完再报错，不如一个都别起（动态端口要等分配完才知道，见尾部对账）。
+  if (setlineEnabled(container) && !noSetline) {
+    auto plan = setlinePlan(container);
+    if (plan.conflicts.length) {
+      printRouteConflicts(plan.conflicts);
+      return 1;
+    }
+  }
 
   // 1. 先准备（分配端口 + 写运行信息 + 生成 spec + resolve），失败不启动，多个实例不会半启动
   PreparedServer[] prepared;
@@ -152,7 +196,7 @@ int runStart(string configFile, string[] rest) {
       p.info.pid = pids[i];
       writeInstanceInfo(basHome, p.server.qualifiedName, p.info);
       writeln(format!"%s started (pid=%s, port=%s, log=%s)"(p.server.qualifiedName, pids[i],
-          p.server.http, consoleLog(basHome, p.server)));
+          p.info.httpPort, consoleLog(basHome, p.server)));
       started++;
     } else {
       // 起不来的实例不留运行信息，否则端口会被算作占用、status 也看不到真相
@@ -162,11 +206,15 @@ int runStart(string configFile, string[] rest) {
     }
   }
   writeln(started, " servers started.");
+  reconcileRoutes(container, basHome, noSetline);
   return started == prepared.length && !failed ? 0 : 1;
 }
 
-/** `start` 的位置参数与选项：`<farm|server|all>` 与 `--port-range=<from>-<to>`；给错即为空。 */
-private Nullable!string startPattern(const(string)[] args, ref PortRange range) {
+/**
+ * `start` 的位置参数与选项：`<farm|server|all>`、`--port-range=<from>-<to>` 与 `--no-setline`；
+ * 给错即为空。
+ */
+private Nullable!string startPattern(const(string)[] args, ref PortRange range, ref bool noSetline) {
   string pattern;
   foreach (arg; args) {
     if (arg.startsWith("--port-range=")) {
@@ -176,6 +224,8 @@ private Nullable!string startPattern(const(string)[] args, ref PortRange range) 
         stderr.writeln(e.msg);
         return Nullable!string.init;
       }
+    } else if (arg == "--no-setline") {
+      noSetline = true;
     } else if (arg.startsWith("-")) {
       stderr.writeln("Unknown option " ~ arg);
       return Nullable!string.init;
@@ -195,9 +245,10 @@ private Nullable!string startPattern(const(string)[] args, ref PortRange range) 
 
 /** `start` 的用法。 */
 private void startUsage() {
-  stderr.writeln("Usage: basctl start [server.xml] <farm|server|all> [--port-range=<from>-<to>]");
+  stderr.writeln("Usage: basctl start [server.xml] <farm|server|all> [--port-range=<from>-<to>] [--no-setline]");
   stderr.writeln("  <server http=\"0\"> (or no http attribute) gets a free port from the range");
   stderr.writeln("  (default " ~ defaultPortRangeText ~ "), recorded in servers/<name>/server.info.");
+  stderr.writeln("  With <setline> in server.xml the routes are reconciled after start (--no-setline skips it).");
 }
 
 /**
@@ -253,11 +304,13 @@ private void applyEngineDefaults(Container container, const(Server)[] servers) {
  */
 int runStop(string configFile, string[] rest) {
   string pattern;
-  bool force;
+  bool force, noSetline;
   auto timeoutSec = defaultStopTimeoutSec;
   foreach (arg; rest) {
     if (arg == "--force")
       force = true;
+    else if (arg == "--no-setline")
+      noSetline = true;
     else if (arg.startsWith("--timeout=")) {
       try
         timeoutSec = parseTimeout(arg["--timeout=".length .. $]);
@@ -301,15 +354,17 @@ int runStop(string configFile, string[] rest) {
   }
   writeln(stopped, " servers stopped.",
       skipped ? format!"(%s skipped)"(skipped) : "");
+  reconcileRoutes(container, basHome, noSetline);
   return skipped ? 1 : 0;
 }
 
 /** `stop` 的用法。 */
 private void stopUsage() {
-  stderr.writeln("Usage: basctl stop [server.xml] <farm|server|all> [--force] [--timeout=<sec>]");
+  stderr.writeln("Usage: basctl stop [server.xml] <farm|server|all> [--force] [--timeout=<sec>] [--no-setline]");
   stderr.writeln("  SIGTERMs the pid recorded in servers/<name>/server.info and waits "
       ~ defaultStopTimeoutSec.to!string
       ~ "s by default; --force SIGKILLs at once.");
+  stderr.writeln("  With <setline> in server.xml the routes are reconciled after stop (--no-setline skips it).");
 }
 
 /** 单个实例的停止结果。 */
@@ -451,6 +506,9 @@ private Nullable!ServerInfo reserveInstance(string basHome, Container container,
     return Nullable!ServerInfo.init;
   }
   info.httpPort = reservation.port.get;
+  // 回填到 server：spec 的 `--port=` 由 `appArgsFor(server)` 拼出，读的就是这个字段；不回填的
+  // 话动态端口只写进了运行信息，应用却还在用引擎的缺省端口（路由会指到一个没人听的端口）。
+  server.http = info.httpPort;
   writeln(format!"%s: port %s (range %s)"(name, info.httpPort, range));
   return nullable(info);
 }
