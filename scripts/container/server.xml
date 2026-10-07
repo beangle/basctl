@@ -1,0 +1,36 @@
+<?xml version='1.0' encoding='utf-8'?>
+<!--
+  容器随镜像分发的样例配置：只在挂载的 BAS_HOME 里没有 conf/server.xml 时铺一份。
+
+  与宿主用的样例（仓库根的 server.xml）的区别只有两处：
+
+  1. `<setline hostname="localhost" endpoint="127.0.0.1:8080"/>` 声明路由命名空间与入口地址；
+     setline 进程由入口脚本自己拉起（`setline -f conf/setline.json`，绑入口脚本给的
+     `BAS_SETLINE_LISTEN`，缺省 `*:8080`），所以这里不写 listen（那是 setline 自己配置里的）。
+     endpoint 写的是**容器内往外拨**的地址：绑的是所有地址、拨的是回环，两者在容器里本来就
+     不同。入口脚本铺这份样例时会按实际端口改写它；
+  2. `<server http="0"/>`：端口交给 basctl 在容器内动态分配（缺省 20000-29999），
+     容器只需要 publish 8080 这一个端口——这就是「一机器一出口」。
+-->
+<bas xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+     xsi:noNamespaceSchemaLocation="http://beangle.github.io/schema/bas-1.0.0.xsd"
+     version="0.14.0">
+  <repository remote="https://maven.aliyun.com/repository/public"/>
+
+  <setline hostname="localhost" endpoint="127.0.0.1:8080"/>
+
+  <engines>
+    <engine name="tomcat" type="tomcat-server" version="11.0.26"/>
+  </engines>
+
+  <farms>
+    <farm name="sample" engine="tomcat" max-heap-size="256m">
+      <server-options>-Duser.timezone=Asia/Shanghai</server-options>
+      <server name="server1" http="0"/>
+    </farm>
+  </farms>
+
+  <webapps>
+    <webapp name="otk" uri="gav://org.beangle.otk:beangle-otk-ws:war:0.0.30" run-at="sample" path="/tools"/>
+  </webapps>
+</bas>
