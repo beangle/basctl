@@ -90,7 +90,7 @@ string engineInitCommand(string containerType = "tomcat-server") {
   return shellQuote(basctlExecutable()) ~ " make " ~ containerType;
 }
 
-/** 覆盖 basctl 可执行文件位置的环境变量名（与 `beangle_jstart` / `beangle_setline` 同约定）。 */
+/** 覆盖 basctl 可执行文件位置的环境变量名（与 `beangle_jstart` 同约定）。 */
 enum basctlEnvVar = "beangle_basctl";
 
 /**

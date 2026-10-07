@@ -167,15 +167,16 @@ import std.file : readText;
   assert(setlineRoutes(conf).length == 0);
 }
 
-@("renderSetlineConfig writes listen, the fallback namespace and single/multiple ports") unittest {
+@("renderSetlineConfig writes listen, the hostname namespace and single/multiple ports") unittest {
   auto text = renderSetlineConfig([SetlineRoute("/api", [9001]), SetlineRoute("/m", [9001, 9002])],
-      "127.0.0.1:8080");
+      "127.0.0.1:8080", "alice.localhost");
   assert(text == "{\n  \"listen\": \"127.0.0.1:8080\",\n  \"routes\": {\n"
-      ~ "    \"*\": {\n      \"/api\": 9001,\n      \"/m\": [9001, 9002]\n    }\n  }\n}\n");
+      ~ "    \"alice.localhost\": {\n      \"/api\": 9001,\n      \"/m\": [9001, 9002]\n    }\n"
+      ~ "  }\n}\n");
 }
 
 @("renderSetlineConfig writes an empty route table") unittest {
-  auto text = renderSetlineConfig([], "127.0.0.1:8080");
+  auto text = renderSetlineConfig([], "127.0.0.1:8080", "*");
   assert(text.canFind(`"*": {}`));
   assert(text.canFind(`"listen": "127.0.0.1:8080"`));
 }

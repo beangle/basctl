@@ -12,7 +12,8 @@
 围绕 setline 的集成设计与后续设想（容器化单出口、host 分组等）见
 [docs/setline-roadmap.md](docs/setline-roadmap.md)，其中的实例运行信息格式见
 [docs/server-info.md](docs/server-info.md)、入口配置与启用规则见
-[docs/setline-config.md](docs/setline-config.md)；basctl 自身的功能规划见
+[docs/setline-config.md](docs/setline-config.md)、把 basctl + jstart + setline + JRE 打成
+「一个端口对外」的镜像见 [docs/container.md](docs/container.md)；basctl 自身的功能规划见
 [docs/roadmap.md](docs/roadmap.md)，运行所需外部命令的检查（`basctl doctor`）见
 [docs/doctor.md](docs/doctor.md)。
 
@@ -65,21 +66,20 @@ dub test --compiler=ldc2
 |---|---|
 | `basctl version` | 打印 `basctl <版本>`（单行纯文本，便于脚本取值） |
 | `basctl banner [server.xml]` | 操作者横幅：logo + bas 引擎版本（取自 `<bas version>`）+ basctl 版本 + 本机地址；`bas.sh version` 调它。图形为纯 ASCII，只在交互终端出现，重定向到日志/管道时只剩版本行与本机地址 |
-| `basctl status` | 列出 `$BAS_HOME/servers` 下运行中的实例：读 `server.info` 展示 pid、端口、引擎、启动时间与各 webapp 的对外 url；pid 已不在的显示为 `stale`。配了 `<setline>` 时另起一节报入口地址与状态（pid / `down` / 被别的进程占用） |
+| `basctl status` | 列出 `$BAS_HOME/servers` 下运行中的实例：读 `server.info` 展示 pid、端口、引擎、启动时间与各 webapp 的对外 url；pid 已不在的显示为 `stale`。配了 `<setline>` 时另起一节报名命空间、入口地址与通不通（`up` / `down`） |
 | `basctl init [--force] [--dry-run] [workdir]` | 初始化组件目录：把控制脚本铺到 `<workdir>/bin`，并建 `conf/` |
 | `basctl make [server.xml] <farm\|server\|all>` | 只准备不启动：生成 jstart spec 并 `jstart resolve` 预取依赖 |
 | `basctl resolve <server.xml> [pattern...]` | 只解析 webapp，不生成实例 |
 | `basctl start [server.xml] <farm\|server\|all> [--port-range=<from>-<to>] [--no-setline]` | 为实例定端口（`<server http="0">` 时在区间内分配，缺省 `20000-29999`）、写 `server.info`、生成 jstart spec、resolve 并后台启动；配了 `<setline>` 时启动后对账路由（`--no-setline` 跳过） |
 | `basctl stop [server.xml] <farm\|server\|all> [--force] [--timeout=<sec>] [--no-setline]` | 按 `server.info` 里的 pid 停止 `start` 启动的实例：SIGTERM 后等 `--timeout`（缺省 15 秒），`--force` 直接 SIGKILL；配了 `<setline>` 时停完对账路由（`--no-setline` 跳过） |
 | `basctl run --engine=<type>-<version> <app>` | 嵌入式运行单个 webapp：`--engine=tomcat-11.0.25` 同时给出容器类型与版本，生成单应用 spec 后前台 `jstart run` |
-| `basctl setline [server.xml] [--output=<file>] [--listen=<addr>]` | 把 `server.xml` 的静态拓扑渲染成 setline 配置（缺省写 `conf/setline.json` 并提示位置）：一个入口地址按路径前缀转发到各 server 的 http 端口，同一 webapp 的多实例自动成为端口列表，见 [docs/setline.md](docs/setline.md) |
-| `basctl setline --sync` | 按运行中的实例（`server.info`，含动态端口）推整组路由给 setline：入口空着就地拉起来，已在跑就复用；与 `basctl start` / `stop` 之后的自动对账同一条路 |
+| `basctl setline [server.xml] [--output=<file>] [--endpoint=<addr>]` | 把 `server.xml` 的静态拓扑渲染成 setline 配置（缺省写 `conf/setline.json` 并提示位置）：一个入口地址按路径前缀转发到各 server 的 http 端口，同一 webapp 的多实例自动成为端口列表；路由写在 `<setline hostname>` 命名空间下，入口地址按 `--endpoint` > `<setline endpoint>` 取，见 [docs/setline.md](docs/setline.md) |
+| `basctl setline --sync` | 按运行中的实例（`server.info`，含动态端口）推整组路由给已在跑的 setline（入口地址取 `<setline endpoint>`，无缺省；入口没人应答就报错，basctl 不拉起它）；与 `basctl start` / `stop` 之后的自动对账同一条路 |
 | `basctl setline --watch [--interval=<sec>]` | 常驻轮询对账（缺省每 5 秒；路由无变化就不推），直到 Ctrl-C；适合交给 systemd |
-| `basctl setline --stop [--force]` | 停掉 basctl 就地启动的那个（`$BAS_HOME/run/setline.pid`），`--force` 直接 SIGKILL |
 | `basctl make <type> [options]` | 容器入口（creator）：把 jstart 的 `[engine] init` 协议翻译成容器启动命令 |
 | `basctl firewall [workdir]` | 按配置交互式配置 firewalld 端口 |
 | `basctl pull [--remote=<url>] [workdir]` | 从控制端拉取 `conf/server.xml`（请求带 `ip:` 头，旧配置备份为 `server_old.xml`） |
-| `basctl doctor [server.xml]` | 检查 `java` / `jstart`（以及启用 setline 时的 `setline`）是否就位，缺件时退出码非 0，见 [docs/doctor.md](docs/doctor.md) |
+| `basctl doctor [server.xml]` | 检查 `java` / `jstart`（以及启用 setline 时入口通不通）是否就位，缺件时退出码非 0，见 [docs/doctor.md](docs/doctor.md) |
 
 ## 组件目录初始化
 
@@ -104,11 +104,11 @@ basctl init --dry-run /opt/bas
 ```
 $BAS_HOME/
   conf/server.xml
-  conf/setline.json             # 本机 setline 入口配置（<setline> 启用时，归 setline 进程所有）
+  conf/setline.json             # setline 自己的配置（listen / 运行期路由；归拉起 setline 的那个进程所有）
   engines/<name>-<version>/     # 解压并按需裁剪后的 Tomcat
   servers/<farm>.<server>/      # 单个实例的 catalina.base（server.info 记运行信息：pid / 端口 / webapp / url）
   webapps/                      # http 直链与 SNAPSHOT 覆盖的落地目录
-  run/                          # 机器级守护进程的运行态（如就地启动的 setline.pid）
+  run/                          # 机器级守护进程的运行态（如将来对账进程的 pid）
   logs/
 ```
 

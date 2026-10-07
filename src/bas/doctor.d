@@ -15,17 +15,19 @@
  */
 
 /**
- * `basctl doctor`：检查 basctl 会去执行的那几条外部命令是否就位。
+ * `basctl doctor`：检查 basctl 会用到的外部命令与入口是否就位。
  *
  * basctl 自己不起进程池，也不直接 exec java，而是把命令交给别的程序：
  *
  *  - `java`：`make`（creator 与只准备）写出的启动命令、以及 jstart 最终 exec 的都是 java，
  *    按 `JAVA_HOME/bin/java` > `PATH` 解析（与 creator 里 `javaExecutable` 同一顺序）；
  *  - `jstart`：`start` / `make` / `resolve` 用它解析下载构件，命令名可用 `beangle_jstart` 覆盖；
- *  - `setline`：只有 `server.xml` 里声明了 `<setline>` 才必需（没有它就不会被调用），
- *    命令名可用 `beangle_setline` 覆盖。
+ *  - `setline`：只有 `server.xml` 里声明了 `<setline>` 才检查，而且检的是**入口可达**而不是命令
+ *    存在——setline 是机器级服务（systemd / 容器入口 / 手工拉起），basctl 只往它的写接口推
+ *    路由，不调用它的可执行文件。入口地址取自 `<setline endpoint>`（缺省 `127.0.0.1:8080`），
+ *    与 `--sync` / `start` / `status` 走同一个解析入口。
  *
- * 只检查“命令存在且可执行”，**不校验版本**：java / jstart / 容器的版本策略分别属于各自的
+ * 只检查“就位没就位”，**不校验版本**：java / jstart / setline / 容器的版本策略分别属于各自的
  * 发布节奏，basctl 掺和只会制造漂移。缺件时打印安装提示，并让退出码非 0。
  *
  * 打包（deb/rpm）不声明对这些命令的硬依赖：安装方式太多（系统包、sdkman、手工放置），
@@ -35,7 +37,7 @@ module bas.doctor;
 
 import bas.config : parseServerXmlFile;
 import bas.jstart : jstartEnvVar;
-import bas.setlineproc : setlineEnvVar;
+import bas.endpoint : SetlineEndpointChoice, portFree, resolveSetlineEndpoint, sourceName;
 
 import std.array : join, split;
 import std.conv : to;
@@ -61,7 +63,7 @@ struct ToolCheck {
   CheckState state;
   /** 找到时的绝对路径（`ok` 才有值）。 */
   string path;
-  /** 解析来源：`JAVA_HOME` / `PATH` / `beangle_jstart` / `beangle_setline`。 */
+  /** 解析来源：`JAVA_HOME` / `PATH` / `beangle_jstart` / `server.xml` / `default`。 */
   string source;
   /** `missing` / `skipped` 的一句话说明。 */
   string note;
@@ -90,13 +92,11 @@ struct ToolEnv {
   string path;
   /** {@link jstartEnvVar} 的值；空串表示按 `PATH` 找 `jstart`。 */
   string jstart;
-  /** {@link setlineEnvVar} 的值；空串表示按 `PATH` 找 `setline`。 */
-  string setline;
 
   /** 取当前进程环境（`basctl doctor` 走这条）。 */
   static ToolEnv fromProcess() {
     return ToolEnv(strip(environment.get("JAVA_HOME", "")), environment.get("PATH", ""),
-        strip(environment.get(jstartEnvVar, "")), strip(environment.get(setlineEnvVar, "")));
+        strip(environment.get(jstartEnvVar, "")));
   }
 }
 
@@ -114,30 +114,32 @@ ToolCheck[] checkTools(string confFile, in ToolEnv env) {
   checks ~= checkJava(env);
   checks ~= checkJstart(env);
   auto setline = setlineConfigState(confFile);
-  checks ~= checkSetline(env, setline.enabled, setline.note);
+  checks ~= checkSetline(setline);
   return checks;
 }
 
-/** `<setline>` 的启用状态与展示用说明。 */
+/** `<setline>` 的启用状态、配置里写的入口地址（可能为空）与展示用说明。 */
 private struct SetlineConfigState {
   bool enabled;
+  string endpoint;
   string note;
 }
 
 /**
- * `server.xml` 是否启用了 setline：只有 `<setline listen="...">` 出现才算（与 config.d 的
- * “出现即启用”一致）。文件不存在或解析失败时按未启用处理，说明写进 `note`。
+ * `server.xml` 是否启用了 setline：只有 `<setline>` 出现才算（与 config.d 的“出现即启用”一致）。
+ * 文件不存在或解析失败时按未启用处理，说明写进 `note`。
  */
 private SetlineConfigState setlineConfigState(string confFile) {
   if (!exists(confFile))
-    return SetlineConfigState(false, "no config file " ~ confFile);
+    return SetlineConfigState(false, "", "no config file " ~ confFile);
   try {
     auto conf = parseServerXmlFile(confFile);
-    if (conf.setlineListen.isNull)
-      return SetlineConfigState(false, "no <setline> in " ~ confFile);
-    return SetlineConfigState(true, "<setline listen=\"" ~ strip(conf.setlineListen.get) ~ "\">");
+    if (conf.setlineHostname.isNull)
+      return SetlineConfigState(false, "", "no <setline> in " ~ confFile);
+    return SetlineConfigState(true, conf.setlineEndpointText(), "<setline hostname=\""
+        ~ strip(conf.setlineHostname.get) ~ "\">");
   } catch (Exception e) {
-    return SetlineConfigState(false, "cannot parse " ~ confFile);
+    return SetlineConfigState(false, "", "cannot parse " ~ confFile);
   }
 }
 
@@ -172,18 +174,31 @@ private ToolCheck checkJstart(in ToolEnv env) {
       : "install jstart, or set " ~ jstartEnvVar ~ " to its path");
 }
 
-/** setline：只有启用时才必需；`beangle_setline` 指向的命令 > `PATH` 上的 `setline`。 */
-private ToolCheck checkSetline(in ToolEnv env, bool required, string configNote) {
-  auto source = env.setline.length ? setlineEnvVar : "PATH";
-  auto found = resolveCommand(env.setline.length ? env.setline : "setline", env.path);
-  if (found.length)
-    return available("setline", found, source);
-  if (!required)
-    return ToolCheck("setline", CheckState.skipped, "", "", "not required: " ~ configNote);
-  return unavailable("setline", source == setlineEnvVar
-      ? setlineEnvVar ~ " points to " ~ env.setline ~ ", but that command was not found ("
-          ~ configNote ~ ")"
-      : "install setline or set " ~ setlineEnvVar ~ " to its path (" ~ configNote ~ ")");
+/**
+ * setline：只有 `<setline>` 配置时才检查——检的是**入口可达**（有人在监听），而不是命令存在：
+ * setline 归 systemd / 容器入口 / 手工起，basctl 只往它的写接口推路由。
+ *
+ * 入口地址走与 `setline --sync` / `start` / `status` 同一个解析入口，`source` 报它的出处
+ * （`server.xml` 或 `default`），不必再去猜环境里设了什么。
+ */
+private ToolCheck checkSetline(SetlineConfigState setline) {
+  if (!setline.enabled)
+    return ToolCheck("setline", CheckState.skipped, "", "", "not required: " ~ setline.note);
+  auto configNote = setline.note;
+  if (setline.endpoint.length)
+    configNote ~= " endpoint=" ~ setline.endpoint;
+
+  SetlineEndpointChoice choice;
+  try
+    choice = resolveSetlineEndpoint("", setline.endpoint);
+  catch (Exception e)
+    return unavailable("setline", e.msg ~ " (" ~ configNote ~ ")");
+  if (portFree(choice.endpoint))
+    return unavailable("setline", "nothing listens on " ~ choice.endpoint.toString()
+        ~ "; start the setline service, or point <setline endpoint=\"...\"> at it ("
+        ~ configNote ~ ")");
+  return ToolCheck("setline", CheckState.ok, choice.endpoint.toString(),
+      sourceName(choice.source), "");
 }
 
 /** 组装一条“找到”的结果。 */

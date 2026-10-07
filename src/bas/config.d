@@ -24,6 +24,7 @@
 module bas.config;
 
 import bas.artifact;
+import bas.endpoint : parseListenEndpoint;
 
 import std.algorithm : canFind, endsWith, map, sort, startsWith;
 import std.array : array, join, split;
@@ -32,7 +33,7 @@ import std.exception : enforce;
 import std.format : format;
 import std.path : absolutePath;
 import std.process : environment;
-import std.string : empty, indexOf, lastIndexOf, replace, split, strip;
+import std.string : empty, indexOf, lastIndexOf, replace, split, strip, toLower;
 import std.typecons : Nullable, nullable;
 
 import dxml.dom : DOMEntity, parseDOM;
@@ -57,6 +58,12 @@ enum containerTypeTomcatServer = "tomcat-server";
 enum containerTypeTomcat = "tomcat";
 enum containerTypeUndertow = "undertow";
 enum containerTypeJetty = "jetty";
+
+/**
+ * `<setline hostname>` 的缺省命名空间：只认 `Host: localhost`（浏览器把 `*.localhost`
+ * 也解析到回环）。要让「用 IP / 任意域名访问」也能匹配，得显式写 `hostname="*"`。
+ */
+enum defaultSetlineHostname = "localhost";
 
 /** 支持的引擎类型。`tomcat-server` 与 `tomcat` 是前缀关系，解析时按最长类型匹配。 */
 enum supportedEngineTypes = [containerTypeTomcatServer, containerTypeTomcat, containerTypeUndertow, containerTypeJetty];
@@ -529,10 +536,19 @@ private string[] splitRepos(string urls) {
 class Container {
   string version_;
   /**
-   * `<setline listen="...">` 的入口地址；未声明 `<setline>` 时为 `Nullable.init`（禁用）。
+   * `<setline hostname="...">` 的路由命名空间；未声明 `<setline>` 时为 `Nullable.init`（禁用）。
    * 出现即启用：basctl 据此判断要不要维护 setline 的路由，不再另设开关。
    */
-  Nullable!string setlineListen;
+  Nullable!string setlineHostname;
+  /**
+   * `<setline endpoint="...">` 的入口地址（写法 `8080` / `127.0.0.1:8080` / `*:8080`）。
+   * `<setline>` 出现时它必填（缺了是配置错误），没有 `<setline>` 时是 `Nullable.init`。
+   *
+   * 这里声明的是**本 BAS_HOME 往外拨哪扇门**（客户端视角），不是 setline 绑哪个 socket
+   * （那是 setline 自己配置文件里的 `listen`，`*` 合法）。解析见
+   * {@link bas.endpoint.resolveSetlineEndpoint}。
+   */
+  Nullable!string setlineEndpoint;
   Repository repository;
   SnapshotRepo snapshotRepo;
   Engine[] engines;
@@ -540,6 +556,11 @@ class Container {
   Farm[] farms;
   Webapp[] webapps;
   Resource[string] resources;
+
+  /** `<setline endpoint>` 的原始写法（没写返回空串），供 {@link bas.endpoint} 解析。 */
+  string setlineEndpointText() const {
+    return setlineEndpoint.isNull ? "" : strip(setlineEndpoint.get);
+  }
 
   /** Finds an engine by name, or null. */
   Engine engine(string name) {
@@ -689,7 +710,8 @@ Container parseServerXml(string xmlText) {
       }
       break;
     case "setline":
-      conf.setlineListen = nullable(requireAttr(section, "listen", "<setline>"));
+      conf.setlineHostname = nullable(parseSetlineHostname(section));
+      conf.setlineEndpoint = nullable(parseSetlineEndpoint(section));
       break;
     default:
       break;
@@ -751,6 +773,46 @@ string requireAttr(XmlElem elem, string name, string where) {
   auto v = optAttr(elem, name);
   enforce!ServerXmlException(!v.isNull, format!"Missing attribute '%s' on %s"(name, where));
   return v.get;
+}
+
+/**
+ * `<setline hostname>`：路由命名空间。缺省 {@link defaultSetlineHostname}，`*` 表示匹配任意
+ * Host；其余只接受域名允许的字符（小写字母、数字、`-`、`.`）。写坏了直接报错，不悄悄替换成
+ * 别的名字——路由写进谁家的命名空间必须看得见。
+ */
+private string parseSetlineHostname(XmlElem elem) {
+  auto value = optAttr(elem, "hostname");
+  if (value.isNull || strip(value.get).empty)
+    return defaultSetlineHostname;
+  auto text = toLower(strip(value.get));
+  if (text == "*")
+    return text;
+  foreach (ch; text) {
+    if ((ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') || ch == '.' || ch == '-')
+      continue;
+    throw new ServerXmlException("Invalid <setline hostname=\"" ~ value.get
+        ~ "\">: use a hostname (letters, digits, '.' and '-'), \"*\" for any Host,"
+        ~ " or drop the attribute");
+  }
+  return text;
+}
+
+/**
+ * `<setline endpoint>`：本 `BAS_HOME` 往外拨的 setline 入口地址。`<setline>` 出现它就**必须**写
+ * （`hostname` 可以省）——地址是这台机器上的事实，没有缺省可猜；写法与 setline 的 `listen` 同构
+ * （`8080` / `127.0.0.1:8080` / `*:8080`），非法当场报错，别等到 `status` / `doctor` 才说"连不上"。
+ *
+ * 反过来，**没有 `<setline>` 就没有任何约束**：不启用 setline，也就不需要地址。
+ */
+private string parseSetlineEndpoint(XmlElem elem) {
+  auto attr = requireAttr(elem, "endpoint", "<setline>");
+  auto text = strip(attr);
+  try
+    parseListenEndpoint(text);
+  catch (Exception)
+    throw new ServerXmlException("Invalid <setline endpoint=\"" ~ attr
+        ~ "\">: use `port`, `host:port`, or `*:port` (setline's listen forms)");
+  return text;
 }
 
 /** Wraps an optional attribute into a `Nullable` holding only non-blank text. */

@@ -17,36 +17,15 @@
 /** Unit tests for bas.main status rendering (setline config helpers live in setlineproc_test). */
 module test.main_test;
 
-import bas.config : parseServerXml;
+import bas.config : Container, parseServerXml;
 import bas.main : setlineStatusLine, staleStatusLine, statusLines;
-import bas.setlineproc : setlineFileListen;
 import bas.serverinfo : ServerInfo, WebappInfo;
 
+import std.algorithm : canFind;
 import std.conv : to;
-import std.file : mkdirRecurse, remove, rmdirRecurse, tempDir, write;
-import std.path : buildPath;
-import std.process : thisProcessID;
 import std.socket : AddressFamily, InternetAddress, Socket, SocketOption, SocketOptionLevel,
   SocketType;
-import std.uuid : randomUUID;
-
-@("setlineFileListen reads the listen field as written") unittest {
-  // 用例并行跑，别用固定文件名去抢同一台机器上的同一个路径
-  auto path = buildPath(tempDir, "basctl-setline-file-listen-" ~ randomUUID().toString() ~ ".json");
-  scope (exit) remove(path);
-
-  write(path, `{"listen":"127.0.0.1:8080","adminToken":"x"}`);
-  assert(setlineFileListen(path) == "127.0.0.1:8080");
-
-  write(path, `{"listen":8080}`);
-  assert(setlineFileListen(path) == "8080");
-
-  write(path, `{"routes":{}}`);
-  assert(setlineFileListen(path) == "");
-
-  write(path, "not json");
-  assert(setlineFileListen(path) == "");
-}
+import std.typecons : nullable;
 
 @("statusLines shows identity plus one line per webapp") unittest {
   ServerInfo info;
@@ -82,48 +61,53 @@ import std.uuid : randomUUID;
   assert(staleStatusLine(info, "platform.server2") == "platform.server2(stale port=20002)");
 }
 
-@("setlineStatusLine reports the entry address and whether it is up") unittest {
-  auto home = buildPath(tempDir, "basctl-setline-status-" ~ randomUUID().toString());
-  mkdirRecurse(home);
-  scope (exit) rmdirRecurse(home);
-
-  // 没记录 pid 且入口空闲：down。用例与别的用例并行跑，端口是共享资源——挑空闲端口时，
-  // 刚释放的端口可能被别的用例抢走，所以换一个端口重试几次。
-  string listen;
+@("setlineStatusLine reports the namespace, the endpoint and whether it answers") unittest {
+  // 用例与别的用例并行跑，端口是共享资源：刚释放的端口可能被别的用例抢走，所以换一个端口重试。
+  string endpoint;
   bool down;
   foreach (attempt; 0 .. 5) {
     auto probe = new Socket(AddressFamily.INET, SocketType.STREAM);
     probe.setOption(SocketOptionLevel.SOCKET, SocketOption.REUSEADDR, 1);
     probe.bind(new InternetAddress("127.0.0.1", 0));
-    listen = "127.0.0.1:" ~ (cast(InternetAddress) probe.localAddress).port.to!string;
+    endpoint = "127.0.0.1:" ~ (cast(InternetAddress) probe.localAddress).port.to!string;
     probe.close();
-    if (setlineStatusLine(setlineContainer(listen), home) == "listen=" ~ listen ~ " (down)") {
+    if (setlineStatusLine(setlineContainer("alice.localhost", endpoint))
+        == "host=alice.localhost endpoint=" ~ endpoint ~ " (down)") {
       down = true;
       break;
     }
   }
   assert(down, "no probed port stayed free long enough to observe 'down'");
 
-  auto cfg = setlineContainer(listen);
+  // 入口有人监听：报 up。basctl 不判断坐的是不是我们的 setline（那要写一次路由才知道）。
+  auto listener = new Socket(AddressFamily.INET, SocketType.STREAM);
+  scope (exit) listener.close();
+  listener.bind(new InternetAddress("127.0.0.1", 0));
+  listener.listen(1);
+  auto upEndpoint = "127.0.0.1:" ~ (cast(InternetAddress) listener.localAddress).port.to!string;
+  assert(setlineStatusLine(setlineContainer("alice.localhost", upEndpoint))
+      == "host=alice.localhost endpoint=" ~ upEndpoint ~ " (up)");
 
-  // 记了自己拉起来的 pid（拿本进程凑数）并活着：报 pid
-  mkdirRecurse(buildPath(home, "run"));
-  write(buildPath(home, "run", "setline.pid"), thisProcessID.to!string ~ "\n");
-  auto line = setlineStatusLine(cfg, home);
-  assert(line == "listen=" ~ listen ~ " pid=" ~ thisProcessID.to!string, line);
-
-  // 没配 <setline> 时整节省略
-  assert(setlineStatusLine(parseServerXml(`<bas version="1"><engines/></bas>`), home) == "");
-
-  // 地址写坏时报出来而不是崩
-  assert(setlineStatusLine(parseServerXml(`<bas version="1"><setline listen="nope"/><engines/></bas>`),
-      home) == "listen=nope (invalid address)");
+  // 没配 <setline> 时整节省略（不启用就没有地址，也不报错）
+  assert(setlineStatusLine(parseServerXml(`<bas version="1"><engines/></bas>`)) == "");
+  assert(setlineStatusLine(parseServerXml(
+      `<bas version="1"><setline endpoint="` ~ upEndpoint ~ `"/><engines/></bas>`))
+      == "host=localhost endpoint=" ~ upEndpoint ~ " (up)");
 }
 
-/** 一份带 `<setline listen="...">` 的最小可解析配置。 */
-private auto setlineContainer(string listen) {
+@("setlineStatusLine reports a missing address instead of throwing") unittest {
+  // 配置校验已经保证"有 <setline> 就有 endpoint"；这条守的是手工构造的容器（公开 API），
+  // 缺地址时也要有个说得清的结果，而不是抛异常。
+  auto container = new Container();
+  container.setlineHostname = nullable("localhost");
+  auto line = setlineStatusLine(container);
+  assert(line.canFind("host=localhost") && line.canFind("No setline entry address"), line);
+}
+
+/** 一份带 `<setline>`（有 `<setline>` 就得有 `endpoint`）的最小可解析配置。 */
+private auto setlineContainer(string hostname, string endpoint) {
   return parseServerXml(`<bas version="1">
-    <setline listen="` ~ listen ~ `"/>
+    <setline hostname="` ~ hostname ~ `" endpoint="` ~ endpoint ~ `"/>
     <engines><engine name="t" type="tomcat" version="11"/></engines>
     <farms><farm name="f" engine="t"><server name="s1" http="0"/></farm></farms>
   </bas>`);

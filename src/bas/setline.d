@@ -26,8 +26,13 @@
  * 调用方报错；端口集合相同时合并无害（同一 webapp 的多实例部署），不算冲突。
  *
  * 本模块只做纯计算与拼文本，不做 IO，也不启动 setline。后端固定为回环地址（setline 的约定），
- * 所以生成的路由只对跑在本机的 server 有意义。server.xml 没有 hostname，路由一律写进 setline
- * 的兜底命名空间 `*`，即整个拓扑是一个分组、按路径匹配任意 Host。
+ * 所以生成的路由只对跑在本机的 server 有意义。路由写进哪个命名空间由 `server.xml` 的
+ * `<setline hostname>` 给出（见 {@link renderSetlineConfig}）——一台机器上共享一个 setline 的
+ * 多份 `BAS_HOME` 靠它各占一格，互不覆盖。
+ *
+ * 渲染进文件的 `listen` 是 setline 自己要绑的 socket，写法与缺省见 {@link bas.endpoint}；它和
+ * `basctl` 往外拨的入口地址（`<setline endpoint>`）写法同构但不是同一个值——`listen` 可以是
+ * `*:8080`，往外拨的只能是具体地址。
  */
 module bas.setline;
 
@@ -37,16 +42,6 @@ import bas.serverinfo : ServerInfo, WebappInfo;
 import std.algorithm : canFind, sort;
 import std.array : appender, join;
 import std.conv : to;
-
-/** setline 的缺省入口地址，与 setline 自身缺省一致：本地回环，不占特权端口。 */
-enum defaultSetlineListen = "127.0.0.1:8080";
-
-/**
- * 路由写进 setline 的兜底命名空间 `*`。server.xml 里没有 hostname，basctl 无从得知按域名分组
- * 的依据，所以固定产出一个分组（`*` 等价于按路径匹配任意 Host）。要归到某个域名下，合并时改键
- * 即可，命令行不提供覆盖项。
- */
-enum setlineRouteHost = "*";
 
 /** 一条路由：context path 前缀 + 后端 http 端口（升序、去重）。 */
 struct SetlineRoute {
@@ -208,15 +203,17 @@ SetlineRoute[] setlineRoutes(Container conf) {
 }
 
 /**
- * 渲染 setline 配置：`listen` 为入口地址，路由一律放在 `setlineRouteHost` 命名空间下。单个端口
+ * 渲染 setline 配置：`endpoint` 落进 setline 自己的 `listen` 字段（回环上两者是同一个值；容器里
+ * 绑 `*:8080` 而拨 `127.0.0.1:8080`，渲染方按绑的那一面给），路由放在 `hostname` 命名空间下
+ * （`server.xml` 的 `<setline hostname>`，缺省 `localhost`，`*` 表示匹配任意 Host）。单个端口
  * 输出数字，多个端口输出数组（setline 两者都接受）。
  */
-string renderSetlineConfig(const(SetlineRoute)[] routes, string listen) {
+string renderSetlineConfig(const(SetlineRoute)[] routes, string endpoint, string hostname) {
   auto sb = appender!string;
   sb.put("{\n");
-  sb.put("  \"listen\": \"" ~ jsonEscape(listen) ~ "\",\n");
+  sb.put("  \"listen\": \"" ~ jsonEscape(endpoint) ~ "\",\n");
   sb.put("  \"routes\": {\n");
-  sb.put("    \"" ~ jsonEscape(setlineRouteHost) ~ "\": " ~ renderRouteMap(routes, "    ") ~ "\n");
+  sb.put("    \"" ~ jsonEscape(hostname) ~ "\": " ~ renderRouteMap(routes, "    ") ~ "\n");
   sb.put("  }\n");
   sb.put("}\n");
   return sb.data;

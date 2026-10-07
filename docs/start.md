@@ -41,8 +41,8 @@ basctl start all --no-setline                # 临时不把这批实例的路由
 端口预留随之撤销；同一批里其余实例照常启动，此时退出码非 0。
 
 配了 `<setline>` 时，最后还会按 `servers/*/server.info` 对账一次路由——把存活的实例推给 setline
-（入口空着就地拉起），没起来的实例不进路由。对账失败**只警告**，不影响退出码；`--no-setline`
-跳过。详见 [setline.md](setline.md)。
+（入口地址取 `<setline endpoint>`，进程由 systemd / 容器入口负责，basctl 不拉起），没起来的实例
+不进路由。对账失败**只警告**，不影响退出码；`--no-setline` 跳过。详见 [setline.md](setline.md)。
 
 ## 停止
 

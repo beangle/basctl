@@ -7,12 +7,13 @@
 
 **状态：已落地**（见 [doctor.md](doctor.md)）。
 
-**目标**：一条命令检查 basctl 运行所依赖的外部命令是否就位——`java`、`jstart`、`setline`。
+**目标**：一条命令检查 basctl 运行所依赖的外部命令与入口是否就位——`java`、`jstart`、setline 入口。
 先只检查"命令存在且可执行"，**暂不校验版本**（避免与 engine / 应用的版本策略耦合）。
 
 - `java`：`start` / `run` 都要（jstart 侧 exec java），按 `$JAVA_HOME/bin/java` 或 `PATH` 解析；
 - `jstart`：`start` 用（可用 `beangle_jstart` 覆盖路径）；
-- `setline`：只在启用 setline（`server.xml` 配了 `<setline>`）时才必需；
+- `setline`：只在启用 setline（`server.xml` 配了 `<setline>`）时才检查，而且检的是**入口可达**
+  （setline 是机器级服务，basctl 不调用它的可执行文件），地址取 `<setline endpoint>`；
 - 逐项报告解析出的路径与结论；缺件时给出安装提示并让退出码非 0；
 - ~~可选接线：`start` 前先跑一遍~~：**不做**。`start` 缺件时 jstart 已经给出明确报错，
   再加一个「先 doctor、缺件拒绝启动」的开关只多一个旋钮而没有新信息；doctor 保持独立命令。

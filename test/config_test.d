@@ -39,8 +39,8 @@ import std.format : format;
   assert(cfg.hosts.length == 1);
   assert(cfg.hosts[0].name == "localhost" && cfg.hosts[0].ip == "127.0.0.1");
 
-  assert(!cfg.setlineListen.isNull);
-  assert(cfg.setlineListen.get == "127.0.0.1:8080");
+  assert(!cfg.setlineHostname.isNull);
+  assert(cfg.setlineHostname.get == "localhost");
 
   assert(cfg.farms.length == 2);
   assert(cfg.farms[0].name == "tools");
@@ -139,17 +139,66 @@ import std.format : format;
   assertThrown!ServerXmlException(parseServerXml(xml));
 }
 
-@("parse the optional setline entry") unittest {
+@("parse the optional setline entry: hostname defaults to localhost, \"*\" is allowed") unittest {
   auto cfg = parseServerXml(`<bas version="1">
-    <setline listen="*:8080"/>
+    <setline hostname="Alice.LOCALHOST" endpoint="127.0.0.1:8080"/>
     <engines><engine name="t" type="tomcat" version="11"/></engines>
     <farms><farm name="f" engine="t"><server name="s1" http="8080"/></farm></farms>
   </bas>`);
-  assert(!cfg.setlineListen.isNull);
-  assert(cfg.setlineListen.get == "*:8080");
+  assert(!cfg.setlineHostname.isNull);
+  assert(cfg.setlineHostname.get == "alice.localhost", cfg.setlineHostname.get);
+
+  // 不写 hostname：启用，命名空间缺省 localhost（只用 Host: localhost 访问得到）
+  auto bare = parseServerXml(
+      `<bas version="1"><setline endpoint="127.0.0.1:8080"/><engines/></bas>`);
+  assert(bare.setlineHostname.get == "localhost");
+
+  // 显式 * ：匹配任意 Host（用 IP / 任意域名访问也走同一组路由）
+  auto any = parseServerXml(
+      `<bas version="1"><setline hostname="*" endpoint="127.0.0.1:8080"/><engines/></bas>`);
+  assert(any.setlineHostname.get == "*");
 
   auto off = parseServerXml(`<bas version="1"><engines/></bas>`);
-  assert(off.setlineListen.isNull);
+  assert(off.setlineHostname.isNull);
+
+  // endpoint：本 BAS_HOME 往外拨的入口地址，写法与 setline 的 listen 同构；
+  // 没有 <setline> 时是空串（不启用就没有地址）
+  assert(off.setlineEndpointText() == "");
+  assert(bare.setlineEndpointText() == "127.0.0.1:8080");
+  auto pointed = parseServerXml(
+      `<bas version="1"><setline hostname="localhost" endpoint="*:9100"/><engines/></bas>`);
+  assert(pointed.setlineEndpointText() == "*:9100");
+  assert(parseServerXml(`<bas version="1"><setline endpoint="9100"/><engines/></bas>`)
+      .setlineEndpointText() == "9100");
+}
+
+@("setline endpoint is required by the element and rejects anything that is not an address") unittest {
+  import std.exception : assertThrown;
+
+  // 有 <setline> 就必须给地址（hostname 可以省）
+  assertThrown!ServerXmlException(parseServerXml(
+      `<bas version="1"><setline hostname="localhost"/><engines/></bas>`));
+  assertThrown!ServerXmlException(parseServerXml(`<bas version="1"><setline/><engines/></bas>`));
+  // 没有 <setline> 就什么都不要求
+  assert(parseServerXml(`<bas version="1"><engines/></bas>`).setlineEndpointText() == "");
+
+  assertThrown!ServerXmlException(parseServerXml(
+      `<bas version="1"><setline endpoint="nope"/><engines/></bas>`));
+  assertThrown!ServerXmlException(parseServerXml(
+      `<bas version="1"><setline endpoint="127.0.0.1:0"/><engines/></bas>`));
+  assertThrown!ServerXmlException(parseServerXml(
+      `<bas version="1"><setline endpoint="127.0.0.1:70000"/><engines/></bas>`));
+}
+
+@("setline hostname rejects anything that is not a hostname") unittest {
+  import std.exception : assertThrown;
+
+  assertThrown!ServerXmlException(parseServerXml(
+      `<bas version="1"><setline hostname="a b"/><engines/></bas>`));
+  assertThrown!ServerXmlException(parseServerXml(
+      `<bas version="1"><setline hostname="a/b"/><engines/></bas>`));
+  assertThrown!ServerXmlException(parseServerXml(
+      `<bas version="1"><setline hostname="a*"/><engines/></bas>`));
 }
 
 @("parse webapp <url> children as the exposed url prefixes") unittest {

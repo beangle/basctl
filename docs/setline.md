@@ -4,65 +4,74 @@
 [setline](https://github.com/beangle/setline) 的 JSON 配置：setline 在本地监听**一个入口地址**，
 按 Host + 路径前缀把请求转发到各 server 的 http 端口，从而用一个地址访问全部 webapp。
 
-默认只渲染配置、不碰进程；`--sync` 会把**运行中实例**的路由推给正在跑的 setline（入口空着就地
-拉起来），`--watch` 常驻轮询对账，`--stop` 停掉 basctl 自己起的那个。配了 `<setline>` 时
-`basctl start` / `stop` 会各自自动对账一次（`--no-setline` 跳过）。
+默认只渲染配置；`--sync` 把**运行中实例**的路由推给正在跑的 setline，`--watch` 常驻轮询对账。
+配了 `<setline>` 时 `basctl start` / `stop` 会各自自动对账一次（`--no-setline` 跳过）。
+
+**setline 的进程不归 basctl**：它由 systemd / 容器入口 / 手工拉起来，basctl 只认入口地址
+（`--endpoint` > `<setline endpoint>`，没有缺省）并往它的写接口推路由——推送失败时报「入口没人
+应答」，不会替你把它拉起来。设计见 [setline-config.md](setline-config.md)。
 
 setline 的后端按约定固定为 `127.0.0.1:<port>`，因此这条路径面向「所有实例都跑在本机」的开发场景。
 
 ## 用法
 
 ```sh
-basctl setline [server.xml] [--output=<file>] [--listen=<addr>]
-basctl setline [server.xml] [--listen=<addr>] --sync
-basctl setline [server.xml] [--listen=<addr>] --watch [--interval=<sec>]
-basctl setline --stop [--force]
+basctl setline [server.xml] [--output=<file>] [--endpoint=<addr>]
+basctl setline [server.xml] [--endpoint=<addr>] --sync
+basctl setline [server.xml] [--endpoint=<addr>] --watch [--interval=<sec>]
 ```
 
 | 参数 | 缺省 | 说明 |
 |---|---|---|
 | `server.xml` | `$BAS_HOME/conf/server.xml` | 拓扑来源 |
 | `--output` | `$BAS_HOME/conf/setline.json` | 配置写出位置；`-` 表示写 stdout（取片段用） |
-| `--listen` | `<setline listen>`，都没有时 `127.0.0.1:8080` | 入口地址：`8080` / `*:8080` / `127.0.0.1:8080` 都可以，与 setline 的 `listen` 一致 |
-| `--sync` | 关 | 确保入口可用，再把**运行中实例**（`servers/<name>/server.info`）的整组路由推给 setline（幂等） |
+| `--endpoint` | 无（其次用 `<setline endpoint>`） | 入口地址：`8080` / `*:8080` / `127.0.0.1:8080` 都可以，与 setline 的 `listen` 同构（但 `*` 拨的时候会落到回环）；两处都没写就报错 |
+| `--sync` | 关 | 把**运行中实例**（`servers/<name>/server.info`）的整组路由推给已在跑的 setline（幂等） |
 | `--watch` | 关 | 常驻轮询，把运行中实例的路由持续推给 setline，直到 Ctrl-C；与 `--output` 互斥 |
 | `--interval` | `5` | 只配 `--watch`：轮询间隔秒数（正整数） |
-| `--stop` | 关 | 停掉 basctl 就地启动的 setline（按 `$BAS_HOME/run/setline.pid`） |
-| `--force` | 关 | 只配 `--stop`：SIGTERM 后仍不退时用 SIGKILL |
 
 渲染与同步的**输入不同**：不带 `--sync` / `--watch` 时读 `server.xml` 的静态拓扑（用于取片段、
 并入全局代理）；`--sync` / `--watch` 读运行信息，配置改了但实例没重启时路由不变，动态端口也只有
 运行信息里才有。
 
-setline 的 `routes` 以 Host 分组，而 `server.xml` 里没有 hostname，basctl 无从得知分组依据，
-因此全部路由固定写进兜底命名空间 `*`——整个拓扑就是**一个分组**，按路径匹配任意 Host。要把它
-归到某个域名下，合并时改这一个键即可（或用运行期接口按 host 写入）。
+setline 的 `routes` 以 Host 分组，分组键就是 `server.xml` 的 `<setline hostname>`（缺省
+`localhost`，写 `*` 表示任意 Host）。访问地址因此是 `http://<hostname>:<入口端口>/...`：
+一台机器上共享同一个 setline 的多份 `BAS_HOME` 各写自己的 `hostname`，互不覆盖。
 
 生成后把结果位置、路由条数与入口地址打出来，直接照抄最后一行即可启动：
 
 ```sh
 $ basctl setline
 write /opt/bas/conf/setline.json
-4 routes, entry http://127.0.0.1:8080
+4 routes, entry http://127.0.0.1:8080, host=localhost
 run: setline -f /opt/bas/conf/setline.json
 ```
 
 已经有全局代理时，用 `--output=-` 取片段并入，见 [并入全局代理](#并入全局代理)。
 
-## 入口与启用：`<setline>`
+## 启用、命名空间与入口地址：`<setline>`
 
-入口写在 `server.xml` 里，出现即启用、不出现即禁用——配置本身就是开关，不再另设环境变量：
+`<setline>` 出现即启用、不出现即禁用——配置本身就是开关。它有两项：`endpoint` 必填，
+`hostname` 可省（缺省 `localhost`）。不写 `<setline>` 时 basctl 完全不碰 setline，`start` /
+`stop` / `status` 也不会因为"没有地址"报错。
 
 ```xml
 <bas version="0.14.0">
   <!-- ... repositories / engines / hosts / farms / webapps ... -->
-  <setline listen="127.0.0.1:8080"/>
+  <setline hostname="alice.localhost" endpoint="127.0.0.1:8080"/>
 </bas>
 ```
 
-元素只有 `listen` 一项：token、健康检查、连接超时这些要么属于 setline 自己的配置文件
-（`conf/setline.json`，归 setline 进程），要么是代理本身的调参，都不进拓扑。
-缺省 `--listen > <setline listen> > 127.0.0.1:8080`。
+- `hostname`（缺省 `localhost`）：路由写进哪个命名空间，见上；
+- `endpoint`（**必填**，没有缺省）：本 `BAS_HOME` **往外拨**哪扇门。缺了或写法非法，解析
+  `server.xml` 时就报错。
+
+token、健康检查、连接超时这些要么属于 setline 自己的配置文件（`conf/setline.json`，归 setline
+进程），要么是代理本身的调参，都不进拓扑。
+
+取用顺序（只有一处在解析，见 `bas.endpoint.resolveSetlineEndpoint`）：`--endpoint` >
+`<setline endpoint>`（元素出现时必填）。`--endpoint` 留给"这份配置没启用 setline、只想渲染/对账
+一次"和临时覆盖：都没有地址可拨时才报错，没有缺省，也就没有"它到底拨哪儿"的第二种解释。
 
 setline 的 `adminToken` 只管**读**（路由表与状态页），留给将来同网段的服务进程读取用——例如把
 路由渲染成 haproxy / nginx 配置的同步程序。basctl 只走**写**接口（只认本机、不需要 token），
@@ -73,16 +82,11 @@ setline 的 `adminToken` 只管**读**（路由表与状态页），留给将来
 **同步的输入是「现状」而不是 `server.xml`**：路由由 `servers/<name>/server.info` 算出（存活的
 pid、实际端口、各 webapp 的对外 url），因此配置改了但实例没重启时路由不变，动态端口也能被覆盖。
 
-`--sync` 按「先落文件、再要入口、最后推路由」三步走：
+`--sync` 只有一步：`PUT /__setline/routes/all?host=<hostname>` 整组替换**这个命名空间**的路由
+（幂等，别的分组不受影响）。入口没人监听就报错并退出，不改动任何东西——把 setline 拉起来是
+systemd / 容器入口 / 你自己的事。
 
-1. 要一份 `conf/setline.json`：**不存在才写骨架**（`listen` + 空 `routes`），已有的一律不改
-   ——那是 setline 自己的配置（`adminToken`、健康检查等都在里面），basctl 只读不写；
-2. 要入口：入口空闲就地启动 setline；已在跑（systemd、手工或别的 `BAS_HOME` 起的）直接复用
-   ——判断办法就是试着写一次路由，写接口只认本机、不需要 token，能写进去就是我们的 setline；
-   被别的进程占用则报错退出，不改动任何东西；
-3. `PUT /__setline/routes/all?host=*` 整组替换兜底命名空间的路由（幂等，别的 host 分组不受影响）。
-
-`--watch` 把第 2、3 步放进轮询循环：每 `--interval`（缺省 5 秒）读一次运行信息，路由表有变化才
+`--watch` 把这一步放进轮询循环：每 `--interval`（缺省 5 秒）读一次运行信息，路由表有变化才
 推送（渲染结果相同就跳过），闲时因此不产生流量。遇到**路由冲突**时打印一次原因并**保持现状**
 （现有路由继续服务，不动 setline），改好 `<url path>` 后下一个周期自动推。Ctrl-C 退出；它只写
 路由，不碰应用进程，也不写 `server.info`（唯一写者仍是 `start` / `stop`）。
@@ -91,34 +95,31 @@ pid、实际端口、各 webapp 的对外 url），因此配置改了但实例�
 ——setline 挂了不该挡住应用启停，下一个 `--sync` / `--watch` 会补上。`--no-setline` 可临时跳过
 这一次对账。
 
-就地启动的 setline：`nohup setline -f <conf/setline.json>`，pid 记 `$BAS_HOME/run/setline.pid`，
-日志写 `$BAS_HOME/logs/setline.out`。可执行文件按 `PATH` 上的 `setline` 查找，可用环境变量
-`beangle_setline` 覆盖（与 `beangle_jstart` 同一约定）。`--sync` 每次调用都是瞬时的，`--watch` 才会常驻。
-路由由 setline 在收到推送后写回该文件（只替换 `routes`），所以重启不丢；文件里的 `listen`
-与 `<setline listen>` 不一致时只提示一句，实际监听以文件为准。
+`--sync` 每次调用都是瞬时的，`--watch` 才会常驻（交给 systemd）。路由由 setline 在收到推送后
+写回它自己的配置文件（只替换 `routes`），所以 setline 重启后路由不丢——只要它读的是同一份文件。
 
 ## 状态（`basctl status`）
 
-配了 `<setline>` 时，`basctl status` 在实例列表之后另起一节，一行给出入口地址与状态：
+配了 `<setline>` 时，`basctl status` 在实例列表之后另起一节，一行给出命名空间、入口地址与状态：
 
 ```
 ---------------setline---------------
-listen=127.0.0.1:8080 pid=12345
+host=localhost endpoint=127.0.0.1:8080 (up)
 ```
 
-- `pid=`：basctl 自己就地启动的那个（读 `$BAS_HOME/run/setline.pid`，且进程还活着）；
-- `(down)`：没记 pid，入口也没人监听；
-- `(in use by another process)`：入口被别的进程占着（外置的 systemd / 手工实例也是这个结果）
-  ——它可能正是我们的 setline，只是不是 basctl 起的；
-- `(invalid address)`：`<setline listen>` 写坏了，`status` 报出来而不是崩掉。
+- `(up)`：入口有人应答——setline 是机器级服务，`status` 只报「通不通」，不猜坐的是谁（要确定
+  得写一次路由，那是 `--sync` 的事）；
+- `(down)`：入口没人监听，说明 setline 服务没在跑；
+- `host=localhost (No setline entry address: ...)`：手工构造的容器缺地址时的兜底（正常路径上
+  "有 `<setline>` 就有 `endpoint`"由配置校验保证，写坏了在解析 `server.xml` 时就报错）。
 
 `status` 只读：它不启动、不停止、也不修改任何东西。
 
-## 停止（`--stop`）
+## 停止与清空路由
 
-`basctl stop` 停的是应用实例，**不停** setline：入口是机器级的，可能还在服务别的系统。
-要停就地启动的那一个用 `basctl setline --stop`；它会先 SIGTERM 并等 10 秒，仍不退时提示
-`--force`，加了才 SIGKILL。pid 文件不存在或进程已不在时不算错——顺手清掉陈旧的 pid 文件。
+`basctl stop` 停的是应用实例，**不停** setline：入口是机器级的，可能还在服务别的系统或别的
+`BAS_HOME`。谁拉起的谁负责停——systemd 用 `systemctl stop`，容器入口收 SIGTERM 自己收尾。
+想让本 `BAS_HOME` 的路由消失，用 `basctl stop all` 之后的那次对账（把命名空间置空），不用动进程。
 
 ## 路由生成规则
 
@@ -190,7 +191,7 @@ listen=127.0.0.1:8080 pid=12345
 - **代理是全局的**：一台机器上通常只有一份 setline，它同时服务 bas 与别的系统。`basctl setline`
   只产出 bas 那部分路由，**不要拿它整体覆盖**全局配置——把它当片段并入（见下）。
 - 生产入口（haproxy / nginx / ...）与本地 setline 代理是两件事，`server.xml` 不描述前者；
-  本地入口用 `--listen` 指定。
+  本地入口用 `<setline endpoint>`（或一次性的 `--endpoint`）指定。
 - Linux only：setline 基于 epoll，且后端固定为回环地址，无法代理其它主机上的 server。
 - 只做 HTTP/1.x 转发，不终止 TLS，也不做路径改写（前缀原样透传）。
 

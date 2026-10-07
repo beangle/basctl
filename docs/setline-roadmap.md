@@ -1,7 +1,7 @@
 # setline 集成 roadmap
 
 本文件跟踪 bas / basctl 与 setline 的集成设想，供后续核对与跟踪。每项用复选框表示进度，落地后
-回填 commit。**当前的落地情况**：R0 / R1 / R2 / R3 / R8 / R9 已完成，其余尚未开始。
+回填 commit。**当前的落地情况**：R0 / R1 / R2 / R3 / R4 / R5 / R8 / R9 已完成，其余尚未开始。
 
 | 编号 | 主题 | 状态 | 依赖 |
 |---|---|---|---|
@@ -9,8 +9,8 @@
 | R1 | 动态端口与端口分配 | 已落地 | R0 |
 | R2 | `start` / `stop` 自动注册路由 | 已落地 | R0、R1 |
 | R3 | 对账（`--watch` / `--sync`） | 已落地（子命令 `basctl setline --watch`） | R0、R1、R2 |
-| R4 | basctl 容器化：一机器一出口 | 未开始 | R1-R3 |
-| R5 | host 分组（多人 / 多项目共享） | 未开始 | R2、R3 |
+| R4 | basctl 容器化：一机器一出口 | 已落地（见 [container.md](container.md)） | R1-R3 |
+| R5 | host 分组（多人 / 多项目共享） | 已落地（见 [setline-config.md](setline-config.md)） | R2、R3 |
 | R6 | 生产侧 agent manifest 通道 | 未开始 | 独立 |
 | R7 | 命令面融合 | 未开始 | R1-R3 |
 | R8 | jstart 精简：去掉 `app.pid` 与 `stop` | 已落地 | 独立 |
@@ -93,19 +93,18 @@
 
 **目标**：`basctl start` 起完即注册路由，`stop` 即摘除；setline 不在时只警告、不影响启动。
 
-**进度**：已落地。`basctl setline --sync`（要入口 + 推整组路由，必要时就地启动）、
-`basctl setline --stop [--force]`，以及 `start` / `stop` 之后的自动对账都已可用；对账输入是
-`servers/*/server.info`（见 R3），`--no-setline` 可临时跳过。
+**进度**：已落地。`basctl setline --sync`（把整组路由推给**已在跑**的 setline）、以及
+`start` / `stop` 之后的自动对账都已可用；对账输入是 `servers/*/server.info`（见 R3），
+`--no-setline` 可临时跳过。入口地址（当时叫 `listen`）与归属的最终形态在 R5 落地时改掉了：
+进程归 systemd / 容器入口，basctl 不再拉起也不再停止（见 [setline-config.md](setline-config.md)）。
 
-- **配置即开关**：`server.xml` 的 `<setline listen="..."/>` 出现才启用（等价于
-  `setline_enabled=false` 的反面），地址、就地启动、systemd 的取舍见
-  [setline-config.md](setline-config.md)。不配置就什么都不做。
-- 启用时 `start` 先确保入口可用（探测入口：已在跑则复用，否则就地启动；探测走**写**接口，它只认
-  本机且不需要 token），再 `--sync`；`stop` 之后再 `--sync` 摘除。失败只警告，不改启停的退出码。
-  需要停掉就地实例时用 `basctl setline --stop [--force]`。
+- **配置即开关**：`server.xml` 的 `<setline>` 出现才启用（等价于 `setline_enabled=false` 的反面），
+  命名空间、入口地址、systemd 的取舍见 [setline-config.md](setline-config.md)。不配置就什么都不做。
+- 启用时 `start` / `stop` 各推一次整组路由：入口上有人应答就复用（systemd、容器入口、手工、别的
+  `BAS_HOME` 都算），没人应答就报错。失败只警告，不改启停的退出码。
 - 注册内容：R0 之后直接由 `servers/*/server.info` 得到「实例 → 端口 → webapp → 对外 url」，
   不必重新解析 `server.xml`；同前缀多实例写成端口数组，交给 setline 健康检查 + 随机选。
-- 命名空间固定 `*`（除非 R5 引入分组）。
+- 命名空间取自 `<setline hostname>`（缺省 `localhost`，`*` 表示任意 Host），见 R5。
 - 冲突前置：注册前先跑 `setlinePlan`，同路径被端口集合不同的多个 webapp 认领就**拒绝启动**——把
   今天的 `Route conflict` 从"生成配置时"提前到"启动前"。
 - 加 `--no-setline` 临时跳过，避免 CI / 生产环境被动写路由。
@@ -113,7 +112,8 @@
 **验收**
 
 - [x] 没配置 `<setline>` 时 `basctl start` 完全不碰 setline
-- [x] 配置了 `<setline>` 而没有 setline 在跑时，`start` 就地把它拉起来并推送路由
+- [x] 配置了 `<setline>` 而没有 setline 在跑时~~`start` 就地把它拉起来并推送路由~~ → R5 改为
+      **只警告并提示入口地址**（不就地拉起：进程归 systemd / 容器入口）
 - [x] `basctl start platform.server1` 后，`GET /__setline/routes` 出现对应前缀与端口
 - [x] `basctl stop` 后该端口从前缀的端口数组消失；数组为空则整条路由消失
 - [x] 冲突拓扑启动即失败，且不写任何路由
@@ -142,7 +142,8 @@
       而不重启时路由**不变**（运行信息跟随实例，而不是跟随当前配置）
 - [x] 连续对账不产生重复路由；停掉对账进程不影响已有路由
 
-**风险**：整体替换会覆盖"别人"写进 `*` 的路由。多人共享时需要 R5 的分组或独立命名空间。
+**风险**：整体替换只覆盖**自己那个命名空间**（R5 之后）；多人共享时各自用不同的 `hostname`，
+别都用 `*`（那是兜底命名空间，两组会互相覆盖）。
 
 ### 实现形态与归属（这个程序放哪）
 
@@ -167,9 +168,15 @@
 
 ## R4 basctl 容器化：一机器一出口
 
+**状态：已落地**。三个仓库各自的源码在镜像里现编译（宿主的 ldc 产物链接宿主 glibc，搬进
+Alpine 会因为 glibc 太旧起不来），容器入口自己拉起 setline（谁拥有进程谁负责起停），
+basctl 只往它推路由。构建与运行见 [container.md](container.md)；涉及的文件：
+`Dockerfile`、`scripts/build_image.sh`、`scripts/container/{entrypoint.sh,server.xml}`。
+
 **目标**：镜像里跑 basctl + jstart + JDK + setline，对外只暴露一个端口。
 
-- entrypoint：`basctl setline` 生成配置 → `setline -f conf/setline.json` 常驻 → `basctl start all`。
+- entrypoint：`basctl setline` 渲染配置 → `setline -f conf/setline.json` 常驻 →
+  `basctl start all`（把实例路由推给它）。
 - 容器内再多 farm / webapp / 实例，出口只有一个——这正是 setline「回环后端 + 单一 listen」最贴的
   形态，docker 端口映射永远是一行。
 - k8s 视角：setline 当 pod 内 sidecar / 入口，Service、Ingress、探针都只面对 setline。
@@ -179,25 +186,50 @@
 
 - [ ] `docker run -p 8080:8080` 后，容器内全部 webapp 都能从宿主机 8080 访问
 - [ ] 容器内增删 server 不需要改 docker 端口映射
-- [ ] SIGTERM 干净退出，无残留 java 进程
+- [ ] SIGTERM 干净退出，无残留 java 进程（优雅 8 秒 → `--force`）
 
 **风险**：运行期路由会写回配置文件，容器需要可写的 `BAS_HOME`。
 
+**待手工验证**：镜像构建只到「编译通过、`java -version` 正常」这一步（`./scripts/build_image.sh`
+产出 `basctl:0.0.1`）；下面三条要在真有 webapp 的环境里跑一遍才能打勾，步骤见
+[container.md](container.md) 的「运行」。
+
 ## R5 host 分组（多人 / 多项目共享一个 setline）
 
-**目标**：一台机器上多份 `BAS_HOME` 共存，互不干扰。
+**状态：已落地**，但形态与最初设想不同（讨论后改的，见 [setline-config.md](setline-config.md)）。
 
-- 分组键来自**环境 / 命令行**（如 `BAS_SETLINE_GROUP=alice`），**不来自 `server.xml`**。
-- `*.localhost` 一般由系统直接解析到 127.0.0.1，浏览器无需改 hosts。
-- 配合 git worktree：一个 worktree 一份 `BAS_HOME` + 一个分组，切分支不停服务。
+**目标**：一台机器上多份 `BAS_HOME` 共用一个 setline，路由互不干扰。
+
+- 分组键**来自 `server.xml`**：`<setline hostname="alice.localhost">`（缺省 `localhost`，`*` 表示
+  任意 Host）。最初设想用环境变量（`BAS_SETLINE_GROUP`），改成配置是因为它在这里没有漂移风险：
+  一份 `BAS_HOME` 只有一份 `server.xml`，值天然唯一；反过来环境变量会出现"忘了 export 就写进
+  `*`"的隐形漂移——正是 `--host` 那次的教训。
+- 入口地址由 `server.xml` 的 `<setline endpoint>` 声明（命令行 `--endpoint` 覆盖单次调用），
+  只有一处在解析（`bas.endpoint.resolveSetlineEndpoint`）。中途试过"环境变量
+  `bas_setline_endpoint` + 内置缺省 `127.0.0.1:8080`"两级兜底，结论是**不要**：多一层看不见的
+  状态，就得在 `doctor` / `status` / `--sync` / `start` 各处再解释一遍，还得为"环境与配置不一致"
+  专门加告警，反而更容易漂移；地址写进 `server.xml` 只需要一行，改端口时 diff 里看得见。
+- 命名空间与地址是两件不同粒度的事：`hostname` 是"我占哪一格"（每份配置不同），`endpoint` 是
+  "门在哪"（共享时各份填同一个地址）。
+- 配套结论：setline 变成**机器级常驻服务**（systemd / 容器入口），basctl 不拉起、不停止，
+  因此 `--stop`、`run/setline.pid`、就地启动那一套一并退役。
+- 浏览器把 `*.localhost` 解析到回环，所以 `alice.localhost` 开箱可用；命令行要
+  `curl --resolve` 或写 hosts，或者干脆用 `hostname="*"`。
+- 配合 git worktree：一个 worktree 一份 `BAS_HOME` + 一个 `hostname`，切分支不停别人的服务。
 
 **验收**
 
-- [ ] 同一台机器两个 `BAS_HOME` 各自分组，同前缀互不干扰
-- [ ] 未设分组时行为与今天一致（写 `*`）
+- [x] 同一台机器两个 `BAS_HOME` 各自 `hostname`，同前缀互不干扰（`routes` 分组边界）
+- [x] 不写 `hostname` 时行为可预期：命名空间是 `localhost`，要「任意 Host」得显式写 `*`
+- [x] `<setline hostname>` 校验（域名字符或 `*`），写坏了报错而不是悄悄换一个名字
+- [x] 入口没人应答时报错并提示入口地址的出处，不再就地拉起
+- [x] 入口地址两个来源（`--endpoint` / `<setline endpoint>`）收在一个解析入口，`doctor` /
+      `status` / `start` / `stop` / `--sync` 取到的是同一个地址；配了 `<setline>` 就必须写
+      `endpoint`（缺了是配置错误），没配 `<setline>` 则完全不碰 setline——"没启用"与"写坏了"
+      分得开，也不再有"忘记 export 就漂移"的隐形路径或猜出来的缺省
 
-**风险**：这实际上复活了一个"没有配置来源的旋钮"（见 `--host` 的教训）。它必须被明确归类为
-"环境"，而不是"配置"。
+**风险**：`hostname` 缺省从"任意 Host"（旧行为）收紧成 `localhost`，靠 IP 或别的域名访问的
+老部署要显式写 `hostname="*"`——迁移时注意（xsd 与样例已同步）。
 
 ## R6 生产侧 agent manifest 通道
 
@@ -239,8 +271,8 @@ haproxy / nginx。
 **状态：已落地**。setline 侧：写接口（`PUT` / `DELETE` 路由）只接受 TCP 对端
 localhost，不认凭据（路由变即流量变）；**读**接口（`GET /__setline/routes`、状态页）保留
 `adminToken`（`X-Setline-Token` / Basic Auth）且不限来源——路由表将来要开放给同网段的服务进程
-读取，例如把拓扑渲染成 haproxy / nginx 配置的同步 agent（见 R6）。basctl 侧新增
-`basctl setline --sync` 与 `--stop [--force]`，只走写路径，因此 `server.xml` 里不放 token。
+读取，例如把拓扑渲染成 haproxy / nginx 配置的同步 agent（见 R6）。basctl 侧只有
+`basctl setline --sync` / `--watch`，只走写路径，因此 `server.xml` 里不放 token。
 
 **为什么最初想删、后来保留**：token 诞生在第一条 commit，当时它管的是**写**（改路由）的凭据；
 写接口加上 localhost 门之后，写路径上它就冗余了，而读路径（`GET` routes + 状态页）是它最后的
@@ -264,7 +296,7 @@ localhost，不认凭据（路由变即流量变）；**读**接口（`GET /__se
 - [x] jstart 精简（R8）：去掉 `app.pid` 与 `stop`，实例身份与停止归 basctl
 - [x] setline 的运行期路由接口：管理接口仅 localhost 可调；路由写回配置文件（重读→只替换 `routes`
       →tmp+rename），仍被引用端口的健康状态会保留（见 setline `doc/runtime-routes-api.md`）
-- [x] `server.xml` 的 `<setline listen>` 解析（xsd + config.d）与 `--sync`/`--stop` 的命令面
+- [x] `server.xml` 的 `<setline hostname>` 解析（xsd + config.d）与 `--sync`/`--watch` 的命令面
 - [x] `basctl setline --sync` 的入口探测：写接口只认本机且无需 token，用它当「是不是我们的 setline」
 
 ## 非目标
@@ -282,6 +314,7 @@ localhost，不认凭据（路由变即流量变）；**读**接口（`GET /__se
 2. ~~**对账形态**：常驻 `--watch`，还是只在 start/stop 里同步一次，或两者并存~~ **已定：两者
    并存**——`start` / `stop` 各同步一次保证即时（失败只警告，见 R2），`--watch` 处理 `kill -9`、
    手工起停、端口漂移等漂移（见 R3）；`--watch` 是前台子命令，常驻与否交给 systemd。
-3. **是否引入 `--group`**：引入后如何映射到 setline 的 host 匹配语义。
+3. ~~**是否引入 `--group`**~~ **已定：不引入**——分组键就是 `server.xml` 的
+   `<setline hostname>`（缺省 `localhost`，`*` 表示任意 Host），见 R5。
 4. **守护进程的运行身份**：单份 `BAS_HOME` 还是多份（一台机器上多个 bas 实例），以及以什么账号
    运行（要能对实例进程发信号）。

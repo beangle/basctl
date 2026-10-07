@@ -19,21 +19,28 @@ module test.doctor_test;
 
 import bas.doctor;
 import bas.jstart : jstartEnvVar;
-import bas.setlineproc : setlineEnvVar;
 
 import std.algorithm : canFind;
 import std.array : join;
+import std.conv : to;
 import std.file : mkdirRecurse, rmdirRecurse, tempDir, write;
 import std.path : buildPath;
-import std.uuid : randomUUID;
+import std.socket : AddressFamily, InternetAddress, Socket, SocketOption, SocketOptionLevel,
+  SocketType;
 import std.string : replace, split;
+import std.uuid : randomUUID;
 
-/** PATH 上放一个假 jstart（不含 setline），测试里用不到真实命令。 */
+/** PATH 上放一个假 jstart，测试里用不到真实命令。 */
 private string fakeToolsDir() {
   auto dir = buildPath(tempDir, "basctl-doctor-" ~ randomUUID().toString());
   mkdirRecurse(dir);
   write(buildPath(dir, "jstart"), "#!/bin/sh\n");
   return dir;
+}
+
+/** 本机 setline 入口的写法，指向某个具体端口。 */
+private string endpoint(int port) {
+  return "127.0.0.1:" ~ port.to!string;
 }
 
 @("findOnPath finds a bare command on PATH and misses an unknown one") unittest {
@@ -44,13 +51,13 @@ private string fakeToolsDir() {
   assert(findOnPath("definitely-not-a-command", dir) == "");
 }
 
-@("doctor requires java and jstart, and setline only when <setline> is configured") unittest {
+@("doctor requires java and jstart, and setline only as a reachable entry") unittest {
   auto dir = fakeToolsDir();
   scope (exit) rmdirRecurse(dir);
 
   // 环境显式传入，不改进程环境：dub 的测试 runner 默认多线程并行（`-t 0`），
   // 进程级环境变量是共享状态，并行改会互相踩。
-  auto env = ToolEnv("", dir, "", "");
+  auto env = ToolEnv("", dir, "");
 
   // 一份最小可解析的 server.xml：先不带 <setline>，再加一段。
   auto base = `<bas version="0.14.0">
@@ -66,16 +73,44 @@ private string fakeToolsDir() {
   assert(checks[1].name == "jstart" && checks[1].state == CheckState.ok);
   assert(checks[2].name == "setline" && checks[2].state == CheckState.skipped);
 
-  write(confFile, base.replace("</bas>", `  <setline listen="127.0.0.1:18080"/>
+  // 配了 <setline> 却没写入口地址是配置错误（解析不过），doctor 不把 setline 记为缺失
+  write(confFile, base.replace("</bas>", `  <setline hostname="alice.localhost"/>
 </bas>`));
   checks = checkTools(confFile, env);
-  assert(checks[2].state == CheckState.missing, "setline becomes required once <setline> is declared");
-  assert(checks[2].note.canFind("127.0.0.1:18080"));
+  assert(checks[2].state == CheckState.skipped, checks[2].note);
 
-  // setline 装到 PATH 上后就绪。
-  write(buildPath(dir, "setline"), "#!/bin/sh\n");
+  // 入口写在 <setline endpoint> 里：source 报 server.xml，端口没人听就是缺失。
+  // 端口是共享资源：挑一个刚空出来的，被别的用例抢走就换一个重试。
+  int freePort = 0;
+  foreach (attempt; 0 .. 5) {
+    auto probe = new Socket(AddressFamily.INET, SocketType.STREAM);
+    probe.setOption(SocketOptionLevel.SOCKET, SocketOption.REUSEADDR, 1);
+    probe.bind(new InternetAddress("127.0.0.1", 0));
+    freePort = (cast(InternetAddress) probe.localAddress).port;
+    probe.close();
+    write(confFile, base.replace("</bas>", `  <setline hostname="alice.localhost" endpoint="`
+        ~ endpoint(freePort) ~ `"/>
+</bas>`));
+    checks = checkTools(confFile, env);
+    if (checks[2].state == CheckState.missing)
+      break;
+  }
+  assert(checks[2].state == CheckState.missing, checks[2].note);
+  assert(checks[2].note.canFind(endpoint(freePort)), checks[2].note);
+
+  // 有人在听就算就绪：doctor 只认「入口可达」，不判断坐的是不是我们的 setline
+  auto listener = new Socket(AddressFamily.INET, SocketType.STREAM);
+  scope (exit) listener.close();
+  listener.bind(new InternetAddress("127.0.0.1", 0));
+  listener.listen(1);
+  auto busyPort = (cast(InternetAddress) listener.localAddress).port;
+  write(confFile, base.replace("</bas>", `  <setline hostname="alice.localhost" endpoint="`
+      ~ endpoint(busyPort) ~ `"/>
+</bas>`));
   checks = checkTools(confFile, env);
-  assert(checks[2].state == CheckState.ok && checks[2].source == "PATH");
+  assert(checks[2].state == CheckState.ok && checks[2].source == "server.xml");
+  assert(checks[2].path == endpoint(busyPort));
+
 }
 
 @("doctor takes a command from its beangle_ env override when it is set") unittest {
@@ -85,21 +120,15 @@ private string fakeToolsDir() {
   write(confFile, `<bas version="1">
   <engines><engine name="e" type="tomcat" version="11"/></engines>
   <farms><farm name="f" engine="e"><server name="s1" http="9980"/></farm></farms>
-  <setline listen="127.0.0.1:18080"/>
 </bas>`);
-  write(buildPath(dir, "setline"), "#!/bin/sh\n");
 
   // 覆盖变量给的是路径：命中即用，source 报变量名（而不是 PATH）
-  auto env = ToolEnv("", dir, buildPath(dir, "jstart"), buildPath(dir, "setline"));
-  auto checks = checkTools(confFile, env);
+  auto checks = checkTools(confFile, ToolEnv("", dir, buildPath(dir, "jstart")));
   assert(checks[1].state == CheckState.ok && checks[1].source == jstartEnvVar, checks[1].source);
-  assert(checks[2].state == CheckState.ok && checks[2].source == setlineEnvVar, checks[2].source);
 
   // 变量指向不存在的命令：报缺失，提示里带变量名
-  auto broken = ToolEnv("", dir, buildPath(dir, "nope"), buildPath(dir, "nope-too"));
-  checks = checkTools(confFile, broken);
+  checks = checkTools(confFile, ToolEnv("", dir, buildPath(dir, "nope")));
   assert(checks[1].state == CheckState.missing && checks[1].note.canFind(jstartEnvVar));
-  assert(checks[2].state == CheckState.missing && checks[2].note.canFind(setlineEnvVar));
 }
 
 @("renderChecks prints one line per command plus a verdict") unittest {

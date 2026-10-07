@@ -56,6 +56,7 @@ import bas.serverinfo : ServerInfo, WebappInfo, instancePid, liveInstancePid, li
   localIsoTimestamp, readInstanceInfo, removeInstanceInfo, writeInstanceInfo;
 import bas.serverstatus : pidLooksLikeInstance, processRunning, rollLog, signalProcess;
 import bas.setline : SetlineConflict, conflictLines, runningPlan, setlinePlan;
+import bas.endpoint : SetlineEndpointChoice, resolveSetlineEndpoint;
 import bas.setlineproc : syncRoutesToSetline;
 import bas.spec : SubappSpec, engineInitCommand, renderLaunchSpec, shellQuote;
 
@@ -88,7 +89,7 @@ enum defaultStopTimeoutSec = 15;
  */
 /** `<setline>` 出现即启用（配置就是开关，见 docs/setline-config.md）。 */
 private bool setlineEnabled(const Container container) {
-  return !container.setlineListen.isNull && strip(container.setlineListen.get).length > 0;
+  return !container.setlineHostname.isNull && strip(container.setlineHostname.get).length > 0;
 }
 
 /** 打印路由冲突与修法。 */
@@ -113,7 +114,15 @@ private void reconcileRoutes(const Container container, string basHome, bool noS
     stderr.writeln("Routes not updated; fix the conflict and run `basctl setline --sync`.");
     return;
   }
-  if (syncRoutesToSetline(basHome, plan.routes, strip(container.setlineListen.get), true) != 0)
+  SetlineEndpointChoice choice;
+  try
+    choice = resolveSetlineEndpoint("", container.setlineEndpointText());
+  catch (Exception e) {
+    stderr.writeln(e.msg);
+    return;
+  }
+  auto hostname = strip(container.setlineHostname.get);
+  if (syncRoutesToSetline(plan.routes, choice.endpoint, hostname, true) != 0)
     stderr.writeln("Routes not updated (setline unavailable); the instances themselves are fine.");
 }
 
