@@ -12,7 +12,8 @@
 见 [docs/setline-roadmap.md](docs/setline-roadmap.md)，其中的实例运行信息格式见
 [docs/server-info.md](docs/server-info.md)、入口配置与启用规则见
 [docs/setline-config.md](docs/setline-config.md)；basctl 自身的功能规划见
-[docs/roadmap.md](docs/roadmap.md)。
+[docs/roadmap.md](docs/roadmap.md)，运行所需外部命令的检查（`basctl doctor`）见
+[docs/doctor.md](docs/doctor.md)。
 
 ## 版本语义
 
@@ -42,7 +43,8 @@ IDE 补全与校验（见 `server.xml` 样例）。
 ## 构建与测试
 
 - `ldc2` >= 1.32，`dub` >= 1.34
-- `make` / `resolve` / `start` 需要本机有 `jstart`（负责构件的解析、下载与启动）
+- `make` / `resolve` / `start` 需要本机有 `jstart`（负责构件的解析、下载与启动）；
+  这些命令是否就位可以用 `basctl doctor` 自查（见 [docs/doctor.md](docs/doctor.md)）
 
 ```sh
 dub build --build=release-nobounds --compiler=ldc2
@@ -74,6 +76,7 @@ dub test --compiler=ldc2
 | `basctl make <type> [options]` | 容器入口（creator）：把 jstart 的 `[engine] init` 协议翻译成容器启动命令 |
 | `basctl firewall [workdir]` | 按配置交互式配置 firewalld 端口 |
 | `basctl pull [--remote=<url>] [workdir]` | 从控制端拉取 `conf/server.xml`（请求带 `ip:` 头，旧配置备份为 `server_old.xml`） |
+| `basctl doctor [server.xml]` | 检查 `java` / `jstart`（以及启用 setline 时的 `setline`）是否就位，缺件时退出码非 0，见 [docs/doctor.md](docs/doctor.md) |
 
 ## 组件目录初始化
 

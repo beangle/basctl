@@ -16,12 +16,13 @@
 
 /**
  * basctl 命令行入口：`version` / `banner` / `status` / `init` / `make` / `resolve` /
- * `start` / `stop` / `run` / `setline` / `firewall` / `pull`。
+ * `start` / `stop` / `run` / `setline` / `doctor` / `firewall` / `pull`。
  */
 module bas.main;
 
 import bas.banner;
 import bas.config;
+import bas.doctor : runDoctor;
 import bas.embed : defaultBasVersion, runEmbedded;
 import bas.enginecreator;
 import bas.firewall;
@@ -80,6 +81,10 @@ version (unittest) {
       return runEmbedded(args[2 .. $]);
     case "setline":
       return cmdSetline(args[2 .. $]);
+    case "doctor": {
+      auto rest = args[2 .. $];
+      return runDoctor(takeConfigFile(rest));
+    }
     case "firewall":
       return runFirewall(args[1 .. $]);
     case "pull":
@@ -120,6 +125,8 @@ void printUsage() {
   stderr.writeln("                                one entry address routes to every server's http port");
   stderr.writeln("                                (writes conf/setline.json; --output=<file>)");
   stderr.writeln("                                (--listen=<addr>)");
+  stderr.writeln("  doctor [server.xml]           Check that java / jstart are on this machine");
+  stderr.writeln("                                (setline too, but only when <setline> is configured)");
   stderr.writeln("  firewall [workdir]            Configure firewalld ports from conf/server.xml");
   stderr.writeln("  pull [--remote=<url>] [workdir]  Fetch conf/server.xml from the control endpoint");
 }
