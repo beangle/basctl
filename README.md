@@ -15,7 +15,8 @@
 [docs/setline-config.md](docs/setline-config.md)、把 basctl + jstart + setline + JRE 打成
 「一个端口对外」的镜像见 [docs/container.md](docs/container.md)；basctl 自身的功能规划见
 [docs/roadmap.md](docs/roadmap.md)，运行所需外部命令的检查（`basctl doctor`）见
-[docs/doctor.md](docs/doctor.md)。
+[docs/doctor.md](docs/doctor.md)；把拓扑导出给边缘机渲染反代配置的 manifest 见
+[docs/manifest.md](docs/manifest.md)。
 
 ## 版本语义
 
@@ -79,6 +80,7 @@ dub test --compiler=ldc2
 | `basctl make <type> [options]` | 容器入口（creator）：把 jstart 的 `[engine] init` 协议翻译成容器启动命令 |
 | `basctl firewall [workdir]` | 按配置交互式配置 firewalld 端口 |
 | `basctl pull [--remote=<url>] [workdir]` | 从控制端拉取 `conf/server.xml`（请求带 `ip:` 头，旧配置备份为 `server_old.xml`） |
+| `basctl manifest [server.xml] [--output=<file>]` | 把声明态拓扑导成 JSON（缺省 `conf/manifest.json`）：命名空间与入口、每个实例的引擎与 http 端口、每个 webapp 的 context path 与对外路径，以及与 setline 配置同形状的 routes；给边缘机渲染 haproxy / nginx 用，见 [docs/manifest.md](docs/manifest.md) |
 | `basctl doctor [server.xml]` | 检查 `java` / `jstart`（以及启用 setline 时入口通不通）是否就位，缺件时退出码非 0，见 [docs/doctor.md](docs/doctor.md) |
 
 ## 组件目录初始化
@@ -105,6 +107,7 @@ basctl init --dry-run /opt/bas
 $BAS_HOME/
   conf/server.xml
   conf/setline.json             # setline 自己的配置（listen / 运行期路由；归拉起 setline 的那个进程所有）
+  conf/manifest.json            # `basctl manifest` 导出的声明态拓扑（给边缘机渲染反代配置）
   engines/<name>-<version>/     # 解压并按需裁剪后的 Tomcat
   servers/<farm>.<server>/      # 单个实例的 catalina.base（server.info 记运行信息：pid / 端口 / webapp / url）
   webapps/                      # http 直链与 SNAPSHOT 覆盖的落地目录

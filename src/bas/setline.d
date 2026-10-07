@@ -355,8 +355,8 @@ private string portsJson(const(int)[] ports) {
   return ports.length == 1 ? ports[0].to!string : portsText(ports);
 }
 
-/** 最小 JSON 字符串转义（本命令只处理地址、Host 与 URL 路径）。 */
-private string jsonEscape(string text) {
+/** 最小 JSON 字符串转义（处理地址、Host、URL 路径与构件坐标；`bas.manifest` 也复用它）。 */
+string jsonEscape(string text) {
   auto sb = appender!string;
   foreach (ch; text) {
     switch (ch) {
