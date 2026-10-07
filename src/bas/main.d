@@ -31,10 +31,9 @@ import bas.endpoint : ListenEndpoint, SetlineEndpointChoice, portFree, resolveSe
 import bas.enginecreator;
 import bas.firewall;
 import bas.init;
-import bas.manifest : cmdManifest;
 import bas.net;
 import bas.pull;
-import bas.shellenv : readContainer, resolveBasHome;
+import bas.shellenv : readContainer;
 import bas.resolver;
 import bas.serverinfo : ServerInfo, liveInstances, readInstanceInfo;
 import bas.serverstatus;
@@ -100,8 +99,6 @@ version (unittest) {
       return runEmbedded(args[2 .. $]);
     case "setline":
       return cmdSetline(args[2 .. $]);
-    case "manifest":
-      return cmdManifest(args[2 .. $], basctlVersion);
     case "doctor": {
       auto rest = args[2 .. $];
       return runDoctor(takeConfigFile(rest));
@@ -150,8 +147,6 @@ void printUsage() {
   stderr.writeln("                                (routes under <setline hostname>; entry from");
   stderr.writeln("                                 --endpoint > <setline endpoint>, one required;");
   stderr.writeln("                                 --sync/--watch push the live instances' routes)");
-  stderr.writeln("  manifest [server.xml]         Export the declared topology as JSON (for an edge");
-  stderr.writeln("                                agent to render haproxy / nginx; conf/manifest.json)");
   stderr.writeln("  doctor [server.xml]           Check that java / jstart are on this machine");
   stderr.writeln("                                (setline too, but only when <setline> is configured)");
   stderr.writeln("  firewall [workdir]            Configure firewalld ports from conf/server.xml");
@@ -427,6 +422,16 @@ private void setlineUsage() {
   stderr.writeln("  the running setline once;");
   stderr.writeln("  --watch keeps doing that (default every " ~ defaultWatchIntervalSec.to!string
       ~ "s) until stopped.");
+}
+
+/** `BAS_HOME` 有值时取其指向目录，否则取当前工作目录。 */
+string resolveBasHome() @trusted {
+  import std.file : getcwd;
+
+  auto fromEnv = strip(environment.get("BAS_HOME", ""));
+  if (fromEnv.length)
+    return absolutePath(fromEnv);
+  return absolutePath(getcwd());
 }
 
 /**

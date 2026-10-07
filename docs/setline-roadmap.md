@@ -2,8 +2,8 @@
 
 本文件跟踪 bas / basctl 与 setline 的集成设想，供后续核对与跟踪。每项用复选框表示进度，落地后
 回填 commit。**当前的落地情况**：R0 / R1 / R2 / R3 / R4 / R5 /
-R7（route 列 + `start` 预检）/ R8 / R9 已完成；R6 的产出侧（`basctl manifest`）已落地，分发与
-边缘机 agent 未开始；R7 原设想的「embed 单应用注册」已明确不做（`run` 保持纯前台，见 R7）。
+R7（route 列 + `start` 预检）/ R8 / R9 已完成；R6 与 R7 的「embed 单应用注册」都已明确不做
+（`run` 保持纯前台，见 R7）。
 
 | 编号 | 主题 | 状态 | 依赖 |
 |---|---|---|---|
@@ -13,7 +13,7 @@ R7（route 列 + `start` 预检）/ R8 / R9 已完成；R6 的产出侧（`basct
 | R3 | 对账（`--watch` / `--sync`） | 已落地（子命令 `basctl setline --watch`） | R0、R1、R2 |
 | R4 | basctl 容器化：一机器一出口 | 已落地（见 [container.md](container.md)） | R1-R3 |
 | R5 | host 分组（多人 / 多项目共享） | 已落地（见 [setline-config.md](setline-config.md)） | R2、R3 |
-| R6 | 生产侧 agent manifest 通道 | 产出侧已落地（`basctl manifest`）；分发 / agent 未开始 | 独立 |
+| R6 | 生产侧 agent 通道（拓扑来源：`server.xml`） | basctl 侧不做（见 R6） | 独立 |
 | R7 | 命令面融合 | 部分落地（route 列、start 预检；embed 单应用注册：不做） | R1-R3 |
 | R8 | jstart 精简：去掉 `app.pid` 与 `stop` | 已落地 | 独立 |
 | R9 | setline 管理面：写只认本机、读保留 `adminToken` | 已落地 | 独立 |
@@ -233,31 +233,31 @@ basctl 只往它推路由。构建与运行见 [container.md](container.md)；�
 **风险**：`hostname` 缺省从"任意 Host"（旧行为）收紧成 `localhost`，靠 IP 或别的域名访问的
 老部署要显式写 `hostname="*"`——迁移时注意（xsd 与样例已同步）。
 
-## R6 生产侧 agent manifest 通道
+## R6 生产侧 agent 通道
 
-**目标**：basctl / bashub 只产出拓扑 manifest → registry → 边缘机的 setline agent 拉取并渲染
-haproxy / nginx。
+**目标**：registry → 部署在 haproxy / nginx 机器上的 setline agent 拉取拓扑并渲染本机反代配置，
+再动态加载或重启 haproxy。与 R1-R3 完全解耦：不依赖 localhost 写接口，不涉及 runtime routes；
+setline 自身规定「normal proxy 模式不许生成 / 同步外部配置」，所以这是两条路、两种模式。
 
-- 与 R1-R3 完全解耦：不依赖 localhost 写接口，不涉及 runtime routes。
-- setline 自身规定「normal proxy 模式不许生成 / 同步外部配置」，所以这是两条路、两种模式。
+**状态：basctl 侧不做**（曾起过一版 `basctl manifest`，把拓扑导成 JSON，随即回退）。
 
-**进度**：产出侧（basctl 的 `basctl manifest`）已落地，把 `server.xml` 的声明态拓扑导成 JSON
-（`version` / `generator` / `source` / `bas` / `setline` / `servers[]` / `routes`），字段与取舍见
-[manifest.md](manifest.md)。剩下的是 registry（怎么存、谁推、拉取的鉴权）与边缘机 agent
-（拉 manifest → 渲染 haproxy / nginx），两者都不在 basctl 里，另立阶段。
-
-- 为什么需要 manifest 而不复用 `conf/setline.json`：后者只有 `listen` + `routes`，是**本机**
-  setline 进程的配置；边缘机渲染 haproxy / nginx 还要知道引擎与 webapp 的对外路径从哪来
-  （`urls` 声明 vs. `paths` 生效），所以 manifest 把这些一并带上。
-- 声明态而非现状：端口取 `server.xml` 的声明值，`http="0"` 原样是 0；真实端口属于
-  `server.info` 那条链路（R0-R3），两条路互不依赖。
-- 后端仍在回环（与 setline 一致），跨机由边缘机渲染时替换。
+- 原因：拓扑信息 `server.xml` 已经完整承载（`<farm>` / `<server http>` / `<engine>` /
+  `<webapp>` 与其 `<url path>` / `<setline hostname endpoint>`），再导出一份平行文件就是**第二个
+  事实源**——两边规则一旦演进就会出现"配置改了、manifest 没跟上"的漂移，正是本文件通篇在消掉的
+  那类问题。顺序重排如下：
+  - 交付物就是 `server.xml` 本身，消费方用 `basctl` 已有的解析（同一个 `bas.config` 模型，别再写
+    一份解析器）；
+  - 需要"运行态"（动态端口、存活实例）时读对方 setline 的 `GET /__setline/routes`（非本机来源用
+    `X-Setline-Token`，见 setline 的 `doc/runtime-routes-api.md`）；
+  - 尝试过的 `basctl manifest` 输出形状（`setline` / `servers[]` / `webapps[].urls` 与 `paths` /
+    `routes`）作为记录留在这里：它证明了 haproxy 渲染真正需要的额外信息只有"引擎 / 超时 /
+    websocket 开关"，这些同样在 `server.xml` 里（`<engine>` 的属性与 `<http>` 参数）。
+- 留给将来的是**通道**，不是产出：registry 存什么、agent 多久拉一次、拉取的鉴权、渲染后
+  `reload` 还是 `restart`。这些都不在 basctl 里。
 
 **验收**
 
-- [x] basctl 产出拓扑 manifest（`basctl manifest`，JSON，字段见 [manifest.md](manifest.md)）
-- [ ] manifest 能经 registry 分发到边缘机（通道形态未定）
-- [ ] agent 渲染产物与 bashub 现有的 haproxy / nginx 模板输出一致
+- [ ] agent 渲染产物与 bashub 现有的 haproxy / nginx 模板输出一致（消费 `server.xml`，不新增中间格式）
 
 ## R7 命令面融合
 
