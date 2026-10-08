@@ -9,7 +9,7 @@
 ```sh
 basctl run --engine=tomcat-11.0.25  /repo/app.war
 basctl run --engine=undertow-2.0.3.Final  org.beangle:app:1.0 --port=8080 --path=/app
-basctl run --engine=jetty-12.0.30  /repo/app.war
+basctl run --engine=jetty-12.1.14  /repo/app.war
 basctl run --engine=tomcat-11.0.25 --print app.war   # 只写 spec 并打印 jstart 命令
 ```
 
@@ -69,7 +69,7 @@ basctl run --engine=tomcat-11.0.26 --port=8080 /repo/app.war
 
 ## 版本
 
-- **容器版本**来自 `--engine`（`tomcat-11.0.25` / `undertow-2.0.3.Final` / `jetty-12.0.30`），显式给出、无内置漂移；
+- **容器版本**来自 `--engine`（`tomcat-11.0.25` / `undertow-2.0.3.Final` / `jetty-12.1.14`），显式给出、无内置漂移；
 - **bas 引擎版本**取 basctl 的默认值 `defaultBasVersion`，可用 `--bas=` 覆盖。这只是 `run`
   的便捷默认；`conf/server.xml` 的多实例部署一律以 `<bas version>` 为准。
 

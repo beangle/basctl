@@ -18,7 +18,7 @@
  * `basctl run`：嵌入式运行单个 webapp（war / Maven 坐标 / http url）。
  *
  * 不读 `conf/server.xml`：一个参数 `--engine=<type>-<version>`（如
- * `tomcat-11.0.25`、`undertow-2.0.3.Final`、`jetty-12.0.30`）同时给出容器类型与版本；bas 引擎
+ * `tomcat-11.0.25`、`undertow-2.0.3.Final`、`jetty-12.1.14`）同时给出容器类型与版本；bas 引擎
  * 版本取 basctl 的默认值 {@link defaultBasVersion}（`--bas=` 可覆盖）。依赖集与 `start`
  * 共用 `engines.ini`（见 {@link bas.config.resolveEngineDeps}，这里没有 `<engine><jar>`，
  * 就用默认集）。
@@ -56,7 +56,7 @@ struct EngineRef {
 
   /**
    * 按 {@link supportedEngineTypes} 中最长的已知类型前缀解析，其余为版本：
-   * `tomcat-11.0.25` / `tomcat-server-11.0.26` / `undertow-2.0.3.Final` / `jetty-12.0.30`。
+   * `tomcat-11.0.25` / `tomcat-server-11.0.26` / `undertow-2.0.3.Final` / `jetty-12.1.14`。
    * 版本必须数字开头，据此把裸类型名（如 `tomcat-server`）与旧式 `tomcat-embed-*`
    * 判为非法：类型未知、缺少版本或版本非数字开头时返回空 `typ`。
    */

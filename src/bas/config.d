@@ -247,7 +247,7 @@ string containerTypeOf(Engine engine) {
 }
 
 /**
- * 引擎引用：`<type>-<version>`，如 `tomcat-server-11.0.26`、`jetty-12.0.30`。
+ * 引擎引用：`<type>-<version>`，如 `tomcat-server-11.0.26`、`jetty-12.1.14`。
  *
  * 与 `basctl run --engine=` 同形（解析规则见 `bas.embed.EngineRef`），也是 `server.info` 里
  * `engine` 字段的取值：一个字符串同时说出容器形态与版本。

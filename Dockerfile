@@ -74,6 +74,14 @@ FROM alpine:3.23
 
 # jstart / basctl 运行期要用的外部命令：curl（下载构件）、/bin/sh（spec 里的命令行）、
 # bash（bin/*.sh 控制脚本）、tar/gzip（busybox 自带，jstart 解压原生包）、bzip2（增量补丁）。
+#
+# JRE 取 25：bas 0.14.0 的引擎构件（beangle-bas-engine / beangle-bas-juli）按 class file
+# 版本 69 发布，21 会在启动时抛 UnsupportedClassVersionError。Alpine 3.23 的 25.0.4 与宿主
+# 工具链同版本，换成 21 之前先确认引擎构件的字节码版本。
+#
+# 用 openjdk25-jre 而不是 -headless：webapp 里的图形验证码走 Java2D，需要 libfontmanager.so，
+# headless 包不含它（会以 `no fontmanager in system library path` 让 context 初始化失败）；
+# fontconfig + font-dejavu 提供字体，否则字体列表为空、验证码照样起不来。
 RUN set -eux; \
   sed -i \
     -e 's|https://dl-cdn.alpinelinux.org/alpine|https://mirrors.huaweicloud.com/alpine|g' \
@@ -86,7 +94,9 @@ RUN set -eux; \
     bzip2 \
     tzdata \
     su-exec \
-    openjdk21-jre-headless \
+    openjdk25-jre \
+    fontconfig \
+    font-dejavu \
     && addgroup -S beangle \
     && adduser -S -D -G beangle -h /var/lib/bas -s /bin/sh bas \
     && mkdir -p /var/lib/bas /opt/bas \

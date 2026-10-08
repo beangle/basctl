@@ -91,7 +91,7 @@ private ServerInfo sample() {
 
 [server]
 id = platform . server1
-engine = jetty-12.0.30
+engine = jetty-12.1.14
 http.port = not-a-number
 started = 2026-10-07T10:12:33+08:00
 pid = -3
@@ -109,7 +109,7 @@ url = /a
 url = /b
 `);
   assert(info.id == "platform . server1");
-  assert(info.engine == "jetty-12.0.30");
+  assert(info.engine == "jetty-12.1.14");
   assert(info.httpPort == 0);
   assert(info.pid == 0);
   assert(info.webapps.length == 1);

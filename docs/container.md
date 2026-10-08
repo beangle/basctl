@@ -1,8 +1,7 @@
 # 容器化：一机器一出口
 
 把 `basctl` + `jstart` + `setline` + JRE 打成一个镜像，容器里无论有多少 farm / server /
-webapp，对外只暴露 `setline` 那一个端口（roadmap 的 R4，见
-[setline-roadmap.md](setline-roadmap.md)）。
+webapp，对外只暴露 `setline` 那一个端口。
 
 ```sh
 docker run -d --name bas -p 8080:8080 \
@@ -39,7 +38,7 @@ setline 最贴的形态：
 | 层 | 内容 |
 |---|---|
 | 构建阶段 | `alpine:3.23` + apk 的 `ldc` / `dub` / `build-base`，在镜像内编译三份源码 |
-| 运行阶段 | `alpine:3.23` + `openjdk21-jre-headless`（+ `tzdata`）、`curl`、`bash`、`bzip2`、`su-exec` |
+| 运行阶段 | `alpine:3.23` + `openjdk25-jre`（+ `tzdata`、`fontconfig`、`font-dejavu`）、`curl`、`bash`、`bzip2`、`su-exec` |
 | 二进制 | `/usr/bin/basctl`、`/usr/bin/jstart`、`/usr/bin/setline`，D 运行库收在 `/usr/lib/bas/`（`LD_LIBRARY_PATH`） |
 | 样例配置 | `/opt/bas/server.xml`（挂载的 `BAS_HOME` 里没有 `conf/server.xml` 时才铺一份） |
 
@@ -47,6 +46,17 @@ setline 最贴的形态：
 宿主 glibc（且宿主 glibc 往往比基础镜像新），搬进 Alpine 会以
 `GLIBC_ABI_DT_RELR not found` 之类的方式起不来。多阶段 + musl 让二进制与运行环境用同一套
 libc——这条路由 micdn 先走过（`micdn/Dockerfile`、`docs/container_build.md`）。
+
+**JRE 为什么是 25**：bas 0.14.0 的引擎构件（`beangle-bas-engine`、`beangle-bas-juli`）按
+class file 版本 69 发布，21 的 JVM 只认到 65，实例会在 `Bootstrap` 静态初始化时抛
+`UnsupportedClassVersionError`，表现为 `basctl start` 报告实例启动失败。Alpine 3.23 的
+`openjdk25` 是 25.0.4，与构建引擎用的宿主工具链同版本；降版本前先看一眼引擎构件的字节码
+版本。
+
+**为什么不是 headless**：webapp 里的图形验证码走 Java2D，需要 `libfontmanager.so`，
+`-headless` 包不含它，context 初始化时会以 `no fontmanager in system library path` 失败，
+`basctl start` 只报「实例启动失败」而看不出所以然。因此取完整的 `openjdk25-jre`，并装
+`fontconfig` + `font-dejavu` 让 JVM 真能找到字体。
 
 ## 构建
 
@@ -79,6 +89,25 @@ docker logs -f bas
 `conf/setline.json`、`servers/*/server.info`、`logs/`，以及 jstart 的本地仓库
 `$BAS_HOME/.m2/repository`（入口脚本把 `HOME` 指到 `BAS_HOME`，所以构件缓存随卷一起持久化，
 重建容器不用重新下载）。容器里没有 `conf/server.xml` 时入口脚本铺一份样例并打日志。
+
+### 用 podman（rootless）跑的注意点
+
+```sh
+podman run -d --name bas --userns=keep-id --init -p 8080:8080 \
+  -v ~/bas-work:/var/lib/bas \
+  -v ~/.m2/repository:/var/lib/bas/.m2/repository \
+  localhost/basctl:0.0.1
+```
+
+- **`--userns=keep-id`**：不加时容器里是 root，入口脚本那句 `chown -R bas:beangle` 会把宿主
+  卷的文件属主改成容器的 subuid，宿主机上就不好管了；加了以后容器进程就是宿主 uid，`chown`
+  失败但 `as_bas` 的降权分支自动跳过，功能不受影响（`podman exec … su-exec` 在 keep-id 下会
+  报 `setgroups: Operation not permitted`，直接 `podman exec bas-test basctl status` 即可）。
+- **挂宿主 `~/.m2/repository`**：引擎构件（`beangle-bas-engine`、`beangle-bas-juli`）目前是
+  本地 install 的，公共仓库上没有，不挂的话 `jstart fetch` 会以
+  `Cannot fetch org.beangle.bas:…` 让 `basctl start` 失败。挂上后这个仓库同时当缓存用。
+- 端口右侧是容器内的 setline 端口，与 `BAS_SETLINE_LISTEN`（缺省 `*:8080`）一致；rootless
+  podman 只允许映射 >=1024 的宿主端口。
 
 ## 入口脚本做什么
 
@@ -115,11 +144,17 @@ docker logs -f bas
 
 - **容器内不做 supervisor**：某个实例崩了不会自动重启，也没有 `HEALTHCHECK`（podman 以 OCI
   格式提交时会忽略它）。要看「容器到底活着吗」用编排层的探针，要自动重启用编排层的重启策略；
-- **不做 host 分组**（roadmap R5）：一个容器一份 `BAS_HOME`、一个出口；
+- **不做 host 分组**：一个容器一份 `BAS_HOME`、一个出口（多份 `BAS_HOME` 共享一个 setline 的
+  做法见 [setline-config.md](setline-config.md)）；
 - **不把 `server.xml` 塞进环境变量**：配置仍然只有 `conf/server.xml` 一个来源，容器只负责挂卷。
 
 ## 验收
 
-R4 的四条验收（单端口可达、增删 server 不改端口映射、SIGTERM 干净退出、运行期路由能写回卷里的
-`conf/setline.json`）记在 [setline-roadmap.md](setline-roadmap.md) 的 R4 一节，实测步骤见本文件
-「运行」。
+以下四条要在真有 webapp 的环境里跑一遍才算数（镜像构建本身只到「编译通过、`java -version`
+正常」，脚本产出的标签是 `basctl:0.0.1`），实测步骤见本文件「运行」：
+
+- [x] `docker run -p 8080:8080` 后，容器内全部 webapp 都能从宿主机 8080 访问
+      （2026-10-07 用 bas-0.14.0 样例在 podman 上验过：`/tools/about` 经 setline 回 200）
+- [ ] 容器内增删 server 不需要改 docker 端口映射
+- [x] SIGTERM 干净退出，无残留 java 进程（优雅 8 秒 → `--force`）
+- [x] 运行期路由能写回卷里的 `conf/setline.json`

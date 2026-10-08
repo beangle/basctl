@@ -59,7 +59,7 @@
 | `url` | 否 | 对外暴露的 URL 前缀，可重复；对应 `<webapp><url path="..."/></webapp>`，缺省回退 `context` |
 
 `engine` 由 `<engine type>` 与 `<engine version>` 拼成，形如 `tomcat-server-11.0.26`、
-`tomcat-11.0.25`、`undertow-2.0.3.Final`、`jetty-12.0.30`——与 `basctl run --engine=<type>-<version>`
+`tomcat-11.0.25`、`undertow-2.0.3.Final`、`jetty-12.1.14`——与 `basctl run --engine=<type>-<version>`
 同形（`EngineRef` 的解析规则）。
 
 ### 示例

@@ -264,7 +264,7 @@ import std.format : format;
   assert(engine.jars.length == 0);
 
   // 非 Tomcat 引擎不补 Tomcat 专有的 listener / Loader / JarScanner
-  auto jetty = new Engine("j", containerTypeJetty, "12.0.30");
+  auto jetty = new Engine("j", containerTypeJetty, "12.1.14");
   applyEngineDefault(cfg, jetty);
   assert(jetty.listeners.length == 0);
   assert(jetty.context is null);
@@ -278,7 +278,7 @@ import std.format : format;
         <engine name="ts" type="tomcat-server" version="11.0.26"/>
         <engine name="te" type="tomcat" version="11.0.26"/>
         <engine name="u" type="undertow" version="2.0.3.Final"/>
-        <engine name="j" type="jetty" version="12.0.30"/>
+        <engine name="j" type="jetty" version="12.1.14"/>
       </engines>
     </bas>`);
   assert(containerTypeOf(cfg.engines[0]) == containerTypeTomcatServer);
@@ -312,6 +312,12 @@ import std.format : format;
   auto jetty = engineDefaultDeps(containerTypeJetty);
   assert(jetty.canFind("org.eclipse.jetty.ee10:jetty-ee10-webapp:{version}"));
   assert(jetty.canFind("org.eclipse.jetty.ee10:jetty-ee10-annotations:{version}"));
+  // Jetty 12.1 起核心 ee 类拆到新 groupId；旧坐标只剩聚合 pom（无 jar），不能再列
+  assert(jetty.canFind("org.eclipse.jetty.ee:jetty-ee-webapp:{version}"));
+  assert(jetty.canFind("org.eclipse.jetty:jetty-annotations:{version}"));
+  assert(!jetty.canFind("org.eclipse.jetty:jetty-ee:{version}"));
+  // 12.1 用 Servlet 6.1（与 undertow 分节同版本）
+  assert(jetty.canFind("jakarta.servlet:jakarta.servlet-api:6.1.0"));
   // Jetty 的 AbstractLifeCycle 直接依赖 slf4j-api（无 JUL 回退）；只声明 API，provider 由应用自带
   assert(jetty.canFind("org.slf4j:slf4j-api:2.0.17"));
   assert(!jetty.canFind("logback"));
@@ -354,12 +360,12 @@ import std.format : format;
   // jetty 的 websocket 补充集同样可关
   auto jettyCfg = parseServerXml(`<bas version="0.14.0">
       <engines>
-        <engine name="j" type="jetty" version="12.0.30" websocket-support="false"/>
+        <engine name="j" type="jetty" version="12.1.14" websocket-support="false"/>
       </engines>
     </bas>`);
   auto jetty = resolveEngineDeps(jettyCfg, jettyCfg.engines[0], containerTypeJetty);
   assert(!jetty.canFind("jetty-ee10-websocket"));
-  assert(jetty.canFind("org.eclipse.jetty.ee10:jetty-ee10-webapp:12.0.30"));
+  assert(jetty.canFind("org.eclipse.jetty.ee10:jetty-ee10-webapp:12.1.14"));
 }
 
 @("resolveEngineDeps expands placeholders and merges <jar> by GA") unittest {

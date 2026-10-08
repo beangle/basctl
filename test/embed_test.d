@@ -35,9 +35,9 @@ import std.algorithm : canFind;
   assert(undertow.typ == "undertow");
   assert(undertow.version_ == "2.0.3.Final");
 
-  auto jetty = EngineRef.parse("jetty-12.0.30");
+  auto jetty = EngineRef.parse("jetty-12.1.14");
   assert(jetty.typ == "jetty");
-  assert(jetty.version_ == "12.0.30");
+  assert(jetty.version_ == "12.1.14");
 
   // 版本里可以带 `-`
   assert(EngineRef.parse("tomcat-11.0.0-M1").version_ == "11.0.0-M1");
@@ -111,11 +111,11 @@ import std.algorithm : canFind;
   assert(undertow.deps.canFind("org.beangle.bas:beangle-bas-engine:1.2.3"));
   assert(!undertow.deps.canFind("beangle-bas-juli"));
 
-  opts = parseRunArgs(["--engine=jetty-12.0.30", "app.war"]);
+  opts = parseRunArgs(["--engine=jetty-12.1.14", "app.war"]);
   auto jetty = planRun(opts);
   assert(jetty.containerType == "jetty");
-  assert(jetty.deps.canFind("org.eclipse.jetty.ee10:jetty-ee10-webapp:12.0.30"));
-  assert(jetty.deps.canFind("org.eclipse.jetty.ee10:jetty-ee10-annotations:12.0.30"));
+  assert(jetty.deps.canFind("org.eclipse.jetty.ee10:jetty-ee10-webapp:12.1.14"));
+  assert(jetty.deps.canFind("org.eclipse.jetty.ee10:jetty-ee10-annotations:12.1.14"));
   assert(jetty.deps.canFind("org.slf4j:slf4j-api:2.0.17"));
   assert(!jetty.deps.canFind("logback"));
   assert(jetty.deps.canFind("org.beangle.bas:beangle-bas-engine:" ~ defaultBasVersion));
