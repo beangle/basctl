@@ -49,7 +49,7 @@ doctor: all required commands are available.
 
 `start` 已经在缺件时给出明确报错（`basctl` 调 jstart 失败、jstart 找不到 java），再加一道
 「先跑 doctor、缺件就拒绝启动」的开关只增加一个旋钮而没有新信息。`doctor` 保持成独立命令，
-由人在初始化或排障时跑（见 [../README.md](../README.md) 的「组件目录初始化」）。
+由人在初始化或排障时跑（见 [usage.md](usage.md) 的「组件目录初始化」）。
 
 ## 打包
 

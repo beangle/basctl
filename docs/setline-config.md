@@ -200,5 +200,6 @@ setline 的管理接口分两类，边界不同（详见 setline 的 `doc/runtim
   列读路由表，读同样**对本机免凭据**——读写同一条门，所以 `server.xml` 里没有、也不需要 token。
   只有非本机来源的读才看 `adminToken`（那是留给同网段服务进程的路径，见 R6）。
 - 读路径保留 token，是因为路由表将来要开放给同网段的服务进程读取——例如把拓扑渲染成
-  haproxy / nginx 配置的同步程序（roadmap 的 R6）；本机来源不在这条规则里，读写一样免凭据。
+  haproxy / nginx 配置的同步程序（见 [features.md](features.md) 的边界与未定项）；本机来源不在这条
+  规则里，读写一样免凭据。
   setline 的 `listen` 绑 `*` 时必须设置 `adminToken`，否则非本机的读也放行；只绑回环时留空即可。

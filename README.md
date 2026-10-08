@@ -3,19 +3,23 @@
 `basctl` 是 Beangle Bas Server 的控制面命令行工具，用 D 语言实现。
 它把 `conf/server.xml` 解析成可运行的 Tomcat 实例：解析 webapp（`gav://` /
 `http(s)://` / 本地路径）、生成实例目录与 jstart launch spec，并渲染容器所需的
-`server.xml`、`web.xml`；也可按 farm 直接拉起实例，同时提供实例状态与防火墙等工具。
+`server.xml`、`web.xml`；也可按 farm 直接拉起实例，同时提供实例状态、本地代理对账与防火墙等工具。
 
-`engine` 模块的**容器入口**（creator，配合 jstart 的 war 运行协议）也由 basctl 提供，
-见 [docs/engine-creator.md](docs/engine-creator.md)；`start` 的流程与生成的 spec 见
-[docs/start.md](docs/start.md)；`setline` 把拓扑渲染成本地 setline 代理配置，并把运行中实例的
-路由同步给它（动态端口、自动注册、`--watch` 对账），见 [docs/setline.md](docs/setline.md)；
-围绕 setline 的集成设计与后续设想（容器化单出口、host 分组等）见
-[docs/setline-roadmap.md](docs/setline-roadmap.md)，其中的实例运行信息格式见
-[docs/server-info.md](docs/server-info.md)、入口配置与启用规则见
-[docs/setline-config.md](docs/setline-config.md)、把 basctl + jstart + setline + JRE 打成
-「一个端口对外」的镜像见 [docs/container.md](docs/container.md)；basctl 自身的功能规划见
-[docs/roadmap.md](docs/roadmap.md)，运行所需外部命令的检查（`basctl doctor`）见
-[docs/doctor.md](docs/doctor.md)。
+## 文档
+
+| 文档 | 内容 |
+|---|---|
+| [docs/features.md](docs/features.md) | 功能清单、核心模型（意图 / 现状 / 运行态与对账）、目录约定、`make` 的两种模式、与 jstart 的关系、边界与非目标 |
+| [docs/usage.md](docs/usage.md) | 安装、五分钟上手、命令一览、常见场景（`run` / setline / 容器 / pull / firewall）、环境变量、排错 |
+| [docs/start.md](docs/start.md) | `start` 的流程与生成的 jstart spec |
+| [docs/run.md](docs/run.md) | `run`：嵌入式运行单个 webapp |
+| [docs/server-info.md](docs/server-info.md) | 实例运行信息 `server.info` 的格式与生命周期、动态端口分配 |
+| [docs/setline.md](docs/setline.md) | 本地代理：路由渲染、`--sync` / `--watch` 对账、`status` 的 route 列 |
+| [docs/setline-config.md](docs/setline-config.md) | `<setline>` 的配置与启用规则、多份 `BAS_HOME` 共享、安全边界 |
+| [docs/engine-creator.md](docs/engine-creator.md) | 容器入口（creator）：jstart `[engine] init` 协议 |
+| [docs/doctor.md](docs/doctor.md) | 环境自检：`java` / `jstart` / setline 入口 |
+| [docs/container.md](docs/container.md) | 容器化「一机器一出口」：镜像内容、构建、运行、信号 |
+| [scripts/README.md](scripts/README.md) | deb / rpm 打包 |
 
 ## 版本语义
 
@@ -59,103 +63,6 @@ dub test --compiler=ldc2
 打包成 deb / rpm（仅安装 `/usr/bin/basctl`）见 [scripts/README.md](scripts/README.md)：
 `scripts/build_deb.sh`（Debian 系）与 `scripts/build_rpm.sh`（Fedora/RHEL 系），版本取自
 `src/bas/main.d` 的 `basctlVersion`，与 `basctl version` 的输出一致。
-
-## 命令
-
-| 命令 | 说明 |
-|---|---|
-| `basctl version` | 打印 `basctl <版本>`（单行纯文本，便于脚本取值） |
-| `basctl banner [server.xml]` | 操作者横幅：logo + bas 引擎版本（取自 `<bas version>`）+ basctl 版本 + 本机地址；`bas.sh version` 调它。图形为纯 ASCII，只在交互终端出现，重定向到日志/管道时只剩版本行与本机地址 |
-| `basctl status` | 列出 `$BAS_HOME/servers` 下运行中的实例：读 `server.info` 展示 pid、端口、引擎、启动时间与各 webapp 的对外 url；pid 已不在的显示为 `stale`。配了 `<setline>` 时另起一节报名命空间、入口地址与通不通（`up` / `down`），并读一次 `GET /__setline/routes`（setline 对本机免凭据）给出 route 列（缺 / 端口对不上 / 多 / `routes in sync`） |
-| `basctl init [--force] [--dry-run] [workdir]` | 初始化组件目录：把控制脚本铺到 `<workdir>/bin`，并建 `conf/` |
-| `basctl make [server.xml] <farm\|server\|all>` | 只准备不启动：生成 jstart spec 并 `jstart resolve` 预取依赖 |
-| `basctl resolve <server.xml> [pattern...]` | 只解析 webapp，不生成实例 |
-| `basctl start [server.xml] <farm\|server\|all> [--port-range=<from>-<to>] [--no-setline]` | 为实例定端口（`<server http="0">` 时在区间内分配，缺省 `20000-29999`）、写 `server.info`、生成 jstart spec、resolve 并后台启动；配了 `<setline>` 时启动后对账路由（`--no-setline` 跳过） |
-| `basctl stop [server.xml] <farm\|server\|all> [--force] [--timeout=<sec>] [--no-setline]` | 按 `server.info` 里的 pid 停止 `start` 启动的实例：SIGTERM 后等 `--timeout`（缺省 15 秒），`--force` 直接 SIGKILL；配了 `<setline>` 时停完对账路由（`--no-setline` 跳过） |
-| `basctl run --engine=<type>-<version> <app>` | 嵌入式运行单个 webapp：`--engine=tomcat-11.0.25` 同时给出容器类型与版本，生成单应用 spec 后前台 `jstart run` |
-| `basctl setline [server.xml] [--output=<file>] [--endpoint=<addr>]` | 把 `server.xml` 的静态拓扑渲染成 setline 配置（缺省写 `conf/setline.json` 并提示位置）：一个入口地址按路径前缀转发到各 server 的 http 端口，同一 webapp 的多实例自动成为端口列表；路由写在 `<setline hostname>` 命名空间下，入口地址按 `--endpoint` > `<setline endpoint>` 取，见 [docs/setline.md](docs/setline.md) |
-| `basctl setline --sync` | 按运行中的实例（`server.info`，含动态端口）推整组路由给已在跑的 setline（入口地址取 `<setline endpoint>`，无缺省；入口没人应答就报错，basctl 不拉起它）；与 `basctl start` / `stop` 之后的自动对账同一条路 |
-| `basctl setline --watch [--interval=<sec>]` | 常驻轮询对账（缺省每 5 秒；路由无变化就不推），直到 Ctrl-C；适合交给 systemd |
-| `basctl make <type> [options]` | 容器入口（creator）：把 jstart 的 `[engine] init` 协议翻译成容器启动命令 |
-| `basctl firewall [workdir]` | 按配置交互式配置 firewalld 端口 |
-| `basctl pull [--remote=<url>] [workdir]` | 从控制端拉取 `conf/server.xml`（请求带 `ip:` 头，旧配置备份为 `server_old.xml`） |
-| `basctl doctor [server.xml]` | 检查 `java` / `jstart`（以及启用 setline 时入口通不通）是否就位，缺件时退出码非 0，见 [docs/doctor.md](docs/doctor.md) |
-
-## 组件目录初始化
-
-`basctl init [workdir]` 把控制脚本（`env.sh`、`bas.sh`、`start.sh`、`stop.sh`、
-`restart.sh`）铺到 `<workdir>/bin` 并建好 `conf/`，用于从零搭建一个 bas 组件目录。
-脚本内嵌在 basctl 里，随 basctl 版本发布，不再依赖单独的发行包：
-
-```sh
-basctl init /opt/bas          # 写入 /opt/bas/bin/*.sh（已存在的脚本保留）
-basctl init --force /opt/bas  # 覆盖为当前 basctl 内置的脚本
-basctl init --dry-run /opt/bas
-```
-
-`bin/setenv.sh` 与 `conf/server.xml` 是用户配置（分别由用户与 `basctl pull` 维护），
-`init` 不生成也不改动它们。这是脚本唯一的安装/升级途径：升级 `basctl` 后重跑
-`basctl init --force`，不再有单独的发行包 zip（原 `bas.sh update` 已移除）。
-
-## 目录约定
-
-`BAS_HOME` 取 `conf/server.xml` 的上两级目录：
-
-```
-$BAS_HOME/
-  conf/server.xml
-  conf/setline.json             # setline 自己的配置（listen / 运行期路由；归拉起 setline 的那个进程所有）
-  engines/<name>-<version>/     # 解压并按需裁剪后的 Tomcat
-  servers/<farm>.<server>/      # 单个实例的 catalina.base（server.info 记运行信息：pid / 端口 / webapp / url）
-  webapps/                      # http 直链与 SNAPSHOT 覆盖的落地目录
-  run/                          # 机器级守护进程的运行态（如将来对账进程的 pid）
-  logs/
-```
-
-实例的端口在启动前就定下来：`<server http>` 有值就用它，为 `0`（或缺省）时由 `basctl start` 在
-`--port-range`（缺省 `20000-29999`）内分配一个空闲端口，两种情况下都记进 `servers/<name>/server.info`
-——`start` / `stop` / `status` 与 setline 的路由对账都读这一份「现状」，不再用 `ss` 反查端口。
-格式与生命周期见 [docs/server-info.md](docs/server-info.md)。
-
-## `make` 的两种模式
-
-`make` 是一种「准备」语义，按第一个参数区分两种输入：
-
-| 调用 | 驱动与输入 | 产物 | 用途 |
-|---|---|---|---|
-| `make [server.xml] <pattern>` | `conf/server.xml`，批量选 Server | **持久**布局：`engines/<name>-<ver>/` + `servers/<name>/` + 按 server 生成一份 launch spec | 面向运维与启动前预取：只写 spec 并 `jstart resolve`，不起进程；随后 `basctl start` |
-| `make <type> [options]` | jstart 的 `[engine] init` 协议，单次运行计划 | jstart base 下的 `engines/`、各 webapp 的 docBase，以及 `--entry-out` 里的**容器启动命令** | `start` / jstart 运行时的回调，用户一般不直接调用 |
-
-`<type>` 取 `tomcat-server`、`tomcat`、`undertow` 或 `jetty`，分别对应全量 Tomcat 发行包与
-三种嵌入式容器。
-
-## 与 jstart 的关系
-
-构件的解析与下载委托给本机 `jstart` 命令（`fetch` / `resolve`）；`basctl` 只负责配置模型、
-目录编排与配置渲染。`jstart` 不在 `PATH` 时可用环境变量 `beangle_jstart` 指定其路径。
-
-运行 war 时，jstart 按 `[engine] init` 协议调用 basctl 的 `make <type>` 并把 war 交给它：它准备
-webapp、写出最终启动命令，jstart 再 exec。`basctl make tomcat` / `undertow` / `jetty` /
-`tomcat-server` 承接原 `engine` 模块的 creator 逻辑（如何调用、spec 示例、必要参数、
-docBase 布局与 classpath 拼装见
-[docs/engine-creator.md](docs/engine-creator.md)）：
-
-```sh
-# [engine] init 直接写命令行（jstart 支持“程序 + 参数”，无需 wrapper）
-init = basctl make tomcat
-```
-
-`basctl start` 会根据 `<engine type>` 自动把 `[engine] init` 写成对应 creator 的
-`make <type>` 命令行（`tomcat-server` 多应用、`tomcat` / `undertow` / `jetty` 单应用），
-再 `jstart resolve` 校验依赖、`jstart run` 后台启动；详见 [docs/start.md](docs/start.md)。
-
-`basctl run` 面向单应用快速运行：一个 `--engine=<type>-<version>`（如
-`tomcat-11.0.25`）同时给出容器类型与版本，bas 引擎版本取 basctl 内置默认
-（`--bas=` 可覆盖），依赖集与 `start` 共用 `engines.ini`；详见 [docs/run.md](docs/run.md)。
-
-`server.xml` 中 `<repository>` / `<snapshot-repo>` 的 `local` / `remote` / `token` 原样透传给
-`jstart`；`remote` 里的 `${bas_remote_url}`、`token` 里的 `${bas_remote_token}` 在解析阶段
-展开为同名环境变量。
 
 ## 许可证
 

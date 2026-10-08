@@ -228,5 +228,7 @@ route 列读的是 setline 的**读**接口（`GET /__setline/routes`）——�
 
 ## 后续演进
 
-basctl 容器化单出口、host 分组等设想都在
-[setline-roadmap.md](setline-roadmap.md)，本文件只描述已经存在的行为。
+生产侧（haproxy / nginx 那台机器上）要不要一个拉拓扑、渲染反代配置的 agent，以及它的通道
+（registry、拉取频率与鉴权、`reload` 还是 `restart`）尚未定；产出侧已定：交付物就是
+`server.xml`，消费方复用 bas 的配置模型，需要运行态则读本文件的 `GET /__setline/routes`，
+basctl 不导出平行的中间格式。边界与未定项见 [features.md](features.md)。

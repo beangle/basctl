@@ -6,7 +6,7 @@
 
 它**不是给用户直接运行的命令**，而是 `basctl start` 生成的 spec 里 `[engine] init` 的
 取值；与 `make [server.xml] <pattern>`（只生成持久部署布局与 spec，不启动）的对照见
-[README](README.md)。
+[features.md](features.md) 的「`make` 的两种模式」。
 
 它由原 `engine` 模块（Java）迁移而来，用 D 重写并复用 basctl 的
 解压/渲染/文件能力，因此运行入口不再需要启动一个 JVM：
