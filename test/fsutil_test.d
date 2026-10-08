@@ -17,7 +17,7 @@
 /** Unit tests for bas.fsutil. */
 module test.fsutil_test;
 
-import bas.fsutil : isLink, linkIfMissing, pathExists, removeTree;
+import bas.fsutil : isLink, linkIfMissing, mkdirPrivate, pathExists, removeTree;
 
 import std.file : exists, mkdir, mkdirRecurse, readText, tempDir, write;
 import std.path : buildPath;
@@ -47,4 +47,26 @@ import std.uuid : randomUUID;
   linkIfMissing(buildPath(root, "none"), buildPath(root, "dangling"));
   assert(isLink(buildPath(root, "dangling")));
   assert(pathExists(buildPath(root, "dangling")));
+}
+
+version (Posix) {
+  @("mkdirPrivate tightens a fresh directory to 0700 despite a permissive umask") unittest {
+    import core.sys.posix.sys.stat : chmod, lstat, stat_t, umask;
+    import std.conv : octal;
+    import std.string : toStringz;
+
+    auto root = buildPath(tempDir, "basctl-fs3-" ~ randomUUID().toString());
+    auto dir = buildPath(root, "instance");
+    auto saved = umask(0b010); // 002: 组内可写，正是触发 jstart 收紧告警的那一种
+    scope (exit) {
+      umask(saved);
+      chmod(root.toStringz, octal!700);
+      removeTree(root);
+    }
+
+    mkdirPrivate(dir);
+    stat_t st;
+    assert(lstat(dir.toStringz, &st) == 0);
+    assert((st.st_mode & octal!777) == octal!700);
+  }
 }

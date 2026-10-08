@@ -20,6 +20,9 @@
 
 路径：`$BAS_HOME/servers/<farm.server>/server.info`（与 `error`、`logs` 同目录）。
 
+实例目录由 basctl **以 0700 创建**（父目录 `servers/` 仍是普通 umask 语义）：运行信息里有 pid 与
+端口，不宜让同组用户写。jstart 随后接管同一个目录，权限已经收好，不会再报"group/world accessible"。
+
 | 时机 | 动作 |
 |---|---|
 | `basctl start` 分配端口后 | 写入第一段：`[server]` 的 `id` / `engine` / `http.port` / `started` + 各 `[webapp]`（此时**没有 `pid`**，同时兼作端口预留） |

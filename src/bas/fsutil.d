@@ -102,3 +102,22 @@ void setExecutable(string path) {
     chmod(path.toStringz, 0b111_101_101); // 0755: rwxr-xr-x
   }
 }
+
+/**
+ * Creates `path` (and its parents) and forces 0700 on `path` itself（POSIX）.
+ *
+ * `mkdirRecurse` 按调用者 umask 建目录（`umask 002` 会得到 0775），随后 jstart 接管
+ * `servers/<name>` 时会先看到"已存在且组内可写"，于是每次都打一行收紧告警——那是 basctl
+ * 自己留下的痕迹，不是用户的配置问题。实例目录从创建起就是 0700，这行噪音和 jstart 的
+ * 事后 chmod 都省了。父目录（如 `servers/`）保持 umask 语义，免得改变运维对 `BAS_HOME`
+ * 的既有预期。
+ */
+void mkdirPrivate(string path) {
+  mkdirRecurse(path);
+  version (Posix) {
+    import core.sys.posix.sys.stat : chmod;
+    import std.conv : octal;
+
+    chmod(path.toStringz, octal!700);
+  }
+}

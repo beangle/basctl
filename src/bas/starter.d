@@ -47,7 +47,7 @@ module bas.starter;
 
 import bas.artifact : isMavenCoord, parseArtifact;
 import bas.config;
-import bas.fsutil : linkIfMissing;
+import bas.fsutil : linkIfMissing, mkdirPrivate;
 import bas.jstart : jstartCommand;
 import bas.net : localAddresses;
 import bas.portalloc : PortRange, defaultPortRange, defaultPortRangeText, parsePortRange, reservePort;
@@ -573,7 +573,7 @@ private Nullable!string prepareServer(string basHome, Container container, Serve
   auto serverDir = buildPath(basHome, "servers", server.qualifiedName);
   auto errorFile = buildPath(serverDir, "error");
   auto missings = resolveWebapps(basHome, container.repository, container.snapshotRepo, webapps);
-  mkdirRecurse(serverDir);
+  mkdirPrivate(serverDir);
   if (missings.length) {
     write(errorFile, missings.join("\n"));
     stderr.writeln("Cannot resolve " ~ server.qualifiedName ~ ", see details: " ~ errorFile);

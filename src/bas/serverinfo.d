@@ -30,13 +30,14 @@
  */
 module bas.serverinfo;
 
+import bas.fsutil : mkdirPrivate;
 import bas.serverstatus : processRunning;
 
 import std.algorithm : canFind, sort;
 import std.array : appender;
 import std.conv : to;
 import std.datetime : SysTime;
-import std.file : SpanMode, dirEntries, exists, isDir, mkdirRecurse, readText, remove, rename, write;
+import std.file : SpanMode, dirEntries, exists, isDir, readText, remove, rename, write;
 import std.format : format;
 import std.path : baseName, buildPath, dirName;
 import std.string : indexOf, replace, split, startsWith, strip, toLower;
@@ -191,7 +192,7 @@ Nullable!ServerInfo readInstanceInfo(string basHome, string instance) {
  * 目标目录不存在时自动创建（实例目录可能还没建）。
  */
 void writeServerInfo(string path, const ServerInfo info) {
-  mkdirRecurse(dirName(path));
+  mkdirPrivate(dirName(path));
   auto tmp = path ~ ".tmp";
   write(tmp, renderServerInfo(info));
   rename(tmp, path);
