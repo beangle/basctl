@@ -22,10 +22,10 @@
  *  - `java`：`make`（creator 与只准备）写出的启动命令、以及 jstart 最终 exec 的都是 java，
  *    按 `JAVA_HOME/bin/java` > `PATH` 解析（与 creator 里 `javaExecutable` 同一顺序）；
  *  - `jstart`：`start` / `make` / `resolve` 用它解析下载构件，命令名可用 `beangle_jstart` 覆盖；
- *  - `setline`：只有 `server.xml` 里声明了 `<setline>` 才检查，而且检的是**入口可达**而不是命令
+ *  - `setline`：只有 `server.xml` 里声明了 `<setline>` 才检查，而且检的是**管理口可达**而不是命令
  *    存在——setline 是机器级服务（systemd / 容器入口 / 手工拉起），basctl 只往它的写接口推
- *    路由，不调用它的可执行文件。入口地址取自 `<setline endpoint>`（缺省 `127.0.0.1:8080`），
- *    与 `--sync` / `start` / `status` 走同一个解析入口。
+ *    路由，不调用它的可执行文件。管理口端口取自 `<setline port>`（拨 `127.0.0.1:<port>`），
+ *    与 `setline` / `start` / `status` 走同一个解析入口。
  *
  * 只检查“就位没就位”，**不校验版本**：java / jstart / setline / 容器的版本策略分别属于各自的
  * 发布节奏，basctl 掺和只会制造漂移。缺件时打印安装提示，并让退出码非 0。
@@ -37,7 +37,7 @@ module bas.doctor;
 
 import bas.config : parseServerXmlFile;
 import bas.jstart : jstartEnvVar;
-import bas.endpoint : SetlineEndpointChoice, portFree, resolveSetlineEndpoint, sourceName;
+import bas.endpoint : adminAddress, portFree, resolveSetlinePort;
 
 import std.array : join, split;
 import std.conv : to;
@@ -118,10 +118,10 @@ ToolCheck[] checkTools(string confFile, in ToolEnv env) {
   return checks;
 }
 
-/** `<setline>` 的启用状态、配置里写的入口地址（可能为空）与展示用说明。 */
+/** `<setline>` 的启用状态、配置里写的管理口端口（可能为空）与展示用说明。 */
 private struct SetlineConfigState {
   bool enabled;
-  string endpoint;
+  string port;
   string note;
 }
 
@@ -135,8 +135,8 @@ private SetlineConfigState setlineConfigState(string confFile) {
   try {
     auto conf = parseServerXmlFile(confFile);
     if (conf.setlineHostname.isNull)
-      return SetlineConfigState(false, "", "no <setline> in " ~ confFile);
-    return SetlineConfigState(true, conf.setlineEndpointText(), "<setline hostname=\""
+    return SetlineConfigState(false, "", "no <setline> in " ~ confFile);
+    return SetlineConfigState(true, conf.setlinePortText(), "<setline hostname=\""
         ~ strip(conf.setlineHostname.get) ~ "\">");
   } catch (Exception e) {
     return SetlineConfigState(false, "", "cannot parse " ~ confFile);
@@ -175,30 +175,29 @@ private ToolCheck checkJstart(in ToolEnv env) {
 }
 
 /**
- * setline：只有 `<setline>` 配置时才检查——检的是**入口可达**（有人在监听），而不是命令存在：
- * setline 归 systemd / 容器入口 / 手工起，basctl 只往它的写接口推路由。
+ * setline：只有 `<setline>` 配置时才检查——检的是**管理口可达**（有人在监听），而不是命令存在：
+ * setline 归 systemd / 容器入口 / 手工起，basctl 只往它的写接口（管理口）推路由。
  *
- * 入口地址走与 `setline --sync` / `start` / `status` 同一个解析入口，`source` 报它的出处
- * （`server.xml` 或 `default`），不必再去猜环境里设了什么。
+ * 管理口地址走与 `setline` / `start` / `status` 同一个解析入口，出处只有 `server.xml` 一处，
+ * 不必再去猜环境里设了什么。
  */
 private ToolCheck checkSetline(SetlineConfigState setline) {
   if (!setline.enabled)
     return ToolCheck("setline", CheckState.skipped, "", "", "not required: " ~ setline.note);
   auto configNote = setline.note;
-  if (setline.endpoint.length)
-    configNote ~= " endpoint=" ~ setline.endpoint;
+  if (setline.port.length)
+    configNote ~= " port=" ~ setline.port;
 
-  SetlineEndpointChoice choice;
+  ushort port;
   try
-    choice = resolveSetlineEndpoint("", setline.endpoint);
+    port = resolveSetlinePort(setline.port);
   catch (Exception e)
     return unavailable("setline", e.msg ~ " (" ~ configNote ~ ")");
-  if (portFree(choice.endpoint))
-    return unavailable("setline", "nothing listens on " ~ choice.endpoint.toString()
-        ~ "; start the setline service, or point <setline endpoint=\"...\"> at it ("
+  if (portFree(port))
+    return unavailable("setline", "nothing listens on " ~ adminAddress(port)
+        ~ "; start the setline service, or point <setline port=\"...\"> at it ("
         ~ configNote ~ ")");
-  return ToolCheck("setline", CheckState.ok, choice.endpoint.toString(),
-      sourceName(choice.source), "");
+  return ToolCheck("setline", CheckState.ok, adminAddress(port), "server.xml", "");
 }
 
 /** 组装一条“找到”的结果。 */

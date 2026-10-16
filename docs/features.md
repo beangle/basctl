@@ -11,11 +11,11 @@
 | 组件目录初始化 | `basctl init` | 把 `env.sh` / `bas.sh` / `start.sh` / `stop.sh` / `restart.sh` 铺到 `<workdir>/bin` 并建 `conf/`；脚本内嵌在 basctl 里，随版本发布，是脚本唯一的安装/升级途径 | [usage.md](usage.md) |
 | 解析与预取 | `basctl make [server.xml] <pattern>`、`basctl resolve` | 解析 webapp（`gav://` / `http(s)://` / 本地路径），生成实例目录与 jstart launch spec，再 `jstart resolve` 预取依赖，不起进程 | [start.md](start.md) |
 | 起停 | `basctl start` / `basctl stop` | 定端口、写 `server.info`、后台 `jstart run`；停止时按 pid 优雅退出（`--timeout` / `--force`） | [start.md](start.md)、[server-info.md](server-info.md) |
-| 状态 | `basctl status` | 读 `servers/<name>/server.info` 列出运行中的实例；配了 `<setline>` 时另报命名空间、入口通不通与 route 列 | [server-info.md](server-info.md)、[setline.md](setline.md) |
+| 状态 | `basctl status` | 读 `servers/<name>/server.info` 列出运行中的实例；配了 `<setline>` 时另报命名空间、管理口通不通与 route 列 | [server-info.md](server-info.md)、[setline.md](setline.md) |
 | 嵌入式跑单应用 | `basctl run --engine=<type>-<version> <app>` | 一个参数给出容器类型与版本，生成单应用 spec 后前台 `jstart run`；纯前台，Ctrl-C 退出 | [run.md](run.md) |
-| 本地代理与对账 | `basctl setline`（渲染 / `--sync` / `--watch`） | 把拓扑渲染成 setline 配置；按运行中的实例把路由推给本机 setline | [setline.md](setline.md)、[setline-config.md](setline-config.md) |
+| 本地代理与对账 | `basctl setline` | 按运行中的实例把路由推给已经在跑的 setline（推一次即退出，只推，不生成 setline 的配置、不拉起它） | [setline.md](setline.md)、[setline-config.md](setline-config.md) |
 | 容器入口（creator） | `basctl make <type>` | jstart `[engine] init` 协议的回调，把容器启动命令写回 spec | [engine-creator.md](engine-creator.md) |
-| 环境自检 | `basctl doctor` | 检查 `java` / `jstart`（启用 setline 时还有入口可达性） | [doctor.md](doctor.md) |
+| 环境自检 | `basctl doctor` | 检查 `java` / `jstart`（启用 setline 时还有管理口可达性） | [doctor.md](doctor.md) |
 | 防火墙 | `basctl firewall` | 按 `server.xml` 交互式配置 firewalld 的放行端口 | [usage.md](usage.md) |
 | 拉取配置 | `basctl pull` | 从控制端拉取 `conf/server.xml`（旧配置备份为 `server_old.xml`） | [usage.md](usage.md) |
 | 横幅与版本 | `basctl banner` / `basctl version` | `bas.sh version` 调前者：ASCII logo + bas 引擎版本 + basctl 版本 + 本机地址 | [usage.md](usage.md) |
@@ -27,19 +27,20 @@
 |---|---|---|---|
 | **意图** | `conf/server.xml` | 人 / `basctl pull` | 所有命令 |
 | **现状** | `$BAS_HOME/servers/<name>/server.info` | `basctl start` / `stop`（唯一写者） | `status`、`stop`、对账 |
-| **运行态** | setline 的路由表（内存 + 它写回的 `conf/setline.json`） | setline 进程（`basctl setline` 只推） | `status` 的 route 列、对账 |
+| **运行态** | setline 的路由表（内存 + 它写回自己配置文件的 `routes`） | setline 进程（`basctl setline` 只推） | `status` 的 route 列、对账 |
 
 **对账** = 把运行态对齐到现状的过程：活着的实例有路由，死掉/消失的摘除。
 
-- **是**：一个只做路由同步的动作（`basctl setline --sync` 一次，或 `--watch` 常驻）。它读
+- **是**：一个只做路由同步的动作（`basctl setline`，推一次就结束）。它读
   `server.info` 得到「实例 → pid / 端口 / webapp / 对外路径」，通过 setline 的
-  `__setline/routes` 增删路由；**不需要重新解析 `server.xml`**——运行信息就是实例启动时那份
+  `/_setline/routes` 增删路由；**不需要重新解析 `server.xml`**——运行信息就是实例启动时那份
   配置的投影。
 - **不是**：应用进程的 supervisor。起停仍然是 `basctl start` / `stop` 的职责，对账不碰进程
   生命周期、不拉容器、不解析依赖。
 - **粒度**：一个 `BAS_HOME`（一份 `server.xml`）一个对账动作，不是每个 farm / server 一个。
-- **也可以不常驻**：`--sync` 一次性对账（`start` / `stop` 之后本来就会各跑一次），`--watch`
-  常驻交给 systemd。
+- **不常驻**：就是一次对账（`--sync` 是它的显式写法），时机是 `start` / `stop` 之后各一次，
+  加上需要时手工敲一次。没有 `--watch` 轮询进程：setline 自己常驻，"什么时候改路由"由实例的
+  启停说清；外部把实例弄没了的漂移，`status` 的 route 列会报出来。
 
 ## 目录约定
 
@@ -48,7 +49,7 @@
 ```
 $BAS_HOME/
   conf/server.xml
-  conf/setline.json             # setline 自己的配置（listen / 运行期路由；归拉起 setline 的那个进程所有）
+  conf/setline.json             # setline 自己的配置（listen / adminListen / 运行期路由；归拉起 setline 的那个进程所有）
   engines/<name>-<version>/     # 解压并按需裁剪后的 Tomcat
   servers/<farm>.<server>/      # 单个实例的 catalina.base（server.info 记运行信息：pid / 端口 / webapp / url）
   webapps/                      # http 直链与 SNAPSHOT 覆盖的落地目录
@@ -112,11 +113,14 @@ exec」——所以 `run` 是纯前台（Ctrl-C 退出），`start` 起来的是
   后端固定 `127.0.0.1:<port>`（因此不能代理别的机器上的 server），且基于 epoll，**Linux only**。
   生产入口（haproxy / nginx）是另一条路。
 - **代理是全局的**：一台机器通常只有一份 setline，它同时服务 bas 与别的系统。`basctl setline`
-  只产出 bas 那部分路由，**不要拿它整体覆盖**全局配置——当片段并入（见 [setline.md](setline.md)）。
+  只推 bas 那一格（`<setline hostname>` 命名空间），别的分组不动。
 - **不做拓扑中间格式**：需要在 haproxy / nginx 那侧渲染反代配置时，交付物就是 `server.xml`
   本身（消费方复用 bas 的配置模型，别再写一份解析器）；要运行态（动态端口、存活实例）就读对方
-  setline 的 `GET /__setline/routes`（非本机来源用 `X-Setline-Token`）。basctl **不导出**平行的
+  setline 的 `GET /_setline/routes`（跨机读要写在它的 `peerReaders` 里）。basctl **不导出**平行的
   `manifest.json` 之类文件——那是第二个事实源，必然漂移。
+- **不生成 setline 的配置**：`listen` / `adminListen` / 调参属于拥有 setline 进程的那个
+  （systemd unit / 容器入口 / 手工），basctl 只按 `<setline port>` 拨管理口；早先的
+  `basctl setline --output` 渲染模式已删（那是第二个配置源，还会和 setline 自己的相反）。
 - **容器里不做 supervisor**：实例崩了不会自动重启，也没有 `HEALTHCHECK`；要这些用编排层的探针
   与重启策略（见 [container.md](container.md)）。
 - **不做路径改写**：只按路径前缀匹配，前缀原样透传；不把「应用健康」塞进 setline（它只有 TCP
@@ -126,7 +130,8 @@ exec」——所以 `run` 是纯前台（Ctrl-C 退出），`start` 起来的是
 
 ## 尚未定的事
 
-- **对账进程（`--watch`）的运行身份**：一台机器上是每份 `BAS_HOME` 一个，还是一个管多份；
-  以什么账号运行（要能对实例进程发信号）。
+- **"漂移自动收敛"要不要做**：现在只靠 `start` / `stop` 加手工一次对账，外部把实例弄没了的
+  漂移要人看见 route 列才会去修。要做成常驻对账进程（谁跑、以什么账号跑、一台机器一个还是
+  每份 `BAS_HOME` 一个）之前，先看实际有多少这种漂移——`--watch` 已经因为"时机已经说清"删掉了。
 - **生产侧 agent 通道的形态**：registry 存什么、agent 多久拉一次、拉取的鉴权、渲染完是
   `reload` 还是 `restart`。产出侧已定：消费 `server.xml` / setline 读接口，不新增中间格式。

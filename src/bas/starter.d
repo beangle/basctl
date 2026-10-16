@@ -56,7 +56,7 @@ import bas.serverinfo : ServerInfo, WebappInfo, instancePid, liveInstancePid, li
   localIsoTimestamp, readInstanceInfo, removeInstanceInfo, writeInstanceInfo;
 import bas.serverstatus : pidLooksLikeInstance, processRunning, rollLog, signalProcess;
 import bas.setline : SetlineConflict, conflictLines, runningPlan, setlinePlan;
-import bas.endpoint : SetlineEndpointChoice, resolveSetlineEndpoint;
+import bas.endpoint : resolveSetlinePort;
 import bas.setlineproc : syncRoutesToSetline;
 import bas.spec : SubappSpec, engineInitCommand, renderLaunchSpec, shellQuote;
 
@@ -103,7 +103,7 @@ private void printRouteConflicts(const(SetlineConflict)[] conflicts) {
  * 启停之后对账路由：把「现状」（`servers/<name>/server.info`）推给 setline。
  *
  * 路由跟着实例走，不跟着 `server.xml` 走——配置改了但实例没重启时，路由不该变。失败**只警告**，
- * 不改启停的退出码：setline 挂了不该挡住应用启停，下一个 `--sync` / `--watch` 周期会补上。
+ * 不改启停的退出码：setline 挂了不该挡住应用启停，下一次启停（或手工 `basctl setline`）会补上。
  */
 private void reconcileRoutes(const Container container, string basHome, bool noSetline) {
   if (noSetline || !setlineEnabled(container))
@@ -114,15 +114,15 @@ private void reconcileRoutes(const Container container, string basHome, bool noS
     stderr.writeln("Routes not updated; fix the conflict and run `basctl setline --sync`.");
     return;
   }
-  SetlineEndpointChoice choice;
+  ushort port;
   try
-    choice = resolveSetlineEndpoint("", container.setlineEndpointText());
+    port = resolveSetlinePort(container.setlinePortText());
   catch (Exception e) {
     stderr.writeln(e.msg);
     return;
   }
   auto hostname = strip(container.setlineHostname.get);
-  if (syncRoutesToSetline(plan.routes, choice.endpoint, hostname, true) != 0)
+  if (syncRoutesToSetline(plan.routes, port, hostname, true) != 0)
     stderr.writeln("Routes not updated (setline unavailable); the instances themselves are fine.");
 }
 

@@ -14,10 +14,10 @@
 | [docs/start.md](docs/start.md) | `start` 的流程与生成的 jstart spec |
 | [docs/run.md](docs/run.md) | `run`：嵌入式运行单个 webapp |
 | [docs/server-info.md](docs/server-info.md) | 实例运行信息 `server.info` 的格式与生命周期、动态端口分配 |
-| [docs/setline.md](docs/setline.md) | 本地代理：路由渲染、`--sync` / `--watch` 对账、`status` 的 route 列 |
+| [docs/setline.md](docs/setline.md) | 本地代理：把运行中实例的路由推给 setline（推一次即退出）、`status` 的 route 列 |
 | [docs/setline-config.md](docs/setline-config.md) | `<setline>` 的配置与启用规则、多份 `BAS_HOME` 共享、安全边界 |
 | [docs/engine-creator.md](docs/engine-creator.md) | 容器入口（creator）：jstart `[engine] init` 协议 |
-| [docs/doctor.md](docs/doctor.md) | 环境自检：`java` / `jstart` / setline 入口 |
+| [docs/doctor.md](docs/doctor.md) | 环境自检：`java` / `jstart` / setline 管理口 |
 | [docs/container.md](docs/container.md) | 容器化「一机器一出口」：镜像内容、构建、运行、信号 |
 | [scripts/README.md](scripts/README.md) | deb / rpm 打包 |
 

@@ -25,8 +25,8 @@ import std.algorithm : canFind;
 import std.conv : to;
 import std.file : readText;
 
-@("setlineRoutes maps every webapp to its server's http port") unittest {
-  auto routes = setlineRoutes(parseServerXml(readText("server.xml")));
+@("setlinePlan maps every webapp to its server's http port") unittest {
+  auto routes = setlinePlan(parseServerXml(readText("server.xml"))).routes;
   assert(routes.length == 4);
   assert(routes[0].path == "/api/platform" && routes[0].ports == [8081]);
   assert(routes[1].path == "/api/tools" && routes[1].ports == [8088]);
@@ -34,7 +34,7 @@ import std.file : readText;
   assert(routes[3].path == "/portal" && routes[3].ports == [8081]);
 }
 
-@("setlineRoutes merges one path across servers and skips undeployed webapps") unittest {
+@("setlinePlan merges one path across servers and skips undeployed webapps") unittest {
   auto conf = parseServerXml(`
 <bas version="0.14.0">
   <engines>
@@ -54,7 +54,7 @@ import std.file : readText;
     <webapp uri="gav://a:f:1" path="/nowhere"/>
   </webapps>
 </bas>`);
-  auto routes = setlineRoutes(conf);
+  auto routes = setlinePlan(conf).routes;
   // "/api" 与 "/api/" 归一到同一路径；"/" 兼收显式 path="/" 与省略 path 的两个 webapp；
   // 未声明 run-at 的 webapp 不产生路由。端口升序去重。
   assert(routes.length == 2);
@@ -150,7 +150,7 @@ import std.file : readText;
   assert(plan.routes.length == 1 && plan.routes[0].ports == [9001]);
 }
 
-@("setlineRoutes drops webapps whose server has no http port") unittest {
+@("setlinePlan drops webapps whose server has no http port") unittest {
   auto conf = parseServerXml(`
 <bas version="0.14.0">
   <engines>
@@ -165,21 +165,7 @@ import std.file : readText;
     <webapp uri="gav://a:b:1" run-at="app" path="/api"/>
   </webapps>
 </bas>`);
-  assert(setlineRoutes(conf).length == 0);
-}
-
-@("renderSetlineConfig writes listen, the hostname namespace and single/multiple ports") unittest {
-  auto text = renderSetlineConfig([SetlineRoute("/api", [9001]), SetlineRoute("/m", [9001, 9002])],
-      "127.0.0.1:8080", "alice.localhost");
-  assert(text == "{\n  \"listen\": \"127.0.0.1:8080\",\n  \"routes\": {\n"
-      ~ "    \"alice.localhost\": {\n      \"/api\": 9001,\n      \"/m\": [9001, 9002]\n    }\n"
-      ~ "  }\n}\n");
-}
-
-@("renderSetlineConfig writes an empty route table") unittest {
-  auto text = renderSetlineConfig([], "127.0.0.1:8080", "*");
-  assert(text.canFind(`"*": {}`));
-  assert(text.canFind(`"listen": "127.0.0.1:8080"`));
+  assert(setlinePlan(conf).routes.length == 0);
 }
 
 @("runningPlan merges the ports of one webapp across instances") unittest {

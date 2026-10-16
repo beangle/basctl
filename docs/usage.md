@@ -70,20 +70,19 @@ basctl stop all                      # 优雅 SIGTERM，--timeout=<sec>（缺省
 |---|---|
 | `basctl version` | 打印 `basctl <版本>`（单行纯文本，便于脚本取值） |
 | `basctl banner [server.xml]` | 操作者横幅：logo + bas 引擎版本（取自 `<bas version>`）+ basctl 版本 + 本机地址；`bas.sh version` 调它。图形为纯 ASCII，只在交互终端出现，重定向到日志/管道时只剩版本行与本机地址 |
-| `basctl status` | 列出 `$BAS_HOME/servers` 下运行中的实例：读 `server.info` 展示 pid、端口、引擎、启动时间与各 webapp 的对外 url；pid 已不在的显示为 `stale`。配了 `<setline>` 时另起一节报名命空间、入口地址与通不通（`up` / `down`），并读一次 `GET /__setline/routes`（setline 对本机免凭据）给出 route 列（缺 / 端口对不上 / 多 / `routes in sync`） |
+| `basctl status` | 列出 `$BAS_HOME/servers` 下运行中的实例：读 `server.info` 展示 pid、端口、引擎、启动时间与各 webapp 的对外 url；pid 已不在的显示为 `stale`。配了 `<setline>` 时另起一节报名命空间、管理口地址与通不通（`up` / `down`），并读一次 `GET /_setline/routes`（本机来源免凭据）给出 route 列（缺 / 端口对不上 / 多 / `routes in sync`） |
 | `basctl init [--force] [--dry-run] [workdir]` | 初始化组件目录：把控制脚本铺到 `<workdir>/bin`，并建 `conf/` |
 | `basctl make [server.xml] <farm\|server\|all>` | 只准备不启动：生成 jstart spec 并 `jstart resolve` 预取依赖 |
 | `basctl resolve <server.xml> [pattern...]` | 只解析 webapp，不生成实例 |
 | `basctl start [server.xml] <farm\|server\|all> [--port-range=<from>-<to>] [--no-setline]` | 为实例定端口（`<server http="0">` 时在区间内分配，缺省 `20000-29999`）、写 `server.info`、生成 jstart spec、resolve 并后台启动；配了 `<setline>` 时启动后对账路由（`--no-setline` 跳过） |
 | `basctl stop [server.xml] <farm\|server\|all> [--force] [--timeout=<sec>] [--no-setline]` | 按 `server.info` 里的 pid 停止 `start` 启动的实例：SIGTERM 后等 `--timeout`（缺省 15 秒），`--force` 直接 SIGKILL；配了 `<setline>` 时停完对账路由（`--no-setline` 跳过） |
 | `basctl run --engine=<type>-<version> <app>` | 嵌入式运行单个 webapp：`--engine=tomcat-11.0.25` 同时给出容器类型与版本，生成单应用 spec 后前台 `jstart run` |
-| `basctl setline [server.xml] [--output=<file>] [--endpoint=<addr>]` | 把 `server.xml` 的静态拓扑渲染成 setline 配置（缺省写 `conf/setline.json` 并提示位置）：一个入口地址按路径前缀转发到各 server 的 http 端口，同一 webapp 的多实例自动成为端口列表；路由写在 `<setline hostname>` 命名空间下，入口地址按 `--endpoint` > `<setline endpoint>` 取，见 [setline.md](setline.md) |
-| `basctl setline --sync` | 按运行中的实例（`server.info`，含动态端口）推整组路由给已在跑的 setline（入口地址取 `<setline endpoint>`，无缺省；入口没人应答就报错，basctl 不拉起它）；与 `basctl start` / `stop` 之后的自动对账同一条路 |
-| `basctl setline --watch [--interval=<sec>]` | 常驻轮询对账（缺省每 5 秒；路由无变化就不推），直到 Ctrl-C；适合交给 systemd |
+| `basctl setline [server.xml]` | 把**运行中实例**（`server.info`，含动态端口）的路由整组推给已在跑的 setline（管理口端口只从 `<setline port>` 来，无缺省、无命令行覆盖；没人应答就报错，basctl 不拉起它、也不生成 setline 的配置；配置里没有 `<setline>` 就报"没启用 setline"）；与 `basctl start` / `stop` 之后的自动对账同一条路 |
+| `basctl setline --sync` | 同上（显式写法，便于脚本与记忆）；只推一次，推完即退出，没有常驻模式——路由变化的时机就是实例的启停 |
 | `basctl make <type> [options]` | 容器入口（creator）：把 jstart 的 `[engine] init` 协议翻译成容器启动命令 |
 | `basctl firewall [workdir]` | 按配置交互式配置 firewalld 端口 |
 | `basctl pull [--remote=<url>] [workdir]` | 从控制端拉取 `conf/server.xml`（请求带 `ip:` 头，旧配置备份为 `server_old.xml`） |
-| `basctl doctor [server.xml]` | 检查 `java` / `jstart`（以及启用 setline 时入口通不通）是否就位，缺件时退出码非 0，见 [doctor.md](doctor.md) |
+| `basctl doctor [server.xml]` | 检查 `java` / `jstart`（以及启用 setline 时管理口通不通）是否就位，缺件时退出码非 0，见 [doctor.md](doctor.md) |
 
 ## 组件目录初始化
 
@@ -122,20 +121,20 @@ basctl run --engine=tomcat-11.0.25 --print  /repo/app.war   # 只打印将要执
 在 `conf/server.xml` 里加一个 `<setline>` 即启用（出现即启用，没有独立开关）：
 
 ```xml
-<setline hostname="localhost" endpoint="127.0.0.1:8080"/>
+<setline hostname="localhost" port="10080"/>
 ```
 
 - `hostname` 是路由命名空间（缺省 `localhost`，`*` 表示任意 Host）——同一台机器上多份
-  `BAS_HOME` 共享一个 setline 时各占一格；`endpoint` 是这份 `BAS_HOME` 往外拨的入口地址，
-  **必填**（没有缺省：端口是这台机器上的事实，写进配置才看得见）。
-- setline 进程本身不归 basctl 管（由 systemd / 容器入口拉起），basctl 只推路由：
+  `BAS_HOME` 共享一个 setline 时各占一格；`port` 是这份 `BAS_HOME` 要推路由的**管理口**端口
+  （setline 的 `adminListen`，缺省绑 `127.0.0.1:10080`），**必填**（没有缺省：端口是这台机器上
+  的事实，写进配置才看得见）。只写端口，因为管理口的写接口只认回环来的连接，basctl 拨的就是
+  `127.0.0.1:<port>`。
+- setline 进程与它自己那份配置（`listen` / `adminListen`）都不归 basctl 管（由 systemd /
+  容器入口拉起并配置），basctl 只推路由：
 
 ```sh
-basctl setline              # 渲染 conf/setline.json
-setline -f conf/setline.json   # 由 systemd / 容器入口负责常驻
 basctl start platform       # 起完自动对账；--no-setline 可跳过
-basctl setline --sync       # 也可以手工对一次
-basctl setline --watch      # 或常驻轮询（systemd unit 示例见 setline-config.md）
+basctl setline              # 外部状态漂移时手工推一次（--sync 是同一次动作的显式写法）
 ```
 
 细节、多 `BAS_HOME` 共享、安全边界见 [setline.md](setline.md) 与
@@ -143,7 +142,7 @@ basctl setline --watch      # 或常驻轮询（systemd unit 示例见 setline-c
 
 ### 一机器一出口（容器）
 
-容器里 `server.xml` 写 `<setline endpoint="127.0.0.1:8080"/>`、`<server http="0"/>` 即可：
+容器里 `server.xml` 写 `<setline port="10080"/>`、`<server http="0"/>` 即可：
 容器内无论多少实例，对外只有 setline 那一个端口，增删 server 不用改端口映射。构建、运行与
 信号处理见 [container.md](container.md)。
 
@@ -173,9 +172,9 @@ basctl firewall /opt/bas                                  # 交互式地放行 s
 |---|---|---|
 | `Cannot find config file …` | `BAS_HOME` 不对，或 `conf/server.xml` 还没写 | `export BAS_HOME=…`，或直接用参数给配置文件路径 |
 | `Route conflict on /x` | 同一个路径被**端口集合不同**的多个 webapp 认领 | 给 webapp 显式声明 `<url path="…"/>`，让每个前缀有唯一归属 |
-| `no answer on …`（`--sync` / `start`） | setline 没在跑，或入口地址不对 | 看 `<setline endpoint>`；basctl 不会替你拉起 setline |
+| `No setline listening on …`（推送 / `start`） | setline 没在跑，或管理口端口不对 | 看 `<setline port>`（那是 setline 的 `adminListen` 端口）；basctl 不会替你拉起 setline |
 | `Cannot run jstart …` | `jstart` 不在 `PATH` | 装 jstart，或 `export beangle_jstart=/path/to/jstart`；`basctl doctor` 会直接告诉你缺哪个 |
 | `status` 里某个实例是 `stale` | 进程已不在（崩了或手工 kill） | `basctl stop <name>` 清掉运行信息，再 `start`；对账会把它的路由摘掉 |
-| 容器外访问不到 | 出口端口没映射，或 `endpoint` 写成了 `127.0.0.1` | `-p 8080:8080` 且容器内 `listen` 绑 `*:8080`（入口脚本默认如此），见 [container.md](container.md) |
+| 容器外访问不到 | 出口端口没映射，或 setline 的 `listen` 绑成了 `127.0.0.1` | `-p 8080:8080` 且容器内 `listen` 绑 `*:8080`（入口脚本默认如此），见 [container.md](container.md) |
 
 外部命令是否就位，优先用 `basctl doctor` 自查；它的输出与退出码见 [doctor.md](doctor.md)。

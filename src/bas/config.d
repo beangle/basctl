@@ -24,7 +24,7 @@
 module bas.config;
 
 import bas.artifact;
-import bas.endpoint : parseListenEndpoint;
+import bas.endpoint : parseSetlinePort;
 
 import std.algorithm : canFind, endsWith, map, sort, startsWith;
 import std.array : array, join, split;
@@ -541,14 +541,14 @@ class Container {
    */
   Nullable!string setlineHostname;
   /**
-   * `<setline endpoint="...">` 的入口地址（写法 `8080` / `127.0.0.1:8080` / `*:8080`）。
-   * `<setline>` 出现时它必填（缺了是配置错误），没有 `<setline>` 时是 `Nullable.init`。
+   * `<setline port="...">` 的管理口**端口**（写法 `10080`）。`<setline>` 出现时它必填（缺了是配置
+   * 错误），没有 `<setline>` 时是 `Nullable.init`。
    *
-   * 这里声明的是**本 BAS_HOME 往外拨哪扇门**（客户端视角），不是 setline 绑哪个 socket
-   * （那是 setline 自己配置文件里的 `listen`，`*` 合法）。解析见
-   * {@link bas.endpoint.resolveSetlineEndpoint}。
+   * 这是 setline 的**管理口**（`adminListen`）：basctl 拨 `127.0.0.1:<port>` 推路由、读路由表，
+   * 它不是 setline 对外接业务的那个 `listen`（那由 setline 自己那份配置决定）。管理口只认回环来
+   * 的写，所以地址没有可配的余地，只有端口。解析见 {@link bas.endpoint.resolveSetlinePort}。
    */
-  Nullable!string setlineEndpoint;
+  Nullable!string setlinePort;
   Repository repository;
   SnapshotRepo snapshotRepo;
   Engine[] engines;
@@ -557,9 +557,9 @@ class Container {
   Webapp[] webapps;
   Resource[string] resources;
 
-  /** `<setline endpoint>` 的原始写法（没写返回空串），供 {@link bas.endpoint} 解析。 */
-  string setlineEndpointText() const {
-    return setlineEndpoint.isNull ? "" : strip(setlineEndpoint.get);
+  /** `<setline port>` 的原始写法（没写返回空串），供 {@link bas.endpoint} 解析。 */
+  string setlinePortText() const {
+    return setlinePort.isNull ? "" : strip(setlinePort.get);
   }
 
   /** Finds an engine by name, or null. */
@@ -711,7 +711,7 @@ Container parseServerXml(string xmlText) {
       break;
     case "setline":
       conf.setlineHostname = nullable(parseSetlineHostname(section));
-      conf.setlineEndpoint = nullable(parseSetlineEndpoint(section));
+      conf.setlinePort = nullable(parseSetlinePortAttr(section));
       break;
     default:
       break;
@@ -798,20 +798,21 @@ private string parseSetlineHostname(XmlElem elem) {
 }
 
 /**
- * `<setline endpoint>`：本 `BAS_HOME` 往外拨的 setline 入口地址。`<setline>` 出现它就**必须**写
- * （`hostname` 可以省）——地址是这台机器上的事实，没有缺省可猜；写法与 setline 的 `listen` 同构
- * （`8080` / `127.0.0.1:8080` / `*:8080`），非法当场报错，别等到 `status` / `doctor` 才说"连不上"。
+ * `<setline port>`：本 `BAS_HOME` 往外拨的 setline **管理口**端口（setline 配置里的 `adminListen`）。
+ * `<setline>` 出现它就**必须**写（`hostname` 可以省）——管理口是这台机器上的事实，没有缺省可猜；
+ * 只写端口，因为管理口只认回环来的写，host 没有可配的余地（见 {@link bas.endpoint}）。非法当场
+ * 报错，别等到 `status` / `doctor` 才说"连不上"。
  *
- * 反过来，**没有 `<setline>` 就没有任何约束**：不启用 setline，也就不需要地址。
+ * 反过来，**没有 `<setline>` 就没有任何约束**：不启用 setline，也就不需要端口。
  */
-private string parseSetlineEndpoint(XmlElem elem) {
-  auto attr = requireAttr(elem, "endpoint", "<setline>");
+private string parseSetlinePortAttr(XmlElem elem) {
+  auto attr = requireAttr(elem, "port", "<setline>");
   auto text = strip(attr);
   try
-    parseListenEndpoint(text);
+    parseSetlinePort(text);
   catch (Exception)
-    throw new ServerXmlException("Invalid <setline endpoint=\"" ~ attr
-        ~ "\">: use `port`, `host:port`, or `*:port` (setline's listen forms)");
+    throw new ServerXmlException("Invalid <setline port=\"" ~ attr
+        ~ "\">: use the adminListen port (1-65535)");
   return text;
 }
 

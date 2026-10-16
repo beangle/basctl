@@ -14,7 +14,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-/** Unit tests for bas.endpoint：写法解析、探测，以及 `--endpoint` / `<setline endpoint>` 的取用顺序。 */
+/** Unit tests for bas.endpoint：端口解析、拨号地址，以及 `<setline port>` 是唯一来源这件事。 */
 module test.endpoint_test;
 
 import bas.endpoint;
@@ -23,29 +23,21 @@ import std.algorithm : canFind;
 import std.exception : assertThrown;
 import std.socket : AddressFamily, InternetAddress, Socket, SocketOption, SocketOptionLevel, SocketType;
 
-@("parseListenEndpoint follows setline's listen forms") unittest {
-  auto bare = parseListenEndpoint("8080");
-  assert(bare.host == "127.0.0.1");
-  assert(bare.port == 8080);
-  assert(bare.toString() == "127.0.0.1:8080");
-  assert(probeHost(bare) == "127.0.0.1");
-
-  auto wildcard = parseListenEndpoint("*:8080");
-  assert(wildcard.host == "");
-  assert(wildcard.port == 8080);
-  assert(wildcard.toString() == "*:8080");
-  assert(probeHost(wildcard) == "127.0.0.1");
-
-  assert(parseListenEndpoint("127.0.0.1:9000").host == "127.0.0.1");
-  assert(probeHost(parseListenEndpoint("0.0.0.0:9000")) == "127.0.0.1");
-  assert(probeHost(parseListenEndpoint("10.0.0.1:9000")) == "10.0.0.1");
+@("adminAddress is the loopback dial address of the admin port") unittest {
+  assert(adminAddress(10080) == "127.0.0.1:10080");
 }
 
-@("parseListenEndpoint rejects invalid ports") unittest {
-  assertThrown(parseListenEndpoint("0"));
-  assertThrown(parseListenEndpoint("65536"));
-  assertThrown(parseListenEndpoint("abc"));
-  assertThrown(parseListenEndpoint("*:"));
+@("parseSetlinePort takes a bare port and rejects everything else") unittest {
+  assert(parseSetlinePort("10080") == 10080);
+  assert(parseSetlinePort(" 8080 ") == 8080);
+  assert(parseSetlinePort("65535") == 65535);
+
+  assertThrown(parseSetlinePort("0"));
+  assertThrown(parseSetlinePort("65536"));
+  assertThrown(parseSetlinePort("abc"));
+  // 管理口只认回环来的写，所以 host:port / *:port 这类写法没有可配的余地
+  assertThrown(parseSetlinePort("127.0.0.1:8080"));
+  assertThrown(parseSetlinePort("*:8080"));
 }
 
 @("portFree reflects whether something is listening") unittest {
@@ -58,38 +50,24 @@ import std.socket : AddressFamily, InternetAddress, Socket, SocketOption, Socket
     sock.listen(1);
 
     auto port = (cast(InternetAddress) sock.localAddress).port;
-    assert(!portFree(ListenEndpoint("127.0.0.1", port)));
+    assert(!portFree(port));
 
     sock.close();
-    if (portFree(ListenEndpoint("127.0.0.1", port)))
+    if (portFree(port))
       return;
   }
   assert(false, "a just-closed port stayed busy across 5 attempts");
 }
 
-@("resolveSetlineEndpoint takes --endpoint, then the config; no default to guess") unittest {
-  // 配置：本 BAS_HOME 长期声明的那扇门，出处报 server.xml
-  auto fromConfig = resolveSetlineEndpoint("", " 127.0.0.1:9100 ");
-  assert(fromConfig.endpoint.toString() == "127.0.0.1:9100");
-  assert(fromConfig.source == SetlineEndpointSource.serverXml);
-  assert(sourceName(fromConfig.source) == "server.xml");
+@("resolveSetlinePort reads <setline port> only; no default to guess") unittest {
+  // 配置是本 BAS_HOME 声明管理口的唯一地方，前后空白由解析吃掉
+  assert(resolveSetlinePort(" 10080 ") == 10080);
 
-  // 命令行覆盖单次调用，比配置还优先
-  auto fromFlag = resolveSetlineEndpoint(" 9200 ", "127.0.0.1:9100");
-  assert(fromFlag.endpoint.port == 9200);
-  assert(fromFlag.source == SetlineEndpointSource.endpointFlag);
-  assert(sourceName(fromFlag.source) == "--endpoint");
+  // 没写：报错，不替谁猜一个 10080
+  assertThrown(resolveSetlinePort(""));
+  assertThrown(resolveSetlinePort("  "));
 
-  // 写法与 setline 的 listen 同构：裸端口落回环，* 只表示绑所有地址（拨的时候走回环）
-  assert(resolveSetlineEndpoint("9000", "").endpoint.toString() == "127.0.0.1:9000");
-  assert(resolveSetlineEndpoint("*:9000", "").endpoint.toString() == "*:9000");
-  assert(probeHost(resolveSetlineEndpoint("*:9000", "").endpoint) == "127.0.0.1");
-
-  // 两处都没写：报错，不替谁猜一个 8080
-  assertThrown(resolveSetlineEndpoint("", ""));
-  assertThrown(resolveSetlineEndpoint("  ", "  "));
-
-  // 写法非法当场报错，而不是悄悄换个地址
-  assertThrown(resolveSetlineEndpoint("nope", ""));
-  assertThrown(resolveSetlineEndpoint("", "nope"));
+  // 写法非法当场报错，而不是悄悄换个端口
+  assertThrown(resolveSetlinePort("nope"));
+  assertThrown(resolveSetlinePort("127.0.0.1:10080"));
 }

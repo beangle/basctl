@@ -15,27 +15,24 @@
  */
 
 /**
- * `basctl setline`：把 `server.xml` 的服务拓扑渲染成 setline 的 JSON 配置。
+ * `basctl setline` 的路由计算：把 `server.xml` 的服务拓扑或运行中的实例聚成 setline 的路由表。
  *
- * setline 在本地监听一个入口地址，按 Host + 路径前缀把请求转发到 `127.0.0.1:<port>`。这里把
- * 每个 webapp 的对外 URL 前缀（`<url path>`，未声明时退回 context path）与它部署到的 server
- * 的 http 端口聚成 routes：同一路径落在多个 server 上时合并成端口列表，由 setline 在健康实例间
- * 选择（自带 TCP 健康检查）。
+ * setline 监听自己的入口地址，按 Host + 路径前缀把请求转发到 `127.0.0.1:<port>`。这里把每个
+ * webapp 的对外 URL 前缀（`<url path>`，未声明时退回 context path）与它部署到的 server 的 http
+ * 端口聚成 routes：同一路径落在多个 server 上时合并成端口列表，由 setline 在健康实例间选择
+ * （自带 TCP 健康检查）。
  *
  * 同一路径被端口集合不同的多个 webapp 声明时无法判定归属，记成冲突（`SetlineConflict`）交给
  * 调用方报错；端口集合相同时合并无害（同一 webapp 的多实例部署），不算冲突。
  *
- * 反向的一步（`GET /__setline/routes` 的响应 → 可比较的路由表，`status` 的 route 列用它报"对没
+ * 反向的一步（`GET /_setline/routes` 的响应 → 可比较的路由表，`status` 的 route 列用它报"对没
  * 对上账"）也在本模块：{@link parseRouteTable}、{@link routeDriftLines}。
  *
- * 本模块只做纯计算与拼文本，不做 IO，也不启动 setline。后端固定为回环地址（setline 的约定），
- * 所以生成的路由只对跑在本机的 server 有意义。路由写进哪个命名空间由 `server.xml` 的
- * `<setline hostname>` 给出（见 {@link renderSetlineConfig}）——一台机器上共享一个 setline 的
- * 多份 `BAS_HOME` 靠它各占一格，互不覆盖。
- *
- * 渲染进文件的 `listen` 是 setline 自己要绑的 socket，写法与缺省见 {@link bas.endpoint}；它和
- * `basctl` 往外拨的入口地址（`<setline endpoint>`）写法同构但不是同一个值——`listen` 可以是
- * `*:8080`，往外拨的只能是具体地址。
+ * 本模块只做纯计算与拼文本，不做 IO，也不启动 setline：setline 是独立的机器级服务，自己那份配置
+ * （`listen` / `adminListen` / 调参）不归 basctl 生成，basctl 只把路由推给它的管理接口。后端固定
+ * 为回环地址（setline 的约定），所以路由只对跑在本机的 server 有意义。路由写进哪个命名空间由
+ * `server.xml` 的 `<setline hostname>` 给出——一台机器上共享一个 setline 的多份 `BAS_HOME` 靠它
+ * 各占一格，互不覆盖。
  */
 module bas.setline;
 
@@ -203,34 +200,8 @@ private ptrdiff_t ownerIndex(const(string)[] owners, string owner) {
   return -1;
 }
 
-/** 只要路由，忽略冲突（保留给只关心渲染的调用方与测试）。 */
-SetlineRoute[] setlineRoutes(Container conf) {
-  return setlinePlan(conf).routes;
-}
-
-/**
- * 渲染 setline 配置：`endpoint` 落进 setline 自己的 `listen` 字段（回环上两者是同一个值；容器里
- * 绑 `*:8080` 而拨 `127.0.0.1:8080`，渲染方按绑的那一面给），路由放在 `hostname` 命名空间下
- * （`server.xml` 的 `<setline hostname>`，缺省 `localhost`，`*` 表示匹配任意 Host）。单个端口
- * 输出数字，多个端口输出数组（setline 两者都接受）。
- */
-string renderSetlineConfig(const(SetlineRoute)[] routes, string endpoint, string hostname) {
-  auto sb = appender!string;
-  sb.put("{\n");
-  sb.put("  \"listen\": \"" ~ jsonEscape(endpoint) ~ "\",\n");
-  sb.put("  \"routes\": {\n");
-  sb.put("    \"" ~ jsonEscape(hostname) ~ "\": " ~ renderRouteMap(routes, "    ") ~ "\n");
-  sb.put("  }\n");
-  sb.put("}\n");
-  return sb.data;
-}
-
-/**
- * 渲染 `path -> port|[ports]` 的映射对象，即 setline 路由表里一个 host 分组的内容。
- *
- * 运行期同步（`PUT /__setline/routes/all`）要的正是这段；`indent` 只影响换行后的缩进，
- * 便于嵌进完整配置文件。
- */
+/** 渲染 `path -> port|[ports]` 的映射对象，即 setline 路由表里一个 host 分组的内容，也就是
+ * `PUT /_setline/routes/all` 的 body 里那段。 */
 string renderRouteMap(const(SetlineRoute)[] routes, string indent = "") {
   auto sb = appender!string;
   sb.put("{");
@@ -247,7 +218,7 @@ string renderRouteMap(const(SetlineRoute)[] routes, string indent = "") {
 }
 
 /**
- * 解析 setline `GET /__setline/routes` 的响应：`{"<host>": [{"prefix": "/x", "port": 8080}, ...]}`。
+ * 解析 setline `GET /_setline/routes` 的响应：`{"<host>": [{"prefix": "/x", "port": 8080}, ...]}`。
  *
  * 返回 `host -> (path -> 端口集合)`（端口升序去重）。形状不对就抛异常——意思是"读回来的东西
  * 不是路由表"，由调用方决定怎么报（`status` 只打一行，不因此让命令失败）。
@@ -288,8 +259,8 @@ int[][string][string] parseRouteTable(string json) {
  * 的 route 列，也是"对没对上账"的答案，不必再手工 `curl` 一遍。
  *
  * 该有的路由来自运行中的实例：**缺**说明 `start` 之后没推上去（setline 刚起或推送只警告过），
- * **对不上**说明端口漂移后没对账，**多**说明实例已停但路由还留着（`--watch` 没跑或没走到
- * `stop`）。全对得上就是一行 `routes in sync (N)`。
+ * **对不上**说明端口漂移后没对账，**多**说明实例已停但路由还留着（`stop` 没走到，或实例是被
+ * 外部弄没的）。全对得上就是一行 `routes in sync (N)`。
  */
 string[] routeDriftLines(const(SetlineRoute)[] want, int[][string] have) {
   string[] lines;

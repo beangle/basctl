@@ -361,9 +361,10 @@ accept-count/connection-timeout；Undertow 只用 accept-count/connection-timeou
 
   <xs:complexType name="setlineType">
     <xs:annotation>
-      <xs:documentation>本机 setline 入口（HTTP 路径路由器）。元素出现即启用：basctl 起停实例时
-        把拓扑同步成 hostname 命名空间下的路由；不出现即禁用。setline 进程是机器级服务
-        （systemd / 容器入口 / 手工拉起），basctl 既不拉起也不停止它，只认入口地址。</xs:documentation>
+      <xs:documentation>本机 setline（HTTP 路径路由器）。元素出现即启用：basctl 起停实例时把运行
+        中实例的路由同步成 hostname 命名空间下的那一格；不出现即禁用。setline 是独立的机器级服务
+        （systemd / 容器入口 / 手工拉起），自己那份配置（listen / adminListen / 调参）不归 basctl
+        生成；basctl 只推路由，既不拉起也不停止它。</xs:documentation>
     </xs:annotation>
     <xs:attribute name="hostname" type="xs:string" use="optional" default="localhost">
       <xs:annotation>
@@ -373,18 +374,19 @@ accept-count/connection-timeout；Undertow 只用 accept-count/connection-timeou
           BAS_HOME 靠它各占一格，互不覆盖。</xs:documentation>
       </xs:annotation>
     </xs:attribute>
-    <xs:attribute name="endpoint" type="xs:string" use="required">
+    <xs:attribute name="port" type="xs:string" use="required">
       <xs:annotation>
-        <xs:documentation>本 BAS_HOME 往外拨的入口地址，与 setline 自己的 listen 写法同构：
-          port（如 8080，等价于 127.0.0.1:8080）、host:port、或 *:port（* 只表示绑所有地址，
-          拨的时候落到回环）。元素出现它就必填——没有缺省可猜，端口写在这里、改的时候看得见
-          （命令行 `basctl setline --endpoint=&lt;addr&gt;` 可覆盖单次调用）。
+        <xs:documentation>本 BAS_HOME 要推路由的 setline 管理口端口（setline 配置里的 adminListen，
+          缺省 127.0.0.1:10080）：路由的写接口只在管理口上，读接口也从这里拨一次。这里只写端口
+          （如 10080），因为管理口只认回环来的连接——basctl 拨的就是 127.0.0.1:port，地址没有可
+          配的余地。元素出现它就必填——没有缺省可猜，也没有命令行覆盖（端口只有这一处来源：写在
+          这里，改的时候看得见）。
 
-          注意它不是 setline 绑哪个 socket——那是 setline 配置文件里的 listen，容器里可能是
-          *:8080（绑所有地址）而这里写 127.0.0.1:8080（往外拨回环）。
+          注意它不是 setline 对外接业务的 listen（那是浏览器与 peer 走的口，在 setline 自己的配置
+          文件里），basctl 不生成那份配置、也不碰它的端口。
 
-          一台机器上共享同一个 setline 的多份 BAS_HOME 各写各的 hostname（那一格归属），
-          endpoint 填同一个地址。</xs:documentation>
+          一台机器上共享同一个 setline 的多份 BAS_HOME 各写各的 hostname（那一格归属），port 填
+          同一个端口。</xs:documentation>
       </xs:annotation>
     </xs:attribute>
   </xs:complexType>

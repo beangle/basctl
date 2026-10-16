@@ -164,7 +164,7 @@ jstart 只负责"解析 + 准备 + exec"，实例身份与停止交给 basctl（
 | `src/bas/starter.d` | `start` 写运行信息（含补 pid）、`stop` 按 pid 停止、`describeInstance` 从配置推导内容 |
 | `src/bas/main.d` | `status` 按运行信息展示（`port` / `engine` / `started` / 各 webapp 的 `url`）；配了 `<setline>` 时另起一节报入口状态 |
 | `src/bas/setline.d` | `runningPlan`：由运行信息（而非 `server.xml`）算路由与冲突 |
-| `src/bas/setlineproc.d` | 把现状推给 setline：`--sync` / `--watch`、`start` / `stop` 之后的对账 |
+| `src/bas/setlineproc.d` | 把现状推给 setline：`basctl setline`（推一次）、`start` / `stop` 之后的对账 |
 
 启动时先写第一段（无 `pid`，兼作端口预留）发生在解析 webapp **之前**：动态端口必须先定下来，
 随后生成的 spec 才能带上 `--port=`。准备失败（webapp 解析不出来、引擎依赖缺件）时撤销预留，避免

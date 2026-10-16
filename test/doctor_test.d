@@ -38,8 +38,8 @@ private string fakeToolsDir() {
   return dir;
 }
 
-/** 本机 setline 入口的写法，指向某个具体端口。 */
-private string endpoint(int port) {
+/** 管理口的拨号地址写法（doctor 展示的就是它）。 */
+private string adminAddress(int port) {
   return "127.0.0.1:" ~ port.to!string;
 }
 
@@ -79,7 +79,7 @@ private string endpoint(int port) {
   checks = checkTools(confFile, env);
   assert(checks[2].state == CheckState.skipped, checks[2].note);
 
-  // 入口写在 <setline endpoint> 里：source 报 server.xml，端口没人听就是缺失。
+  // 端口写在 <setline port> 里：source 报 server.xml，端口没人听就是缺失。
   // 端口是共享资源：挑一个刚空出来的，被别的用例抢走就换一个重试。
   int freePort = 0;
   foreach (attempt; 0 .. 5) {
@@ -88,15 +88,15 @@ private string endpoint(int port) {
     probe.bind(new InternetAddress("127.0.0.1", 0));
     freePort = (cast(InternetAddress) probe.localAddress).port;
     probe.close();
-    write(confFile, base.replace("</bas>", `  <setline hostname="alice.localhost" endpoint="`
-        ~ endpoint(freePort) ~ `"/>
+    write(confFile, base.replace("</bas>", `  <setline hostname="alice.localhost" port="`
+        ~ freePort.to!string ~ `"/>
 </bas>`));
     checks = checkTools(confFile, env);
     if (checks[2].state == CheckState.missing)
       break;
   }
   assert(checks[2].state == CheckState.missing, checks[2].note);
-  assert(checks[2].note.canFind(endpoint(freePort)), checks[2].note);
+  assert(checks[2].note.canFind(adminAddress(freePort)), checks[2].note);
 
   // 有人在听就算就绪：doctor 只认「入口可达」，不判断坐的是不是我们的 setline
   auto listener = new Socket(AddressFamily.INET, SocketType.STREAM);
@@ -104,12 +104,12 @@ private string endpoint(int port) {
   listener.bind(new InternetAddress("127.0.0.1", 0));
   listener.listen(1);
   auto busyPort = (cast(InternetAddress) listener.localAddress).port;
-  write(confFile, base.replace("</bas>", `  <setline hostname="alice.localhost" endpoint="`
-      ~ endpoint(busyPort) ~ `"/>
+  write(confFile, base.replace("</bas>", `  <setline hostname="alice.localhost" port="`
+      ~ busyPort.to!string ~ `"/>
 </bas>`));
   checks = checkTools(confFile, env);
   assert(checks[2].state == CheckState.ok && checks[2].source == "server.xml");
-  assert(checks[2].path == endpoint(busyPort));
+  assert(checks[2].path == adminAddress(busyPort));
 
 }
 

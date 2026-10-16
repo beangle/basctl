@@ -21,12 +21,14 @@ setline 最贴的形态：
 
 所以容器里的 `conf/server.xml` 有两处约定：
 
-1. `<setline hostname="localhost" endpoint="127.0.0.1:8080"/>`——声明路由命名空间与入口地址。
-   出口**监听地址**由入口脚本给（`BAS_SETLINE_LISTEN`，缺省 `*:8080`）：容器里必须监听所有地址，
-   写 `127.0.0.1` 在容器外访问不到，端口与 `-p` 的右边一致。绑的是 `*:8080`、拨的是
-   `127.0.0.1:8080`，所以这里不写 `listen`（那是 setline 配置里的），`endpoint` 写拨的那一面。
-   入口脚本铺这份样例时会按实际端口改写 `endpoint`；自己挂载 `conf/server.xml` 时，端口对不上
-   它会警告一句；
+1. `<setline hostname="localhost" port="10080"/>`——声明路由命名空间与 basctl 要推路由的
+   **管理口端口**（setline 的 `adminListen`，写接口只在管理口上、且只认回环来的连接）。setline
+   自己对外的 `listen` 由
+   入口脚本给（`BAS_SETLINE_LISTEN`，缺省 `*:8080`）：容器里必须监听所有地址，写 `127.0.0.1`
+   在容器外访问不到，端口与 `-p` 的右边一致。两个监听都写在入口脚本生成的
+   `conf/setline.json` 里（`BAS_SETLINE_ADMIN_LISTEN` 改管理口），basctl 不碰那份文件；
+   入口脚本铺这份样例时会按 `BAS_SETLINE_ADMIN_LISTEN` 的端口改写 `port`；自己挂载
+   `conf/server.xml` 时，端口对不上它会警告一句；
 2. `<server http="0"/>`（或不写 http）——端口交给 basctl 在容器内分配（缺省
    `20000-29999`），由 [server.info](server-info.md) 记下来供 setline 对账，不会被 publish。
 
@@ -86,7 +88,7 @@ docker logs -f bas
 ```
 
 卷（`BAS_HOME`，缺省 `/var/lib/bas`）里放的是整套运行态：`conf/server.xml`、
-`conf/setline.json`、`servers/*/server.info`、`logs/`，以及 jstart 的本地仓库
+`conf/setline.json`（setline 自己的两个监听与运行期路由）、`servers/*/server.info`、`logs/`，以及 jstart 的本地仓库
 `$BAS_HOME/.m2/repository`（入口脚本把 `HOME` 指到 `BAS_HOME`，所以构件缓存随卷一起持久化，
 重建容器不用重新下载）。容器里没有 `conf/server.xml` 时入口脚本铺一份样例并打日志。
 
@@ -108,6 +110,8 @@ podman run -d --name bas --userns=keep-id --init -p 8080:8080 \
   `Cannot fetch org.beangle.bas:…` 让 `basctl start` 失败。挂上后这个仓库同时当缓存用。
 - 端口右侧是容器内的 setline 端口，与 `BAS_SETLINE_LISTEN`（缺省 `*:8080`）一致；rootless
   podman 只允许映射 >=1024 的宿主端口。
+- 容器内 setline 的管理口由 `BAS_SETLINE_ADMIN_LISTEN` 给（缺省 `127.0.0.1:10080`），只在容器
+  内部用，不 publish——basctl 拨的就是它。
 
 ## 入口脚本做什么
 
@@ -119,10 +123,11 @@ podman run -d --name bas --userns=keep-id --init -p 8080:8080 \
 3. `basctl init "$BAS_HOME"` 补齐 `bin/*.sh` 控制脚本（已存在的保留）；
 4. 删掉 `servers/*/server.info`——**新容器 = 新进程空间**，上一轮的 pid 已经指不到任何人，
    留着会让路由和 `status` 指向别的进程；
-5. setline：容器入口**自己拉起它**（容器里 setline 的进程归入口脚本）——卷里没有
-   `conf/setline.json` 时先 `basctl setline --endpoint=$BAS_SETLINE_LISTEN` 渲染一份（这里给绑的
-   形态 `*:8080`，和写进文件的 `listen` 一致），再 `setline -f conf/setline.json` 常驻，日志
-   `logs/setline.out`；basctl 推路由拨的是 `conf/server.xml` 里 `<setline endpoint>` 的地址；
+5. setline：容器入口**自己拉起它、也自己给配置**（容器里 setline 的进程归入口脚本）——卷里没有
+   `conf/setline.json` 时写一份骨架（`listen=$BAS_SETLINE_LISTEN` 缺省 `*:8080`、
+   `adminListen=$BAS_SETLINE_ADMIN_LISTEN` 缺省 `127.0.0.1:10080`、`routes` 先空），再
+   `setline -f conf/setline.json` 常驻，日志 `logs/setline.out`；路由不写在这份骨架里，由
+   `basctl` 推给 `conf/server.xml` 里 `<setline port>` 指的管理口；
 6. `basctl start all`：定端口、写运行信息、resolve、后台拉起实例，并把整组路由推给 setline；
 7. 前台等信号，收到 SIGTERM / SIGINT 后：`basctl stop all --timeout=$BAS_STOP_TIMEOUT`
    （缺省 8 秒，超时就 `--force`）→ 给 setline 发 SIGTERM（超时 SIGKILL，容器里它没有配置
@@ -157,4 +162,4 @@ podman run -d --name bas --userns=keep-id --init -p 8080:8080 \
       （2026-10-07 用 bas-0.14.0 样例在 podman 上验过：`/tools/about` 经 setline 回 200）
 - [ ] 容器内增删 server 不需要改 docker 端口映射
 - [x] SIGTERM 干净退出，无残留 java 进程（优雅 8 秒 → `--force`）
-- [x] 运行期路由能写回卷里的 `conf/setline.json`
+- [x] 运行期路由能写回卷里的 `conf/setline.json`（`routes` 那一节，`listen` / `adminListen` 不动）

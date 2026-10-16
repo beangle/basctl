@@ -14,14 +14,14 @@ basctl doctor /opt/bas/conf/server.xml
 |------|--------------|--------|
 | `java` | `make` / `start` / `run` 都要（creator 写出的启动命令与 jstart 最终 exec 的都是 java） | `$JAVA_HOME/bin/java` 优先，其次 `PATH` |
 | `jstart` | `start` / `make` / `resolve` 用它解析下载构件 | `beangle_jstart` 指向的命令优先，其次 `PATH` 上的 `jstart` |
-| `setline` | **只有** `server.xml` 里声明了 `<setline>` 才检查；检的是**入口可达**，不是命令存在 | 入口地址取自 `<setline endpoint>`（元素必填，`doctor` 没有命令行覆盖），有人监听即 `ok` |
+| `setline` | **只有** `server.xml` 里声明了 `<setline>` 才检查；检的是**管理口可达**，不是命令存在 | 管理口端口取自 `<setline port>`（元素必填，`doctor` 没有命令行覆盖），`127.0.0.1:<port>` 有人监听即 `ok` |
 
 `<setline>` 的判定与 [setline-config.md](setline-config.md) 一致：出现即启用，没有独立的开关。
 没启用时这一行是 `skip`，`start` / `stop` / `status` 也完全不碰 setline。配置文件不存在或解析
 失败时按「未启用 setline」处理（不因此报错），说明会打在 `config` 行上。
 
 `setline` 这一行检的是**服务**而不是可执行文件：setline 是机器级服务（systemd / 容器入口 /
-手工拉起），basctl 只往它的写接口推路由，从不调用它的可执行文件。
+手工拉起），basctl 只往它的写接口（管理口）推路由，从不调用它的可执行文件。
 
 ## 输出与退出码
 
@@ -29,14 +29,14 @@ basctl doctor /opt/bas/conf/server.xml
 config  /opt/bas/conf/server.xml (<setline hostname="alice.localhost">)
 java     ok      /usr/lib/jvm/java-17-openjdk/bin/java (JAVA_HOME)
 jstart   ok      /usr/local/bin/jstart (PATH)
-setline  ok      127.0.0.1:8080 (server.xml)
+setline  ok      127.0.0.1:10080 (server.xml)
 doctor: all required commands are available.
 ```
 
-- 每行给出命令名、状态（`ok` / `MISSING` / `skip`）与解析出的绝对路径（setline 一行是入口地址）及来源
+- 每行给出命令名、状态（`ok` / `MISSING` / `skip`）与解析出的绝对路径（setline 一行是管理口地址）及来源
   （setline 的来源是 `server.xml`，一眼看出地址是从哪来的）；
 - 没启用 setline 时它是 `skip`，不算缺失；
-- 启用 setline 但入口没人应答时，`setline` 报 `MISSING` 并提示去起服务或改地址；
+- 启用 setline 但管理口没人应答时，`setline` 报 `MISSING` 并提示去起服务或改地址；
 - **缺少必需项时退出码为 1**，脚本可以据此在启动前拦一道。
 
 `doctor` 只检查「就位没就位」，**不校验版本**：java / jstart / 容器的版本策略分别
