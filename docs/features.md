@@ -56,7 +56,6 @@ $BAS_HOME/
   engines/<name>-<version>/     # 解压并按需裁剪后的 Tomcat
   servers/<farm>.<server>/      # 单个实例的 catalina.base（server.info 记运行信息：pid / 端口 / webapp / url）
   webapps/                      # http 直链与 SNAPSHOT 覆盖的落地目录
-  run/                          # 机器级守护进程的运行态（如对账进程的 pid）
   logs/
 ```
 
@@ -116,7 +115,7 @@ exec」——所以 `run` 是纯前台（Ctrl-C 退出），`start` 起来的是
   后端固定 `127.0.0.1:<port>`（因此不能代理别的机器上的 server），且基于 epoll，**Linux only**。
   生产入口（haproxy / nginx）是另一条路。
 - **代理是全局的**：一台机器通常只有一份 setline，它同时服务 bas 与别的系统。`basctl setline`
-  只推 bas 那一格（`<setline hostname>` 命名空间），别的分组不动。
+  只推 bas 那一格（`<setline hostname>` 命名空间），别的分组既不读也不清理。
 - **不做拓扑中间格式**：需要在 haproxy / nginx 那侧渲染反代配置时，交付物就是 `server.xml`
   本身（消费方复用 bas 的配置模型，别再写一份解析器）；要运行态（动态端口、存活实例）就读对方
   setline 的 `GET /_setline/routes`（跨机读要写在它的 `peerReaders` 里）。basctl **不导出**平行的

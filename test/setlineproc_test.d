@@ -20,14 +20,14 @@ module test.setlineproc_test;
 import bas.setline : SetlineRoute;
 import bas.setlineproc;
 
+import core.stdc.errno : EINTR;
 import core.thread : Thread;
 
 import std.algorithm : canFind, splitter, startsWith;
-import std.array : appender, join;
+import std.array : appender;
 import std.conv : to;
 import std.socket : AddressFamily, InternetAddress, Socket, SocketOption, SocketOptionLevel,
-  SocketType;
-import std.stdio : writeln;
+  SocketOSException, SocketType;
 import std.string : indexOf, strip;
 
 @("syncRoutesToSetline PUTs the whole route map to the admin port of the hostname") unittest {
@@ -40,7 +40,7 @@ import std.string : indexOf, strip;
 
   string request;
   auto stub = new Thread({
-    auto conn = listener.accept();
+    auto conn = acceptOne(listener);
     scope (exit) conn.close();
     request = readRequest(conn);
     conn.send("HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n");
@@ -82,7 +82,14 @@ private string readRequest(Socket conn) {
   auto received = appender!string;
   auto buf = new ubyte[8192];
   while (true) {
-    auto count = conn.receive(buf);
+    ptrdiff_t count;
+    try {
+      count = conn.receive(buf);
+    } catch (SocketOSException e) {
+      if (e.errorCode == EINTR)
+        continue;
+      throw e;
+    }
     if (count == Socket.ERROR || count == 0)
       break;
     received.put(cast(string) buf[0 .. count]);
@@ -94,6 +101,18 @@ private string readRequest(Socket conn) {
       break;
   }
   return received.data;
+}
+
+/** `accept` 会被其它测试子进程的 SIGCHLD 打断；EINTR 只重试，不当作服务结束。 */
+private Socket acceptOne(Socket listener) {
+  while (true) {
+    try {
+      return listener.accept();
+    } catch (SocketOSException e) {
+      if (e.errorCode != EINTR)
+        throw e;
+    }
+  }
 }
 
 /** 请求头里的 `Content-Length`（没写按 0）。 */

@@ -126,7 +126,8 @@ private void reconcileRoutes(const Container container, string basHome, bool noS
   }
   auto hostname = strip(container.setlineHostname.get);
   if (syncRoutesToSetline(plan.routes, port, hostname, true) != 0)
-    stderr.writeln("Routes not updated (setline unavailable); the instances themselves are fine.");
+    stderr.writeln("setline routes were not fully reconciled; the instances themselves are fine"
+        ~ " (the next start/stop retries).");
 }
 
 int runStart(string configFile, string[] rest) {

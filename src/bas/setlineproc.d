@@ -19,16 +19,17 @@
  *
  * setline 是**机器级服务**（systemd / 容器入口 / 手工拉起），basctl 不拉它也不停它，所以这里
  * 没有 pid 文件、没有就地启动：只做「入口在哪 / 在不在 / 把本 BAS_HOME 的整组路由推进自己的
- * 命名空间」三件事——进程归谁起，谁负责停。
+ * 命名空间」——进程归谁起，谁负责停。
  *
  * 管理口端口由 {@link bas.endpoint.resolveSetlinePort} 统一解析（只认 `server.xml` 的
  * `<setline port>`，没有缺省、没有命令行覆盖）；命名空间来自
  * `server.xml` 的 `<setline hostname>`（缺省 `*`，匹配任意 Host）。一台机器上共享同一个 setline 的多份
  * `BAS_HOME` 靠命名空间各占一格——`PUT /_setline/routes/all?host=<ns>` 只替换自己那一格。
+ * 其他分组不读取、不清理；`<setline hostname>` 改了之后，旧分组由用户按需编辑 setline.json。
  *
  * 管理口（`<setline port>`）是 setline 的写接口所在：它只在管理口上，而管理口缺省绑回环，
- * 于是"只有本机能改流量走向"是 TCP 层的事实。读接口（`GET /_setline/routes`）只在 `status` 的
- * route 列里用一次（{@link fetchRouteTable}），同样从 localhost 发——setline 的读接口对回环来源
+ * 于是"只有本机能改流量走向"是 TCP 层的事实。读接口（`GET /_setline/routes`）在 `status` 的
+ * route 列里使用（{@link fetchRouteTable}），同样从 localhost 发——setline 的读接口对回环来源
  * 一律放行，不需要任何凭据。写永远拨回环，所以配置里只有端口（见 {@link bas.endpoint}）。
  */
 module bas.setlineproc;
@@ -36,7 +37,6 @@ module bas.setlineproc;
 import bas.endpoint : adminAddress, portFree;
 import bas.setline : SetlineRoute, renderRouteMap;
 
-import std.conv : to;
 import std.format : format;
 import std.process : Config, execute;
 import std.stdio : stderr, writeln;

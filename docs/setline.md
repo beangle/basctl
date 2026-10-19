@@ -3,13 +3,13 @@
 [setline](https://github.com/beangle/setline) 是独立的机器级服务：它监听一个入口地址，按 Host +
 路径前缀把请求转发到各 server 的 http 端口，从而用一个地址访问全部 webapp。
 
-`basctl setline` 只做一件事：把**运行中实例**的路由推给已经在跑的 setline——推一次就结束（幂等，
-只替换本 `BAS_HOME` 那一格）。配了 `<setline>` 时 `basctl start` / `stop` 会各自在动作之后对账
-一次（`--no-setline` 跳过），所以日常根本不用手工敲它：**路由变化的时机就是实例的启停**。
+`basctl setline` 只做一件事：把**运行中实例**的路由对账给已经在跑的 setline——推一次就结束（幂等，
+只替换 `<setline hostname>` 对应的当前分组）。配了 `<setline>` 时 `basctl start` /
+`stop` 会各自在动作之后对账一次（`--no-setline` 跳过），所以日常根本不用手工敲它：**路由变化的
+时机就是实例的启停**。
 
 **setline 的进程与它自己的配置都不归 basctl**：进程由 systemd / 容器入口 / 手工拉起来，`listen` /
 `adminListen` / 调参写在 setline 自己那份配置里（basctl 不生成、不读取、不覆盖）；basctl 只需要
-知道**管理口**在哪（`server.xml` 的 `<setline port>`，唯一来源、没有缺省），用来推路由、
 知道**管理口**在哪（`server.xml` 的 `<setline port>`，唯一来源、没有缺省），用来推路由、
 读路由表——写接口只认回环来的连接，所以 basctl 拨的固定是 `127.0.0.1:<port>`，配置里也就只有
 端口。
@@ -83,9 +83,11 @@ $ basctl setline
 **同步的输入是「现状」而不是 `server.xml`**：路由由 `servers/<name>/server.info` 算出（存活的
 pid、实际端口、各 webapp 的对外 url），因此配置改了但实例没重启时路由不变，动态端口也能被覆盖。
 
-推送只有一步：`PUT /_setline/routes/all?host=<hostname>` 整组替换**这个命名空间**的路由
-（幂等，别的分组不受影响）。管理口没人监听就报错并退出，不改动任何东西——把 setline 拉起来是
-systemd / 容器入口 / 你自己的事。
+推送只有一步：`PUT /_setline/routes/all?host=<hostname>` 整组替换**当前命名空间**的路由
+（幂等，别的分组不受影响）。basctl 不保存上次使用的 hostname，也不读取或清理其他分组；改了
+`<setline hostname>` 之后，旧分组如果还需要删除，由用户直接编辑 setline 的 `setline.json`。
+管理口没人监听就报错并退出，不改动任何东西——把 setline 拉起来是 systemd / 容器入口 / 你自己
+的事。
 
 遇到**路由冲突**时打印原因并**保持现状**（现有路由继续服务，不动 setline），改好 `<url path>`
 之后再推一次。它只写路由，不碰应用进程，也不写 `server.info`（唯一写者仍是 `start` / `stop`）。
@@ -94,8 +96,8 @@ systemd / 容器入口 / 你自己的事。
 ——setline 挂了不该挡住应用启停，下一次启停（或手工 `basctl setline`）会把路由补齐。
 `--no-setline` 可临时跳过这一次对账。
 
-推送是瞬时的：拨一次管理口，推完就退出。路由由 setline 在收到推送后写回它自己的配置文件（只替换
-`routes`），所以 setline 重启后路由不丢——只要它读的是同一份文件。
+推送是瞬时的：拨一次管理口、发一次 `PUT` 就退出。路由由 setline 在收到推送后写回它自己的配置
+文件（只替换 `routes`），所以 setline 重启后路由不丢——只要它读的是同一份文件。
 
 ## 状态（`basctl status`）
 
@@ -206,7 +208,7 @@ setline 侧：它自己那份配置给出对外接业务的 `listen`（例子里
 - **只覆盖 bas 管辖的服务**：路由全部来自 `server.xml` 的 farm / server / webapp，不含 basctl
   之外的服务。
 - **代理是全局的**：一台机器上通常只有一份 setline，它同时服务 bas 与别的系统。`basctl setline`
-  只推 bas 那一格（`<setline hostname>` 命名空间），别的分组不动。
+  只推 bas 那一格（`<setline hostname>` 命名空间）；别的分组既不读也不清理。
 - 生产入口（haproxy / nginx / ...）与本地 setline 代理是两件事，`server.xml` 不描述前者；
   basctl 只把路由推给 setline（管理口端口由 `<setline port>` 给出），不会替 haproxy / nginx
   生成配置。

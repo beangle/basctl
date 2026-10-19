@@ -88,9 +88,10 @@ basctl 内部完成（它本来就解析 `server.xml`），**不引入 shell 变
 
 ### 推送与探测
 
-推送只有一个请求：`PUT /_setline/routes/all?host=<hostname>`——幂等，只替换**这个命名空间**，
-别的分组不受影响（setline 侧是 `replaceRoutes`）。它是**写**接口，只认 TCP 对端是本机、不需要
-凭据，所以写成功就说明管理口上坐的确实是我们能驱动的 setline。失败分两种说法：
+推送只有一步：`PUT /_setline/routes/all?host=<hostname>` 整组替换**当前命名空间**。basctl
+不保存上次使用的 hostname，也不读取或清理其他分组；用户需要修正旧分组时直接编辑 setline 的
+`setline.json`。写接口只认 TCP 对端是本机、不需要凭据，所以写成功就说明管理口上坐的确实是
+我们能驱动的 setline。失败分两种说法：
 
 | 探测结果 | 动作 |
 |---|---|
