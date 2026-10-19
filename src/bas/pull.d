@@ -17,28 +17,29 @@
 /**
  * `pull`：从控制端拉取 `conf/server.xml`。
  *
- * remote 缺省取环境变量 `bas_remote_url`（由发行包的 `bin/setenv.sh` 提供），请求带
- * `ip:<本机地址>` 头，服务端据此下发该机器对应的配置。旧配置备份为
- * `conf/server_old.xml`；拉取失败时保留现有配置不动。
+ * 地址、Profile 与凭证都取自 `conf/basctl.conf` 的 `[remote]` 段；请求只用
+ * `Authorization: Bearer <token>` 鉴权，不再发送可伪造的 `ip:` 头，也不再读取
+ * `bas_remote_*` 环境变量。旧配置备份为 `conf/server_old.xml`；拉取失败时保留
+ * 现有配置不动。
  */
 module bas.pull;
 
 import bas.download : curlDownload;
-import bas.net : localAddresses;
+import bas.remote : RemoteConfig, loadRemoteConf, remoteConfPath, serverConfigUrl, validateRemoteConf;
 
 import std.file : exists, getcwd, mkdirRecurse, rename;
 import std.path : absolutePath, buildPath;
 import std.process : environment;
 import std.stdio : stderr, writeln;
-import std.string : endsWith, startsWith, strip;
+import std.string : startsWith, strip;
 
-/** `pull [--remote=<url>] [workdir]`：下载并替换 `<workdir>/conf/server.xml`。 */
+/** `pull [--file=<basctl.conf>] [workdir]`：下载并替换 `<workdir>/conf/server.xml`。 */
 int runPull(string[] args) {
-  string remote;
+  string confFile;
   string workdir;
   foreach (arg; args) {
-    if (arg.startsWith("--remote=")) {
-      remote = strip(arg["--remote=".length .. $]);
+    if (arg.startsWith("--file=")) {
+      confFile = strip(arg["--file=".length .. $]);
     } else if (arg == "--help" || arg == "-h") {
       pullUsage();
       return 0;
@@ -55,27 +56,35 @@ int runPull(string[] args) {
     }
   }
 
-  if (!remote.length)
-    remote = strip(environment.get("bas_remote_url", ""));
-  if (!remote.length) {
-    stderr.writeln("define bas_remote_url in bin/setenv.sh (or pass --remote=<url>)");
-    return 1;
-  }
-
   if (!workdir.length) {
     auto fromEnv = strip(environment.get("BAS_HOME", ""));
     workdir = fromEnv.length ? fromEnv : getcwd();
   }
   workdir = absolutePath(workdir);
 
-  auto url = serverXmlUrl(remote);
+  if (!confFile.length)
+    confFile = remoteConfPath(workdir);
+  RemoteConfig remote;
+  try {
+    remote = loadRemoteConf(confFile);
+    if (!remote.complete) {
+      stderr.writeln("basctl pull: warning: remote is not configured in " ~ confFile
+          ~ "; server.xml was not refreshed.");
+      return 0;
+    }
+    validateRemoteConf(remote, confFile);
+  } catch (Exception e) {
+    stderr.writeln("basctl pull: " ~ e.msg);
+    return 1;
+  }
+
+  auto url = serverConfigUrl(remote);
   writeln("fetching " ~ url ~ "...");
 
   auto confDir = buildPath(workdir, "conf");
   mkdirRecurse(confDir);
   auto newer = buildPath(confDir, "server_newer.xml");
-  auto ip = ipHeader(localAddresses());
-  if (!curlDownload(url, newer, ip.length ? ["ip:" ~ ip] : null)) {
+  if (!curlDownload(url, newer, ["Authorization: Bearer " ~ remote.token])) {
     stderr.writeln("cannot get " ~ url);
     return 1;
   }
@@ -90,31 +99,11 @@ int runPull(string[] args) {
   return 0;
 }
 
-/** 控制端 server.xml 的 URL：`<remote>/config/server.xml`（容忍结尾斜杠）。 */
-string serverXmlUrl(string remote) {
-  auto base = strip(remote);
-  while (base.endsWith("/"))
-    base = base[0 .. $ - 1];
-  return base ~ "/config/server.xml";
-}
-
-/** `ip` 请求头的取值：本机非回环 IPv4，空格分隔；只有回环时返回空串。 */
-string ipHeader(const(string)[] addresses) {
-  string result;
-  foreach (address; addresses) {
-    if (address == "127.0.0.1")
-      continue;
-    if (result.length)
-      result ~= " ";
-    result ~= address;
-  }
-  return result;
-}
-
 /** 打印 `pull` 用法到 stderr。 */
 void pullUsage() {
-  stderr.writeln("Usage: basctl pull [--remote=<url>] [workdir]");
-  stderr.writeln("  Fetch <remote>/config/server.xml into <workdir>/conf, backing up the old");
-  stderr.writeln("  file as server_old.xml. <url> defaults to $bas_remote_url, <workdir> to");
-  stderr.writeln("  $BAS_HOME (or the current directory).");
+  stderr.writeln("Usage: basctl pull [--file=<basctl.conf>] [workdir]");
+  stderr.writeln("  Fetch <remote.url>/api/<remote.profile>/config/server into <workdir>/conf,");
+  stderr.writeln("  authenticating with remote.token from <workdir>/conf/basctl.conf. The old");
+  stderr.writeln("  file is backed up as server_old.xml. <workdir> defaults to $BAS_HOME (or the");
+  stderr.writeln("  current directory).");
 }

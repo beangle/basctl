@@ -24,7 +24,7 @@
       "targetType": "executable",
       "targetPath": "target",
       "targetName": "basctl",
-      "versions": ["EventCoreSilenceLeakWarnings"]
+      "versions": ["EventCoreSilenceLeakWarnings", "VibeDisableCommandLineParsing"]
     },
     {
       "name": "unittest",

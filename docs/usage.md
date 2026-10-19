@@ -71,6 +71,7 @@ basctl stop all                      # 优雅 SIGTERM，--timeout=<sec>（缺省
 | `basctl version` | 打印 `basctl <版本>`（单行纯文本，便于脚本取值） |
 | `basctl banner [server.xml]` | 操作者横幅：logo + bas 引擎版本（取自 `<bas version>`）+ basctl 版本 + 本机地址；`bas.sh version` 调它。图形为纯 ASCII，只在交互终端出现，重定向到日志/管道时只剩版本行与本机地址 |
 | `basctl status` | 列出 `$BAS_HOME/servers` 下运行中的实例：读 `server.info` 展示 pid、端口、引擎、启动时间与各 webapp 的对外 url；pid 已不在的显示为 `stale`。配了 `<setline>` 时另起一节报名命空间、管理口地址与通不通（`up` / `down`），并读一次 `GET /_setline/routes`（本机来源免凭据）给出 route 列（缺 / 端口对不上 / 多 / `routes in sync`） |
+| `basctl logs [server.xml] <farm.server> [-n <行数>] [-f]` | 读 `$BAS_HOME/logs/<farm.server>/console.out` 的尾部：`-n` 缺省 50 行、上限 2000；`-f` 持续跟随（Ctrl-C 退出），日志滚动后自动跟新文件。归档的旧日志在 `logs/archive/`，要查直接读文件 |
 | `basctl init [--force] [--dry-run] [workdir]` | 初始化组件目录：把控制脚本铺到 `<workdir>/bin`，并建 `conf/` |
 | `basctl make [server.xml] <farm\|server\|all>` | 只准备不启动：生成 jstart spec 并 `jstart resolve` 预取依赖 |
 | `basctl resolve <server.xml> [pattern...]` | 只解析 webapp，不生成实例 |
@@ -81,7 +82,9 @@ basctl stop all                      # 优雅 SIGTERM，--timeout=<sec>（缺省
 | `basctl setline --sync` | 同上（显式写法，便于脚本与记忆）；只推一次，推完即退出，没有常驻模式——路由变化的时机就是实例的启停 |
 | `basctl make <type> [options]` | 容器入口（creator）：把 jstart 的 `[engine] init` 协议翻译成容器启动命令 |
 | `basctl firewall [workdir]` | 按配置交互式配置 firewalld 端口 |
-| `basctl pull [--remote=<url>] [workdir]` | 从控制端拉取 `conf/server.xml`（请求带 `ip:` 头，旧配置备份为 `server_old.xml`） |
+| `basctl pull [--file=<basctl.conf>] [workdir]` | 按 `conf/basctl.conf` 的 `[remote]` 拉取 `conf/server.xml`：地址为 `<url>/api/<profile>/config/server`，请求用 `Authorization: Bearer <token>`；旧配置备份为 `server_old.xml`。未配置 `[remote]` 时告警并以 0 退出，配置无效或下载失败时非 0 |
+| `basctl report [server.xml]` | 连一次控制台（bashub）报一次主机与实例现状后退出；地址与凭证都取同目录 `basctl.conf` 的 `[remote]`，报上去了退出码才是 0。见 [channel.md](channel.md) |
+| `basctl agent [server.xml]` | 常驻：连上控制台后周期上报、回保活、执行固定指令（取日志 / 启停实例），断线自动重连；`start` / `stop` 之后也会顺带报一次 |
 | `basctl doctor [server.xml]` | 检查 `java` / `jstart`（以及启用 setline 时管理口通不通）是否就位，缺件时退出码非 0，见 [doctor.md](doctor.md) |
 
 ## 组件目录初始化
@@ -96,9 +99,32 @@ basctl init --force /opt/bas   # 覆盖为当前 basctl 内置的脚本
 basctl init --dry-run /opt/bas # 只打印将会写入的文件
 ```
 
-`bin/setenv.sh` 与 `conf/server.xml` 是用户配置（分别由用户与 `basctl pull` 维护），`init` 不
-生成也不改动它们。这是脚本唯一的安装/升级途径：升级 `basctl` 后重跑 `basctl init --force`，
-不再有单独的发行包 zip（原 `bas.sh update` 已移除）。
+`bin/setenv.sh`、`conf/basctl.conf` 与 `conf/server.xml` 是用户配置，`init` 不生成；
+`--force` 也不会覆盖它们。这是脚本唯一的安装/升级途径：升级 `basctl` 后重跑
+`basctl init --force`，不再有单独的发行包 zip（原 `bas.sh update` 已移除）。
+
+## 远程配置 `conf/basctl.conf`
+
+控制台连接只从 `conf/basctl.conf` 读取，不再使用 `bas_remote_*` 环境变量，也不靠 `ip:` 请求头
+识别机器：
+
+```ini
+[remote]
+url = http://127.0.0.1:8080
+profile = openurp.prod
+token = fedcba9876543210fedcba9876543210
+```
+
+- `url` 是控制台根地址（有反向代理前缀就连前缀一起写）；`profile` 是 bashub 里的配置名
+  `org.name`；`token` 是该 Profile 的 `key`（bashub 配置详情里可查看/重置）。
+- `pull` 请求 `<url>/api/<profile>/config/server`，并发送
+  `Authorization: Bearer <token>`。token 不对返回 401，Profile 不存在返回 404。
+- `start.sh` 发现 `conf/basctl.conf` 存在就先尝试一次 `pull`；拉取失败只打印警告，并继续用
+  现有 `conf/server.xml` 启动。`restart.sh` 同样先尽力拉取，再 resolve / stop / start；
+  远端不可用不会让改配置失败挡住已安装版本的启动。
+- `server.xml` 里仍可写 `${bas_remote_url}` / `${bas_remote_token}`，解析时会用
+  `basctl.conf` 的 `remote.url` / `remote.token` 展开，而不是读取环境变量。
+- 文件含凭证，建议 `chmod 600 conf/basctl.conf`。
 
 ## 常见场景
 
@@ -140,6 +166,23 @@ basctl setline              # 外部状态漂移时手工推一次（--sync 是�
 细节、多 `BAS_HOME` 共享、安全边界见 [setline.md](setline.md) 与
 [setline-config.md](setline-config.md)。
 
+### 接到控制台（bashub）
+
+控制台端（bashub）在配置里给这台机器生成一个 `Profile.key`，写入 `conf/basctl.conf` 的
+`[remote] token`；`pull` 和通道握手共用它，不再写进 `server.xml`。
+
+```bash
+# 手工报一次：主机家底 + 本机活着的实例
+$BAS_HOME/bin/basctl report "$BAS_HOME/conf/server.xml"
+
+# 常驻（生产机上以 systemd unit 跑）：周期上报，并接取日志 / 启停指令
+$BAS_HOME/bin/basctl agent "$BAS_HOME/conf/server.xml"
+```
+
+`[remote] url/profile/token` 不完整时，`agent` 打印警告并以 0 退出、`pull` 告警后不刷新配置；
+`start` / `stop` 之后的上报也会跳过。启停之后拉取或上报失败只提醒，不改启停的退出码。
+细节与排错见 [channel.md](channel.md)，协议见 [channel-protocol.md](channel-protocol.md)。
+
 ### 一机器一出口（容器）
 
 容器里 `server.xml` 写 `<setline port="10080"/>`、`<server http="0"/>` 即可：
@@ -149,8 +192,8 @@ basctl setline              # 外部状态漂移时手工推一次（--sync 是�
 ### 拉配置与开防火墙
 
 ```sh
-basctl pull --remote=http://ctrl.internal:8080 /opt/bas   # 缺省取 $bas_remote_url
-basctl firewall /opt/bas                                  # 交互式地放行 server.xml 里的端口
+basctl pull /opt/bas              # 读取 /opt/bas/conf/basctl.conf
+basctl firewall /opt/bas          # 交互式地放行 server.xml 里的端口
 ```
 
 ## 环境变量
@@ -161,8 +204,6 @@ basctl firewall /opt/bas                                  # 交互式地放行 s
 | `JAVA_HOME` | `doctor`、creator 写出的启动命令 | `$JAVA_HOME/bin/java` 优先于 `PATH` 上的 `java` |
 | `beangle_jstart` | 用 jstart 的命令 | jstart 可执行文件路径，缺省按 `PATH` 找 `jstart` |
 | `beangle_basctl` | jstart 回调 creator 时 | basctl 可执行文件路径；缺省用自身（`/proc/self/exe`），debug 构建或改名时可用它指定 |
-| `bas_remote_url` | `pull`、`server.xml` 的 `${bas_remote_url}` | 控制端地址 / 构件远端仓库地址 |
-| `bas_remote_token` | `server.xml` 的 `${bas_remote_token}` | 远端仓库 token |
 | `M2_REPO` / `M2_REMOTE_REPO` | `run`（`--local` / `--remote` 的缺省值） | 本地 / 远端构件仓库 |
 | `micdn_token` | 传给 jstart 的下载 token | 由 `server.xml` 的 token 临时设置，命令结束后恢复原值 |
 

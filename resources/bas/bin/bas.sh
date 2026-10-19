@@ -11,9 +11,6 @@ if [ -x "$BAS_HOME/bin/setenv.sh" ]; then
   . "$BAS_HOME/bin/setenv.sh"
 fi
 
-# basctl 作为子进程运行，setenv.sh 里未 export 的变量要显式导出
-export bas_remote_url
-
 conf="$BAS_HOME/conf/server.xml"
 
 usage() {
@@ -25,6 +22,7 @@ usage() {
   echo "  start       Start instances via jstart           (basctl start <farm|server|all>)"
   echo "  stop        Stop instances started by start      (basctl stop <farm|server|all>)"
   echo "  run         Run one webapp in embedded mode      (basctl run --engine=<type>-<ver> <war>)"
+  echo "  logs        Tail an instance console log          (basctl logs <farm.server> [-n N] [-f])"
   echo "  setline     Push the routes to setline         (basctl setline [--sync])"
   echo "  restart     resolve, then stop + start"
   echo "  pull        Fetch and update conf/server.xml    (basctl pull)"
@@ -39,6 +37,7 @@ case "$cmd" in
   start)    exec "$BAS_HOME/bin/start.sh" "${@:2}" ;;
   stop)     exec "$BAS_HOME/bin/stop.sh" "${@:2}" ;;
   run)      exec "$basctl_cmd" run --workdir="$BAS_HOME" "${@:2}" ;;
+  logs)     exec "$basctl_cmd" logs "$conf" "${@:2}" ;;
   setline)  exec "$basctl_cmd" setline "$conf" "${@:2}" ;;
   restart)  exec "$BAS_HOME/bin/restart.sh" "${@:2}" ;;
   pull)     exec "$basctl_cmd" pull "$BAS_HOME" ;;

@@ -15,14 +15,15 @@
  */
 
 /**
- * basctl 命令行入口：`version` / `banner` / `status` / `init` / `make` / `resolve` /
- * `start` / `stop` / `run` / `setline` / `doctor` / `firewall` / `pull`。
+ * basctl 命令行入口：`version` / `banner` / `status` / `logs` / `init` / `make` / `resolve` /
+ * `start` / `stop` / `run` / `setline` / `doctor` / `firewall` / `pull` / `report` / `agent`。
  *
  * `start` / `stop` 在 `server.xml` 配了 `<setline>` 时还会自动对账路由（见 bas.setlineproc），
  * `--no-setline` 可临时跳过。
  */
 module bas.main;
 
+import bas.agent : runAgent, runReport;
 import bas.banner;
 import bas.config;
 import bas.doctor : runDoctor;
@@ -31,6 +32,7 @@ import bas.endpoint : adminAddress, portFree, resolveSetlinePort;
 import bas.enginecreator;
 import bas.firewall;
 import bas.init;
+import bas.logs : runLogs;
 import bas.net;
 import bas.pull;
 import bas.shellenv : readContainer;
@@ -79,6 +81,10 @@ version (unittest) {
       return cmdBanner(args[2 .. $]);
     case "status":
       return cmdStatus();
+    case "logs": {
+      auto rest = args[2 .. $];
+      return runLogs(dirName(dirName(absolutePath(takeConfigFile(rest)))), rest);
+    }
     case "init":
       return runInit(args[2 .. $]);
     case "make":
@@ -105,6 +111,14 @@ version (unittest) {
       return runFirewall(args[1 .. $]);
     case "pull":
       return runPull(args[2 .. $]);
+    case "report": {
+      auto rest = args[2 .. $];
+      return runReport(takeConfigFile(rest), basctlVersion, rest);
+    }
+    case "agent": {
+      auto rest = args[2 .. $];
+      return runAgent(takeConfigFile(rest), basctlVersion, rest);
+    }
     case "help", "-h", "--help":
       printUsage();
       return 0;
@@ -125,6 +139,8 @@ void printUsage() {
   stderr.writeln("  version                       Show the basctl version");
   stderr.writeln("  banner [server.xml]           Show logo, versions and local hosts (used by bas.sh version)");
   stderr.writeln("  status                        Show running servers under $BAS_HOME/servers");
+  stderr.writeln("  logs [server.xml] <instance>  Print the tail of logs/<instance>/console.out");
+  stderr.writeln("                                (-n <lines> default 50, -f to keep following)");
   stderr.writeln("  init [--force] [workdir]      Install the control scripts under <workdir>/bin");
   stderr.writeln("  make [server.xml] <pattern>   Generate specs and resolve dependencies (no start)");
   stderr.writeln("  make <type> [options]         Prepare a container for jstart `[engine] init` (creator)");
@@ -147,7 +163,10 @@ void printUsage() {
   stderr.writeln("  doctor [server.xml]           Check that java / jstart are on this machine");
   stderr.writeln("                                (setline too, but only when <setline> is configured)");
   stderr.writeln("  firewall [workdir]            Configure firewalld ports from conf/server.xml");
-  stderr.writeln("  pull [--remote=<url>] [workdir]  Fetch conf/server.xml from the control endpoint");
+  stderr.writeln("  pull [--file=<basctl.conf>] [workdir]  Fetch conf/server.xml from the control endpoint");
+  stderr.writeln("  report [server.xml]           Push one host/instance snapshot to the hub and exit");
+  stderr.writeln("  agent [server.xml]            Stay connected to the hub: periodic reports, log reads,");
+  stderr.writeln("                                and the fixed service actions (see docs/channel-protocol.md)");
 }
 
 /**

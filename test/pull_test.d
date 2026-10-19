@@ -14,21 +14,48 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-/** Unit tests for bas.pull. */
+/** Unit tests for bas.remote URL construction and bas.pull's command behavior. */
 module test.pull_test;
 
-import bas.pull : ipHeader, serverXmlUrl;
+import bas.pull : runPull;
+import bas.remote : RemoteConfig, profileControlUrl, serverConfigUrl;
 
-@("serverXmlUrl appends config/server.xml and tolerates trailing slashes") unittest {
-  assert(serverXmlUrl("https://control.example/api") == "https://control.example/api/config/server.xml");
-  assert(serverXmlUrl("https://control.example/api/") == "https://control.example/api/config/server.xml");
-  assert(serverXmlUrl("https://control.example/api///") == "https://control.example/api/config/server.xml");
-  assert(serverXmlUrl(" https://control.example/api ") == "https://control.example/api/config/server.xml");
+import std.file : exists, mkdirRecurse, rmdirRecurse, tempDir, write;
+import std.path : buildPath;
+import std.uuid : randomUUID;
+
+@("server config URL is built from control root, profile and trailing slashes") unittest {
+  assert(serverConfigUrl(RemoteConfig("https://control.example", "openurp.prod", "k"))
+      == "https://control.example/api/openurp.prod/config/server");
+  assert(serverConfigUrl(RemoteConfig("https://control.example/", "openurp.prod", "k"))
+      == "https://control.example/api/openurp.prod/config/server");
+  assert(profileControlUrl(RemoteConfig("https://control.example/api/", "openurp.prod", "k"))
+      == "https://control.example/api/openurp.prod");
+  assert(profileControlUrl(RemoteConfig("https://control.example/api", "openurp.prod", "k"))
+      == "https://control.example/api/openurp.prod");
+  assert(profileControlUrl(RemoteConfig("https://control.example/api/openurp.prod/", "openurp.prod", "k"))
+      == "https://control.example/api/openurp.prod");
 }
 
-@("ipHeader drops loopback and joins the rest with spaces") unittest {
-  assert(ipHeader(["127.0.0.1", "10.0.0.1", "192.168.1.2"]) == "10.0.0.1 192.168.1.2");
-  assert(ipHeader(["10.0.0.1"]) == "10.0.0.1");
-  assert(ipHeader(["127.0.0.1"]) == "");
-  assert(ipHeader([]) == "");
+@("server config URL keeps a reverse-proxy prefix") unittest {
+  assert(serverConfigUrl(RemoteConfig("https://control.example/bashub/", "openurp.prod", "k"))
+      == "https://control.example/bashub/api/openurp.prod/config/server");
+}
+
+@("pull warns and exits cleanly when remote is not configured") unittest {
+  auto root = buildPath(tempDir(), "basctl-pull-unconfigured-" ~ randomUUID().toString);
+  scope (exit) if (exists(root)) rmdirRecurse(root);
+  mkdirRecurse(buildPath(root, "conf"));
+
+  assert(runPull([root]) == 0);
+}
+
+@("pull reports invalid remote configuration as an error") unittest {
+  auto root = buildPath(tempDir(), "basctl-pull-invalid-" ~ randomUUID().toString);
+  scope (exit) if (exists(root)) rmdirRecurse(root);
+  mkdirRecurse(buildPath(root, "conf"));
+  write(buildPath(root, "conf", "basctl.conf"),
+      "[remote]\nurl = ftp://host\nprofile = openurp.prod\ntoken = k\n");
+
+  assert(runPull([root]) == 1);
 }

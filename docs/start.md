@@ -35,8 +35,8 @@ basctl start all --no-setline                # 临时不把这批实例的路由
    再 exec 它（进程变为容器）。
 
 确认存活（启动后约 2 秒探一次）后把 `pid` 补进 `servers/<farm.server>/server.info`，控制台输出进
-`logs/<farm.server>/console.out`（`servers/<farm.server>/logs` 是指向它的软链），
-`basctl status` 与 `make` 流程共用这套布局。目标已在运行时不再重复启动（幂等，退出码 0）。
+`logs/<farm.server>/console.out`（`servers/<farm.server>/logs` 是指向它的软链；跟着看用
+`basctl logs <farm.server> -f`），`basctl status` 与 `make` 流程共用这套布局。目标已在运行时不再重复启动（幂等，退出码 0）。
 准备失败（端口没得挑、webapp 解析不出来、依赖缺件）或启动失败（进程没起来）的实例不留运行信息，
 端口预留随之撤销；同一批里其余实例照常启动，此时退出码非 0。
 

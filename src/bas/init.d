@@ -19,7 +19,8 @@
  *
  * 脚本内嵌在本二进制里（`resources/bas/bin/`），随 basctl 版本发布，避免发行包与
  * basctl 版本错配。已存在的脚本默认保留（用户可能改过），`--force` 才覆盖；
- * `bin/setenv.sh` 与 `conf/server.xml` 属用户配置，本命令不生成也不改动。
+ * `bin/setenv.sh`、`conf/basctl.conf` 与 `conf/server.xml` 属用户配置，本命令不生成，
+ * `--force` 也不改动它们。
  */
 module bas.init;
 

@@ -12,11 +12,13 @@
 | 解析与预取 | `basctl make [server.xml] <pattern>`、`basctl resolve` | 解析 webapp（`gav://` / `http(s)://` / 本地路径），生成实例目录与 jstart launch spec，再 `jstart resolve` 预取依赖，不起进程 | [start.md](start.md) |
 | 起停 | `basctl start` / `basctl stop` | 定端口、写 `server.info`、后台 `jstart run`；停止时按 pid 优雅退出（`--timeout` / `--force`） | [start.md](start.md)、[server-info.md](server-info.md) |
 | 状态 | `basctl status` | 读 `servers/<name>/server.info` 列出运行中的实例；配了 `<setline>` 时另报命名空间、管理口通不通与 route 列 | [server-info.md](server-info.md)、[setline.md](setline.md) |
+| 看实例日志 | `basctl logs <farm.server>` | 读 `logs/<实例>/console.out` 的尾部（`-n` 缺省 50 行，上限 2000），`-f` 持续跟随（含日志滚动后的新文件）；通道的 `log:read` 与它共用同一份读法（`bas.logs`） | [usage.md](usage.md)、[channel.md](channel.md) |
 | 嵌入式跑单应用 | `basctl run --engine=<type>-<version> <app>` | 一个参数给出容器类型与版本，生成单应用 spec 后前台 `jstart run`；纯前台，Ctrl-C 退出 | [run.md](run.md) |
 | 本地代理与对账 | `basctl setline` | 按运行中的实例把路由推给已经在跑的 setline（推一次即退出，只推，不生成 setline 的配置、不拉起它） | [setline.md](setline.md)、[setline-config.md](setline-config.md) |
 | 容器入口（creator） | `basctl make <type>` | jstart `[engine] init` 协议的回调，把容器启动命令写回 spec | [engine-creator.md](engine-creator.md) |
 | 环境自检 | `basctl doctor` | 检查 `java` / `jstart`（启用 setline 时还有管理口可达性） | [doctor.md](doctor.md) |
 | 防火墙 | `basctl firewall` | 按 `server.xml` 交互式配置 firewalld 的放行端口 | [usage.md](usage.md) |
+| 汇报与指令通道 | `basctl report` / `basctl agent` | 主动拨一条出站 WebSocket 到控制台（bashub），把本机现状（主机家底 + 活着的实例）报上去，并接收固定原语（立即上报 / 取日志）；`start` / `stop` 之后顺带报一次 | [channel.md](channel.md)、[channel-protocol.md](channel-protocol.md) |
 | 拉取配置 | `basctl pull` | 从控制端拉取 `conf/server.xml`（旧配置备份为 `server_old.xml`） | [usage.md](usage.md) |
 | 横幅与版本 | `basctl banner` / `basctl version` | `bas.sh version` 调前者：ASCII logo + bas 引擎版本 + basctl 版本 + 本机地址 | [usage.md](usage.md) |
 | 发行 | `scripts/build_deb.sh` / `build_rpm.sh`、`Dockerfile` | deb / rpm 包，以及「一机器一出口」的容器镜像 | [container.md](container.md) |
@@ -28,6 +30,7 @@
 | **意图** | `conf/server.xml` | 人 / `basctl pull` | 所有命令 |
 | **现状** | `$BAS_HOME/servers/<name>/server.info` | `basctl start` / `stop`（唯一写者） | `status`、`stop`、对账 |
 | **运行态** | setline 的路由表（内存 + 它写回自己配置文件的 `routes`） | setline 进程（`basctl setline` 只推） | `status` 的 route 列、对账 |
+| **远端副本**（可选） | bashub 里那份「谁报的就覆盖谁」的现状 | `basctl report` / `agent` 的 `report:*` | 控制台（bashub）；basctl 自己不读 |
 
 **对账** = 把运行态对齐到现状的过程：活着的实例有路由，死掉/消失的摘除。
 
@@ -99,7 +102,7 @@ bas 引擎版本取 basctl 内置默认（`--bas=` 可覆盖），依赖集与 `
 
 `server.xml` 中 `<repository>` / `<snapshot-repo>` 的 `local` / `remote` / `token` 原样透传给
 `jstart`；`remote` 里的 `${bas_remote_url}`、`token` 里的 `${bas_remote_token}` 在解析阶段
-展开为同名环境变量。
+用同目录 `conf/basctl.conf` 的 `remote.url` / `remote.token` 展开，不读取同名环境变量。
 
 实例身份与停止只归 basctl：jstart 不再写 `app.pid`、也不提供 `stop`，它就是「解析 + 准备 +
 exec」——所以 `run` 是纯前台（Ctrl-C 退出），`start` 起来的是后台进程，两者的运行信息都记在
@@ -130,8 +133,5 @@ exec」——所以 `run` 是纯前台（Ctrl-C 退出），`start` 起来的是
 
 ## 尚未定的事
 
-- **"漂移自动收敛"要不要做**：现在只靠 `start` / `stop` 加手工一次对账，外部把实例弄没了的
-  漂移要人看见 route 列才会去修。要做成常驻对账进程（谁跑、以什么账号跑、一台机器一个还是
-  每份 `BAS_HOME` 一个）之前，先看实际有多少这种漂移——`--watch` 已经因为"时机已经说清"删掉了。
-- **生产侧 agent 通道的形态**：registry 存什么、agent 多久拉一次、拉取的鉴权、渲染完是
-  `reload` 还是 `restart`。产出侧已定：消费 `server.xml` / setline 读接口，不新增中间格式。
+已经整理进 [roadmap.md](roadmap.md)：R1 与 bashub 的汇报/指令通道、R2 漂移自动收敛、
+R3 生产侧拓扑 agent。本文件只保留长期约束（上面的「边界与非目标」）。

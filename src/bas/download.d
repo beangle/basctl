@@ -29,7 +29,7 @@ import std.stdio : stderr, writeln;
  * 先下载到同目录的 `.名字.part`，成功后再改名，避免跨设备 rename 与半个文件。
  * 失败时不创建目标目录之外的东西，返回 false。
  *
- * `headers` 逐条作为 `curl -H` 传入（如 `ip:10.0.0.1 10.0.0.2`）。
+ * `headers` 逐条作为 `curl -H` 传入（如 `Authorization: Bearer ...`）。
  */
 bool curlDownload(string url, string local, string[] headers = null) {
   mkdirRecurse(dirName(local));

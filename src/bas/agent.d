@@ -1,0 +1,451 @@
+/* Copyright (C) 2023 Beangle
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
+/**
+ * 控制通道的 agent 侧：**主动出站**连一条 WebSocket 到 bashub，报现状、听指令。
+ *
+ * 两个命令共用一个循环，只是跑几轮不同：
+ *
+ * - `basctl report`：连上、发 `hello` + 两份上报、断开（一次性，`start` / `stop` 之后也走它）；
+ * - `basctl agent`：常驻，断线按 {@link reconnectDelay} 重连，周期上报并随时接指令。
+ *
+ * 三条不变量（见 `docs/channel-protocol.md`）：
+ *
+ * 1. **认不出的原语既不执行也不退出**——有 `id` 回 `result{ok:false}`，没有就记一行日志；
+ * 2. 报文解析失败同样只记一行：agent 是常驻进程，一条坏消息不许把它弄死；
+ * 3. 指令走白名单分支，没有「把控制台来的字符串交给 shell」这条路。
+ *
+ * 顺序也是设计的一部分：`hello`（身份与能力）→ 两份上报 → 之后按节拍。重连后重发整份快照，
+ * 不做增量续传——上报是整份替换语义，接上就是一致的。
+ */
+module bas.agent;
+
+import bas.channel;
+import bas.config : Container, parseServerXmlFile;
+import bas.hub : agentUrl;
+import bas.logs : consoleLog, countLines, maxLogLines, plainName, readLogWindow;
+import bas.net : hostName;
+import bas.remote : RemoteConfig, loadRemoteConf, profileControlUrl, remoteConfFileName, validateRemoteConf;
+import bas.report : basReport, osReport;
+import bas.starter : serviceAction;
+
+import vibe.core.core : exitEventLoop, runApplication, runTask, sleep;
+import vibe.core.log : logInfo, logWarn;
+import vibe.http.client : HTTPClientRequest, HTTPClientSettings;
+import vibe.http.websockets : WebSocket, connectWebSocketEx;
+import vibe.inet.url : URL;
+
+import core.time : Duration, seconds;
+import std.datetime.stopwatch : MonoTime;
+import std.file : exists;
+import std.json : JSONValue;
+import std.path : absolutePath, buildPath, dirName;
+import std.process : spawnShell;
+import std.stdio : stderr, writeln;
+import std.conv : to;
+import std.string : format;
+
+/** 心跳节拍：循环等消息的超时。等到了就处理消息，等不到就用来看计时器。 */
+private enum tick = 1.seconds;
+
+/** 周期上报的间隔（`report:os` / `report:bas` 各按这个节拍报一次）。 */
+private enum reportInterval = 30.seconds;
+
+/** 多久没收到任何消息就认为这条连接已经废了，交给外层重连（中间设备会静默掐断空闲连接）。 */
+private enum silentTimeout = 90.seconds;
+
+/** 断线后的重连间隔：固定值，不做指数退避——少一个要调的参数。 */
+private enum reconnectDelay = 10.seconds;
+
+/** 最近若干个请求的结果：重复的 `id` 只回放，不重复执行（尤其不能让 restart 做两遍）。 */
+private enum int recentResultLimit = 32;
+
+/**
+ * 拨号的连接与读取超时。
+ *
+ * 控制台多数在机房里、也可能暂时不可达，所以「连不上」要有确定的上界：缺省值是
+ * `Duration.max`，真按它等下去，`start` / `stop` 之后的那次顺带上报能让人等上好几分钟。
+ */
+private enum connectTimeout = 20.seconds;
+
+/** 一次会话需要的全部输入。地址与 token 都来自同目录 `conf/basctl.conf`，没有第二处来源。 */
+struct AgentContext {
+  string endpoint;
+  string token;
+  /** 当前配置路径；service:* 动作与 report:bas 都从同一份 server.xml 找实例。 */
+  string configFile;
+  string host;
+  string basHome;
+  string basVersion;
+  string basctlVersion;
+  /** 只跑一轮（`report`）；常驻（`agent`）为 false。 */
+  bool once;
+  /** 这一轮到底报上去了没有：`report` 据此定退出码，启停之后的顺带上报据此决定要不要提醒。 */
+  bool served;
+  /** 请求号 → 已发出的 result；跨重连保留，按插入顺序淘汰。 */
+  string[string] recentResults;
+  string[] recentRequestIds;
+}
+
+/** `basctl agent [server.xml]`：常驻，连上就报，断线重连。 */
+int runAgent(string configFile, string basctlVersion, string[] rest) {
+  if (rest.length) {
+    stderr.writeln("Unknown option: " ~ rest[0]);
+    return 1;
+  }
+  if (!exists(configFile)) {
+    stderr.writeln("basctl agent: cannot find config file " ~ configFile);
+    return 1;
+  }
+  auto remotePath = agentRemotePath(configFile);
+  auto remote = loadRemoteConf(remotePath);
+  if (!channelEnabled(remote)) {
+    stderr.writeln("basctl agent: warning: remote is not configured in " ~ remotePath
+        ~ "; agent not started.");
+    return 0;
+  }
+  AgentContext ctx;
+  try {
+    validateRemoteConf(remote, remotePath);
+    ctx = agentContext(parseServerXmlFile(configFile), remote, configFile, basctlVersion, false);
+  } catch (Exception e) {
+    stderr.writeln("basctl agent: " ~ e.msg);
+    return 1;
+  }
+  writeln("channel: reporting to " ~ ctx.endpoint);
+  runTask({ agentLoop(ctx); });
+  return runApplication(null);
+}
+
+/** `basctl report [server.xml]`：连一次、发两份上报、断开。 */
+int runReport(string configFile, string basctlVersion, string[] rest) {
+  if (rest.length) {
+    stderr.writeln("Unknown option: " ~ rest[0]);
+    return 1;
+  }
+  if (!exists(configFile)) {
+    stderr.writeln("basctl report: cannot find config file " ~ configFile);
+    return 1;
+  }
+  AgentContext ctx;
+  try {
+    ctx = agentContext(parseServerXmlFile(configFile), configFile, basctlVersion, true);
+  } catch (Exception e) {
+    stderr.writeln("basctl report: " ~ e.msg);
+    return 1;
+  }
+  runTask({ agentLoop(ctx); });
+  auto code = runApplication(null);
+  // 连不上时事件循环同样正常退出，所以退出码得看「报上去了没有」，不能只看循环的返回值
+  if (!ctx.served) {
+    stderr.writeln("no snapshot published: " ~ ctx.endpoint);
+    return 1;
+  }
+  return code;
+}
+
+/**
+ * `start` / `stop` 之后顺手推一次现状：阶段 1「事件驱动」的时机，与 {@link bas.setline} 的对账同构。
+ *
+ * 没有完整的 `basctl.conf [remote]` 就什么都不做；推不上去只留一行提醒——通道是附带能力，不该挡住
+ * 应用启停，也不该改它们的退出码。下一次启停、常驻 agent 的周期上报或手工 `basctl report`
+ * 都会补上这一次。
+ */
+void publishSnapshot(const Container conf, string configFile, string basctlVersion) {
+  auto remotePath = agentRemotePath(configFile);
+  auto remote = loadRemoteConf(remotePath);
+  // 没有完整的 [remote] 配置就直接返回：不配就不该在每次启停后往 stderr 喊一声
+  if (!channelEnabled(remote))
+    return;
+  AgentContext ctx;
+  try {
+    validateRemoteConf(remote, remotePath);
+    ctx = agentContext(conf, remote, configFile, basctlVersion, true);
+  } catch (Exception e) {
+    stderr.writeln("snapshot not published: " ~ e.msg);
+    return;
+  }
+  runTask({ agentLoop(ctx); });
+  runApplication(null);
+  if (!ctx.served)
+    stderr.writeln("Snapshot not published (" ~ ctx.endpoint ~ "); the instances themselves are fine.");
+}
+
+/** `[remote] url/profile/token` 齐全即启用通道；文件不存在或字段缺失都静默跳过。 */
+bool channelEnabled(const RemoteConfig remote) {
+  return remote.complete;
+}
+
+/** 与 `server.xml` 同目录的 `basctl.conf`。 */
+private string agentRemotePath(string configFile) {
+  return buildPath(dirName(configFile), remoteConfFileName);
+}
+
+/** 组装上下文：地址、Profile 与 token 全部来自同目录 `basctl.conf`。 */
+AgentContext agentContext(const Container conf, string configFile, string basctlVersion, bool once) {
+  auto remotePath = agentRemotePath(configFile);
+  auto remote = loadRemoteConf(remotePath);
+  validateRemoteConf(remote, remotePath);
+  return agentContext(conf, remote, configFile, basctlVersion, once);
+}
+
+/** 已读取并校验过的远程配置；`publishSnapshot` 用它避免重复读文件。 */
+private AgentContext agentContext(const Container conf, const RemoteConfig remote, string configFile,
+    string basctlVersion, bool once) {
+  return AgentContext(agentUrl(profileControlUrl(remote)), remote.token, configFile, hostName(),
+      dirName(dirName(absolutePath(configFile))), conf.version_, basctlVersion, once);
+}
+
+/**
+ * 连接循环：连一次、跑一次会话；常驻模式下失败或断开都只是等一会儿再来。
+ *
+ * 整个循环 `nothrow`（交给 vibe 的 `runTask`）：日志与 `sleep` 自己也可能抛，所以逐段兜住——
+ * **agent 退出只发生在收到信号时**，网络与磁盘的毛病都不该让它退出。
+ */
+private void agentLoop(ref AgentContext ctx) @system nothrow {
+  while (true) {
+    try {
+      connectOnce(ctx);
+    } catch (Throwable t) {
+      swallow({ logWarn("channel: %s", t.msg); });
+    }
+    if (ctx.once)
+      break;
+    swallow({ sleep(reconnectDelay); });
+  }
+  exitEventLoop(true);
+}
+
+/** 拨号、握手（`Authorization: Bearer <key>`），连上后交给 {@link serve}。 */
+private void connectOnce(ref AgentContext ctx) {
+  swallow({ logInfo("channel: connecting to %s", ctx.endpoint); });
+  auto settings = new HTTPClientSettings;
+  settings.connectTimeout = connectTimeout;
+  // WebSocket 复用底层 TCP 的 readTimeout。若这里仍用 20s，而 hub 的 ping 是 30s，
+  // 空闲连接会在第一轮心跳前就被客户端自己掐断，表现为每 30s 重连一次。
+  settings.readTimeout = silentTimeout;
+  auto ws = connectWebSocketEx(URL(ctx.endpoint),
+      (scope HTTPClientRequest req) @safe {
+        req.headers["Authorization"] = "Bearer " ~ ctx.token;
+      }, settings);
+  scope (exit) {
+    if (ws.connected)
+      ws.close();
+  }
+  serve(ctx, ws);
+}
+
+/** 执行一段可能抛异常的动作，把异常压成一行日志——循环里的每一步都不许把 agent 弄死。 */
+private void swallow(scope void delegate() action) @system nothrow {
+  try {
+    action();
+  } catch (Throwable t) {
+    try {
+      logWarn("channel: %s", t.msg);
+    } catch (Throwable) {
+      // 连日志都写不出去就不再纠缠：这一层的职责是「不让异常逃出去」
+    }
+  }
+}
+
+/** 一条连接的生命周期：`hello` → 两份上报 → 按节拍上报、回 `ping`、执行固定原语。 */
+private void serve(ref AgentContext ctx, scope WebSocket ws) {
+  ws.send(helloMessage(ctx.host, ctx.basctlVersion, ctx.basHome, ctx.basVersion));
+  sendReports(ctx, ws);
+  ctx.served = true;
+  logInfo("channel: connected as %s", ctx.host.length ? ctx.host : ctx.basHome);
+
+  if (ctx.once)
+    return;
+
+  auto lastReport = MonoTime.currTime;
+  auto lastTraffic = lastReport;
+  while (ws.connected) {
+    if (ws.waitForData(tick)) {
+      handle(ctx, ws, ws.receiveText());
+      lastTraffic = MonoTime.currTime;
+    } else if (MonoTime.currTime - lastTraffic > silentTimeout) {
+      throw new Exception("no traffic from hub for " ~ silentTimeout.to!string);
+    }
+    if (MonoTime.currTime - lastReport > reportInterval) {
+      sendReports(ctx, ws);
+      lastReport = MonoTime.currTime;
+    }
+  }
+}
+
+/** 两份上报：`report:os`（主机）与 `report:bas`（实例清单）。整份替换，失败不影响下一条。 */
+private void sendReports(const AgentContext ctx, scope WebSocket ws) {
+  ws.send(reportMessage("report:os", osReport()));
+  Container container;
+  try {
+    // 每次重读配置：与 service:* 一样以当前 server.xml 为准，也能反映运行期的声明变化
+    container = parseServerXmlFile(ctx.configFile);
+  } catch (Exception e) {
+    logWarn("channel: cannot read declared instances from %s: %s", ctx.configFile, e.msg);
+  }
+  ws.send(reportMessage("report:bas", basReport(ctx.basHome, container)));
+}
+
+/** 处理一条来自 hub 的消息：白名单分支 + 认不出就拒绝（既不执行，也不退出）。 */
+private void handle(ref AgentContext ctx, scope WebSocket ws, string text) {
+  Envelope msg;
+  try {
+    msg = parseEnvelope(text);
+  } catch (Exception e) {
+    logWarn("channel: %s", e.msg);
+    return;
+  }
+
+  // 破坏性动作也走这一条：同一个 id 重发（控制台重试、网络抖动）只回放上次结果。
+  if (msg.isRequest()) {
+    if (auto previous = msg.id in ctx.recentResults) {
+      ws.send(*previous);
+      return;
+    }
+  }
+
+  switch (msg.type) {
+  case "ping":
+    ws.send(pongMessage());
+    break;
+  case "report:now":
+    sendReports(ctx, ws);
+    break;
+  case "log:read":
+    auto reply = logReadResult(ctx.basHome, msg.id, msg.body);
+    rememberResult(ctx, msg.id, reply);
+    ws.send(reply);
+    break;
+  case "service:start":
+  case "service:stop":
+  case "service:restart":
+    if (!msg.isRequest()) {
+      logWarn("channel: ignore %s without id", msg.type);
+      break;
+    }
+    auto action = msg.type["service:".length .. $];
+    auto reply = serviceResult(ctx.configFile, msg.id, action, msg.body);
+    rememberResult(ctx, msg.id, reply);
+    ws.send(reply);
+    // 结果是「动作做完了」，不是「快照已经推到」；随后整份重报，控制台不必再等下一轮。
+    sendReports(ctx, ws);
+    break;
+  default:
+    if (msg.isRequest())
+      ws.send(resultMessage(msg.id, false, JSONValue(null), unsupportedError(msg.type)));
+    else
+      logWarn("channel: ignore %s", msg.type);
+    break;
+  }
+}
+
+/** 记下请求结果；`id` 为空（通知）不记，超过上限丢掉最旧的一条。 */
+private void rememberResult(ref AgentContext ctx, string id, string reply) {
+  if (id.length == 0)
+    return;
+  if ((id in ctx.recentResults) is null)
+    ctx.recentRequestIds ~= id;
+  ctx.recentResults[id] = reply;
+  if (ctx.recentRequestIds.length > recentResultLimit) {
+    auto oldest = ctx.recentRequestIds[0];
+    ctx.recentRequestIds = ctx.recentRequestIds[1 .. $];
+    ctx.recentResults.remove(oldest);
+  }
+}
+
+/**
+ * `log:read`：读 `logs/<实例>/console.out` 的第 from–to 行，回
+ * `{total, from, to, lines:[...]}`。
+ *
+ * `tail` 是给「先看尾部、之后只取新增行」的客户端用的：from/to 都没给时，它把窗口定位到最后
+ * `tail` 行；给出 from 后仍按区间读，不重读历史。
+ *
+ * 实例名来自控制台，只允许**普通名字**（不含路径分隔符、不是 `.` / `..`）——它是目录名，不是路径，
+ * 否则控制台就能借日志接口读机器上任何文件。定位、数行与截断都在 {@link bas.logs} 里，和
+ * `basctl logs` 共用同一份读法。
+ *
+ * 只收 `basHome` 与 body，不碰连接：这条路径是控制台唯一能指到文件的地方，越是想少出岔子，
+ * 越要能脱离容器与事件循环单独测（见 `test/agent_test.d`）。
+ */
+string logReadResult(string basHome, string id, ref JSONValue body) {
+  auto instance = bodyText(body, "instance");
+  if (!plainName(instance))
+    return resultMessage(id, false, JSONValue(null), "bad-request");
+
+  auto path = consoleLog(basHome, instance);
+  if (!exists(path))
+    return resultMessage(id, false, JSONValue(null), "no-log");
+
+  auto from = bodyNumber(body, "from");
+  auto to = bodyNumber(body, "to");
+  auto tail = bodyNumber(body, "tail");
+  if (tail > maxLogLines)
+    tail = maxLogLines;
+  if (from <= 0) {
+    if (tail > 0) {
+      auto total = countLines(path);
+      from = total > tail ? total - tail + 1 : 1;
+    } else {
+      from = 1;
+    }
+  }
+  if (to <= 0 || to - from + 1 > maxLogLines)
+    to = from + maxLogLines - 1;
+
+  long total;
+  string[] lines;
+  try {
+    auto window = readLogWindow(path, from, to);
+    total = window.total;
+    lines = window.lines;
+  } catch (Exception e) {
+    return resultMessage(id, false, JSONValue(null), "read-failed: " ~ e.msg);
+  }
+
+  JSONValue[] items;
+  foreach (line; lines)
+    items ~= JSONValue(line);
+  JSONValue data = [
+    "total": JSONValue(total),
+    "from": JSONValue(from),
+    "to": JSONValue(from + lines.length - 1),
+    "lines": JSONValue(items)
+  ];
+  return resultMessage(id, true, data, "");
+}
+
+/**
+ * `service:start|stop|restart`：按 body 里的实例名调用本机启停，回
+ * `{state:"running"|"stopped", pid?}`。
+ *
+ * 实例名只是 `server.xml` 里的限定名，动作由 {@link bas.starter.serviceAction} 分支处理；
+ * 这里没有把控制台输入拼进命令行的路径。请求必须带 `id`（破坏性动作不接受无回执的通知）。
+ */
+string serviceResult(string configFile, string id, string action, ref JSONValue body) {
+  auto instance = bodyText(body, "instance");
+  if (!plainName(instance))
+    return resultMessage(id, false, JSONValue(null), "bad-request");
+
+  auto result = serviceAction(configFile, action, instance);
+  if (!result.ok)
+    return resultMessage(id, false, JSONValue(null), result.error);
+
+  JSONValue data = ["state": JSONValue(result.state)];
+  if (result.pid > 0)
+    data["pid"] = JSONValue(cast(long) result.pid);
+  return resultMessage(id, true, data, "");
+}

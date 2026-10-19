@@ -19,7 +19,27 @@ module bas.net;
 
 import std.algorithm : canFind;
 import std.format : format;
+import std.string : strip;
 import std.socket : Socket, SocketOption, SocketOptionLevel, SocketType, parseAddress;
+
+/**
+ * 本机主机名（短名）。取不到返回空串——Windows 开发机上没有 `gethostname`，那边用 `COMPUTERNAME`；
+ * 通道只是拿它当身份里的一个字段，取不到就不填，不该因此报错。
+ */
+string hostName() {
+  version (linux) {
+    import core.sys.posix.unistd : gethostname;
+    import std.string : fromStringz;
+
+    char[256] buffer;
+    if (gethostname(buffer.ptr, buffer.length) == 0)
+      return fromStringz(buffer.ptr).idup;
+  } else version (Windows) {
+    import std.process : environment;
+    return environment.get("COMPUTERNAME", "").strip.idup;
+  }
+  return "";
+}
 
 /**
  * 返回 `127.0.0.1` 与本机所有非回环 IPv4 地址。

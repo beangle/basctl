@@ -19,6 +19,9 @@
 | [docs/engine-creator.md](docs/engine-creator.md) | 容器入口（creator）：jstart `[engine] init` 协议 |
 | [docs/doctor.md](docs/doctor.md) | 环境自检：`java` / `jstart` / setline 管理口 |
 | [docs/container.md](docs/container.md) | 容器化「一机器一出口」：镜像内容、构建、运行、信号 |
+| [docs/channel.md](docs/channel.md) | 汇报通道（basctl → bashub）：怎么启用、`report` / `agent` 两条命令、上报什么、失败怎么办 |
+| [docs/channel-protocol.md](docs/channel-protocol.md) | 控制通道协议：端点与鉴权、消息信封、固定原语、节拍、未知消息的处理与扩展方式 |
+| [docs/roadmap.md](docs/roadmap.md) | 待定项与下一步：R1 与 bashub 的汇报/指令通道（阶段 3 已落地、阶段 4 启停已落地、审计待补）、R2 漂移自动收敛、R3 生产侧拓扑 agent |
 | [scripts/README.md](scripts/README.md) | deb / rpm 打包 |
 
 ## 版本语义

@@ -17,17 +17,30 @@
 /** Unit tests for bas.init. */
 module test.init_test;
 
+import bas.fsutil : setExecutable;
 import bas.init : installScripts, runInit;
 
-import std.algorithm : canFind;
+import std.algorithm : canFind, startsWith;
 import std.file : exists, readText, rmdirRecurse, tempDir, write;
 import std.path : buildPath;
+import std.process : execute;
+import std.string : splitLines;
 import std.uuid : randomUUID;
 
 private immutable string[] names = ["env.sh", "bas.sh", "start.sh", "stop.sh", "restart.sh"];
 
 private string newRoot(string tag) {
   return buildPath(tempDir, "basctl-init-" ~ tag ~ "-" ~ randomUUID().toString());
+}
+
+private string fakeBasctl(string root) {
+  auto path = buildPath(root, "fake-basctl.sh");
+  write(path, "#!/bin/bash\n"
+      ~ "printf '%s\\n' \"$*\" >> \"$BAS_HOME/fake-calls\"\n"
+      ~ "if [ \"$1\" = pull ]; then exit \"${FAKE_PULL_STATUS:-0}\"; fi\n"
+      ~ "exit 0\n");
+  setExecutable(path);
+  return path;
 }
 
 @("installScripts writes the control scripts") unittest {
@@ -72,6 +85,60 @@ private string newRoot(string tag) {
   assert(!exists(root));
 }
 
+@("installScripts never rewrites conf/basctl.conf, even with force") unittest {
+  auto root = newRoot("remote-conf");
+  scope (exit) if (exists(root)) rmdirRecurse(root);
+
+  installScripts(root, false, false);
+  auto conf = buildPath(root, "conf", "basctl.conf");
+  write(conf, "[remote]\nurl = https://hub.example.com\n");
+
+  installScripts(root, true, false);
+  assert(readText(conf) == "[remote]\nurl = https://hub.example.com\n");
+}
+
 @("runInit rejects unknown options") unittest {
   assert(runInit(["--nope"]) == 1);
+}
+
+@("start.sh warns and starts with the local server.xml when pull fails") unittest {
+  auto root = newRoot("start-pull");
+  scope (exit) if (exists(root)) rmdirRecurse(root);
+
+  installScripts(root, false, false);
+  write(buildPath(root, "conf", "basctl.conf"), "[remote]\nurl = http://127.0.0.1:1\n");
+  auto fake = fakeBasctl(root);
+  auto result = execute(["bash", buildPath(root, "bin", "start.sh"), "tools"],
+      ["beangle_basctl": fake, "FAKE_PULL_STATUS": "1"]);
+
+  assert(result.status == 0, result.output);
+  assert(result.output.canFind("warning: cannot refresh conf/server.xml"), result.output);
+  auto calls = readText(buildPath(root, "fake-calls"));
+  assert(calls.canFind("pull " ~ root), calls);
+  assert(calls.canFind("start " ~ buildPath(root, "conf", "server.xml") ~ " tools"), calls);
+}
+
+@("restart.sh warns on pull failure, resolves, stops and starts once") unittest {
+  auto root = newRoot("restart-pull");
+  scope (exit) if (exists(root)) rmdirRecurse(root);
+
+  installScripts(root, false, false);
+  write(buildPath(root, "conf", "basctl.conf"), "[remote]\nurl = http://127.0.0.1:1\n");
+  auto fake = fakeBasctl(root);
+  auto result = execute(["bash", buildPath(root, "bin", "restart.sh"), "tools"],
+      ["beangle_basctl": fake, "FAKE_PULL_STATUS": "1"]);
+
+  assert(result.status == 0, result.output);
+  assert(result.output.canFind("warning: cannot refresh conf/server.xml"), result.output);
+  auto calls = readText(buildPath(root, "fake-calls"));
+  assert(calls.canFind("resolve " ~ buildPath(root, "conf", "server.xml") ~ " tools"), calls);
+  assert(calls.canFind("stop " ~ buildPath(root, "conf", "server.xml") ~ " tools"), calls);
+  assert(calls.canFind("start " ~ buildPath(root, "conf", "server.xml") ~ " tools"), calls);
+  // restart 在停机前已经尝试过 pull，start.sh 不应再拉一次
+  assert(calls.canFind("pull " ~ root), calls);
+  size_t pulls;
+  foreach (line; calls.splitLines())
+    if (line.startsWith("pull "))
+      pulls++;
+  assert(pulls == 1, calls);
 }

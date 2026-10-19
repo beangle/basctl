@@ -45,10 +45,13 @@
  */
 module bas.starter;
 
+import bas.agent : publishSnapshot;
 import bas.artifact : isMavenCoord, parseArtifact;
 import bas.config;
 import bas.fsutil : linkIfMissing, mkdirPrivate;
 import bas.jstart : jstartCommand;
+import bas.logs : consoleLog, plainName, readTail;
+import bas.main : basctlVersion;
 import bas.net : localAddresses;
 import bas.portalloc : PortRange, defaultPortRange, defaultPortRangeText, parsePortRange, reservePort;
 import bas.resolver : resolveArtifact, resolveWebapps;
@@ -143,7 +146,18 @@ int runStart(string configFile, string[] rest) {
     stderr.writeln("No local server matches " ~ pattern.get);
     return 1;
   }
+  return startServers(container, configFile, basHome, servers, range, noSetline, true);
+}
 
+/**
+ * 启动一组已经选好的本机实例；命令行与通道的 `service:start` 共用这一段。
+ *
+ * `publish` 为 false 时不在本函数末尾推快照：常驻 agent 还要回 `result`，直接调用
+ * {@link bas.agent.publishSnapshot} 会再跑一次事件循环；agent 会在动作完成后自己发
+ * `report:bas`。
+ */
+private int startServers(Container container, string configFile, string basHome, Server[] servers,
+    PortRange range, bool noSetline, bool publish) {
   applyEngineDefaults(container, servers);
   auto startedAt = localIsoTimestamp(Clock.currTime());
 
@@ -216,6 +230,8 @@ int runStart(string configFile, string[] rest) {
   }
   writeln(started, " servers started.");
   reconcileRoutes(container, basHome, noSetline);
+  if (publish)
+    publishSnapshot(container, configFile, basctlVersion);
   return started == prepared.length && !failed ? 0 : 1;
 }
 
@@ -257,7 +273,9 @@ private void startUsage() {
   stderr.writeln("Usage: basctl start [server.xml] <farm|server|all> [--port-range=<from>-<to>] [--no-setline]");
   stderr.writeln("  <server http=\"0\"> (or no http attribute) gets a free port from the range");
   stderr.writeln("  (default " ~ defaultPortRangeText ~ "), recorded in servers/<name>/server.info.");
-  stderr.writeln("  With <setline> in server.xml the routes are reconciled after start (--no-setline skips it).");
+  stderr.writeln("  With <setline> in server.xml the routes are reconciled after start (--no-setline skips it);");
+  stderr.writeln("  with [remote] in conf/basctl.conf the host/instance snapshot is pushed once (best effort;");
+  stderr.writeln("  see docs/channel-protocol.md).");
 }
 
 /**
@@ -364,6 +382,7 @@ int runStop(string configFile, string[] rest) {
   writeln(stopped, " servers stopped.",
       skipped ? format!"(%s skipped)"(skipped) : "");
   reconcileRoutes(container, basHome, noSetline);
+  publishSnapshot(container, configFile, basctlVersion);
   return skipped ? 1 : 0;
 }
 
@@ -373,7 +392,8 @@ private void stopUsage() {
   stderr.writeln("  SIGTERMs the pid recorded in servers/<name>/server.info and waits "
       ~ defaultStopTimeoutSec.to!string
       ~ "s by default; --force SIGKILLs at once.");
-  stderr.writeln("  With <setline> in server.xml the routes are reconciled after stop (--no-setline skips it).");
+  stderr.writeln("  With <setline> in server.xml the routes are reconciled after stop (--no-setline skips it);");
+  stderr.writeln("  with [remote] in conf/basctl.conf the host/instance snapshot is pushed once (best effort).");
 }
 
 /** 单个实例的停止结果。 */
@@ -435,6 +455,75 @@ private StopOutcome stopInstance(string basHome, Server server, bool force, int 
   removeRunInfo(basHome, name);
   writeln(name ~ ": stopped (pid=" ~ pid.get.to!string ~ ").");
   return StopOutcome.stopped;
+}
+
+/** 控制通道 `service:*` 的结果，字段与 `docs/channel-protocol.md` 的应答一致。 */
+struct ServiceResult {
+  bool ok;
+  string state;
+  int pid;
+  string error;
+}
+
+/**
+ * 执行控制通道的 `service:start|stop|restart`。
+ *
+ * 实例名来自控制台，只接受 `server.xml` 里本机声明的 `farm.server`；动作走固定的三个分支，
+ * 不拼命令行、不把实例名交给 shell。`restart` 先在停机前准备一遍（与 `restart.sh` 的
+ * resolve-before-stop 同构），避免依赖解析失败时已经停了服务；动态端口取停机前的运行信息，
+ * 重启后保持原端口。
+ */
+ServiceResult serviceAction(string configFile, string action, string instance) {
+  if (action != "start" && action != "stop" && action != "restart")
+    return ServiceResult(false, "", 0, "bad-request");
+  if (!plainName(instance))
+    return ServiceResult(false, "", 0, "bad-request");
+  if (!exists(configFile))
+    return ServiceResult(false, "", 0, "no-config");
+
+  Container container;
+  try {
+    container = parseServerXmlFile(configFile);
+  } catch (Exception e) {
+    return ServiceResult(false, "", 0, "bad-config: " ~ e.msg);
+  }
+  auto basHome = dirName(dirName(absolutePath(configFile)));
+
+  Server target;
+  foreach (server; localServers(container, instance))
+    if (server.qualifiedName == instance)
+      target = server;
+  if (target is null)
+    return ServiceResult(false, "", 0, "no-instance");
+  applyEngineDefaults(container, [target]);
+
+  auto previous = readInstanceInfo(basHome, instance);
+  if (action == "restart" && !previous.isNull && target.http == 0)
+    target.http = previous.get.httpPort;
+
+  // 与 restart.sh 同序：准备失败就停在原处，不先停服务。
+  if (action == "restart" && prepareServer(basHome, container, target).isNull)
+    return ServiceResult(false, "", 0, "prepare-failed");
+
+  if (action == "stop" || action == "restart") {
+    final switch (stopInstance(basHome, target, false, defaultStopTimeoutSec)) {
+    case StopOutcome.failed:
+      return ServiceResult(false, "", 0, "stop-failed");
+    case StopOutcome.stopped:
+    case StopOutcome.notRunning:
+      break;
+    }
+    reconcileRoutes(container, basHome, false);
+    if (action == "stop")
+      return ServiceResult(true, "stopped", 0, "");
+  }
+
+  if (startServers(container, configFile, basHome, [target], defaultPortRange, false, false) != 0)
+    return ServiceResult(false, "", 0, "start-failed");
+  auto info = readInstanceInfo(basHome, instance);
+  if (info.isNull || info.get.pid <= 0 || !processRunning(info.get.pid))
+    return ServiceResult(false, "", 0, "start-failed");
+  return ServiceResult(true, "running", info.get.pid, "");
 }
 
 /** 等进程退出，最多 `timeoutSec` 秒；已经退出返回 true。 */
@@ -774,11 +863,6 @@ private int launchBackground(string spec, string log, const(string)[] repos) {
     return 0;
 }
 
-/** 实例控制台日志：`logs/<farm.server>/console.out`（`servers/<name>/logs` 为其软链）。 */
-string consoleLog(string basHome, Server server) {
-  return buildPath(basHome, "logs", server.qualifiedName, "console.out");
-}
-
 /** 启动前准备日志：`servers/<name>/logs` → `logs/<name>`，并归档旧 console.out。 */
 private void prepareLog(string basHome, Server server) {
   auto logDir = buildPath(basHome, "logs", server.qualifiedName);
@@ -787,12 +871,11 @@ private void prepareLog(string basHome, Server server) {
   rollLog(basHome, server);
 }
 
-/** 打印日志末尾若干行，方便一眼看出启动失败原因。 */
+/**
+ * 打印日志末尾若干行，方便一眼看出启动失败原因（读法与 `basctl logs` 同一条，
+ * 见 {@link bas.logs.readTail}）。
+ */
 private void printLogTail(string log) {
-  if (!exists(log))
-    return;
-  auto lines = readText(log).split("\n");
-  auto from = lines.length > 20 ? lines.length - 20 : 0;
-  foreach (line; lines[from .. $])
+  foreach (line; readTail(log, 20).lines)
     stderr.writeln("  | " ~ line);
 }

@@ -17,6 +17,7 @@
 module test.config_test;
 
 import bas.config;
+import bas.remote : RemoteConfig;
 
 import std.algorithm.searching : canFind;
 import std.file : readText;
@@ -199,6 +200,13 @@ import std.format : format;
       `<bas version="1"><setline hostname="a/b"/><engines/></bas>`));
   assertThrown!ServerXmlException(parseServerXml(
       `<bas version="1"><setline hostname="a*"/><engines/></bas>`));
+}
+
+@("server.xml ignores the retired <hub> element") unittest {
+  auto conf = parseServerXml(`<bas version="1"><hub key="k1"/><engines/></bas>`);
+  assert(conf.version_ == "1");
+  assert(conf.engines.length == 0);
+  assert(conf.hosts.length == 1);
 }
 
 @("parse webapp <url> children as the exposed url prefixes") unittest {
@@ -408,4 +416,31 @@ import std.format : format;
   assert(!deps.canFind("beangle-bas-juli"));
   // 应用自带日志实现由 <jar> 追加
   assert(deps.canFind("ch.qos.logback:logback-core:1.6.3"));
+}
+
+@("remote placeholders expand from basctl.conf instead of environment") unittest {
+  auto cfg = parseServerXml(`<bas version="0.14.0">
+      <snapshot-repo remote="${bas_remote_url}/maven" token="${bas_remote_token}"/>
+      <engines><engine name="tomcat" type="tomcat-server" version="11.0.26"/></engines>
+      <farms><farm name="platform" engine="tomcat">
+        <server-options>-Dhub=${bas_remote_url}</server-options>
+        <server name="server1" http="8080"/>
+      </farm></farms>
+    </bas>`, RemoteConfig("https://hub.example.com", "openurp.prod", "secret"));
+  assert(cfg.snapshotRepo.remote.get == "https://hub.example.com/maven");
+  assert(cfg.snapshotRepo.token.get == "secret");
+  assert(cfg.farms[0].serverOptions.get == "-Dhub=https://hub.example.com");
+}
+
+@("remote placeholders remove a trailing slash from the control root") unittest {
+  auto cfg = parseServerXml(`<bas version="0.14.0">
+      <snapshot-repo remote="${bas_remote_url}/maven" token="${bas_remote_token}"/>
+      <engines><engine name="tomcat" type="tomcat-server" version="11.0.26"/></engines>
+      <farms><farm name="platform" engine="tomcat">
+        <server-options>-Dhub=${bas_remote_url}</server-options>
+        <server name="server1" http="8080"/>
+      </farm></farms>
+    </bas>`, RemoteConfig("https://hub.example.com/bashub/", "openurp.prod", "secret"));
+  assert(cfg.snapshotRepo.remote.get == "https://hub.example.com/bashub/maven");
+  assert(cfg.farms[0].serverOptions.get == "-Dhub=https://hub.example.com/bashub");
 }

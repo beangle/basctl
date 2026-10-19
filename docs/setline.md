@@ -222,7 +222,6 @@ setline 的 `docs/runtime-routes-api.md`。basctl 不导出平行的中间格式
 
 ## 后续演进
 
-生产侧（haproxy / nginx 那台机器上）要不要一个拉拓扑、渲染反代配置的 agent，以及它的通道
-（registry、拉取频率与鉴权、`reload` 还是 `restart`）尚未定；产出侧已定：交付物就是
-`server.xml`，消费方复用 bas 的配置模型，需要运行态则读 setline 的 `GET /_setline/routes`，
-basctl 不导出平行的中间格式。边界与未定项见 [features.md](features.md)。
+生产侧（haproxy / nginx 那台机器上）的拓扑 agent 记在 [roadmap.md](roadmap.md) 的 R3；
+产出侧已定：交付物就是 `server.xml`，消费方复用 bas 的配置模型，需要运行态则读 setline 的
+`GET /_setline/routes`，basctl 不导出平行的中间格式。

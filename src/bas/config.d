@@ -25,6 +25,7 @@ module bas.config;
 
 import bas.artifact;
 import bas.endpoint : parseSetlinePort;
+import bas.remote : RemoteConfig, remoteBaseUrl, remoteConfForServerXml;
 
 import std.algorithm : canFind, endsWith, map, sort, startsWith;
 import std.array : array, join, split;
@@ -32,7 +33,6 @@ import std.conv : to;
 import std.exception : enforce;
 import std.format : format;
 import std.path : absolutePath;
-import std.process : environment;
 import std.string : empty, indexOf, lastIndexOf, replace, split, strip, toLower;
 import std.typecons : Nullable, nullable;
 
@@ -549,6 +549,7 @@ class Container {
    * 的写，所以地址没有可配的余地，只有端口。解析见 {@link bas.endpoint.resolveSetlinePort}。
    */
   Nullable!string setlinePort;
+
   Repository repository;
   SnapshotRepo snapshotRepo;
   Engine[] engines;
@@ -656,7 +657,7 @@ class Container {
 }
 
 /** 解析 `server.xml` 文本为 `Container`。 */
-Container parseServerXml(string xmlText) {
+Container parseServerXml(string xmlText, RemoteConfig remote = RemoteConfig.init) {
   auto dom = parseDOM(xmlText);
   auto basElem = requireRootElement(dom, "bas");
 
@@ -667,9 +668,9 @@ Container parseServerXml(string xmlText) {
   conf.repository = new Repository;
   foreach (c; elementChildren(basElem)) {
     if (c.name == "repository")
-      conf.repository = parseRepository(c);
+      conf.repository = parseRepository(c, remote);
     else if (c.name == "snapshot-repo")
-      conf.snapshotRepo = parseSnapshotRepo(c);
+      conf.snapshotRepo = parseSnapshotRepo(c, remote);
   }
   if (conf.snapshotRepo is null)
     conf.snapshotRepo = new SnapshotRepo;
@@ -700,7 +701,7 @@ Container parseServerXml(string xmlText) {
     case "farms":
       foreach (f; elementChildren(section)) {
         if (f.name == "farm")
-          conf.farms ~= parseFarm(conf, f);
+          conf.farms ~= parseFarm(conf, f, remote);
       }
       break;
     case "webapps":
@@ -728,7 +729,7 @@ Container parseServerXml(string xmlText) {
 Container parseServerXmlFile(string path) {
   import std.file : readText;
 
-  return parseServerXml(readText(path));
+  return parseServerXml(readText(path), remoteConfForServerXml(path));
 }
 
 private:
@@ -825,53 +826,48 @@ Nullable!string nonBlankAttr(XmlElem elem, string name) {
 }
 
 /** 解析正式版 `<repository>`：本地目录、远端地址与可选令牌。 */
-Repository parseRepository(XmlElem elem) {
+Repository parseRepository(XmlElem elem, RemoteConfig remoteConf) {
   auto local = nonBlankAttr(elem, "local");
   auto remote = nonBlankAttr(elem, "remote");
-  auto token = resolveToken(optAttr(elem, "token"));
+  auto token = resolveToken(optAttr(elem, "token"), remoteConf.token);
   return new Repository(local, remote, token);
 }
 
-/** 解析开发版 `<snapshot-repo>`：`remote` 先展开 `${bas_remote_url}`。 */
-SnapshotRepo parseSnapshotRepo(XmlElem elem) {
+/** 解析开发版 `<snapshot-repo>`：`remote` 展开 `${bas_remote_url}`。 */
+SnapshotRepo parseSnapshotRepo(XmlElem elem, RemoteConfig remoteConf) {
   auto local = nonBlankAttr(elem, "local");
-  auto remote = expandBasRemoteUrl(nonBlankAttr(elem, "remote"));
-  auto token = resolveToken(optAttr(elem, "token"));
-  return new SnapshotRepo(local, remote, token);
+  auto url = expandBasRemoteUrl(nonBlankAttr(elem, "remote"), remoteConf.url);
+  auto token = resolveToken(optAttr(elem, "token"), remoteConf.token);
+  return new SnapshotRepo(local, url, token);
 }
 
 /** 解析仓库的 `token` 属性，支持 `${bas_remote_token}` 占位。 */
-Nullable!string resolveToken(Nullable!string token) {
+Nullable!string resolveToken(Nullable!string token, string remoteToken) {
   if (token.isNull || strip(token.get).empty)
     return Nullable!string.init;
   auto result = token.get;
   enum marker = "${bas_remote_token}";
   if (result.canFind(marker)) {
-    auto envToken = environment.get("bas_remote_token", "");
-    if (envToken.empty)
+    if (remoteToken.empty)
       return Nullable!string.init;
-    result = result.replace(marker, envToken);
+    result = result.replace(marker, remoteToken);
   }
   if (strip(result).empty)
     return Nullable!string.init;
   return nullable(result);
 }
 
-/** 展开 `${bas_remote_url}`，取到 `/api/` 之前；离线时返回空。 */
-Nullable!string expandBasRemoteUrl(Nullable!string remote) {
+/** 展开 `${bas_remote_url}` 为控制台根地址；未配置时返回空。 */
+Nullable!string expandBasRemoteUrl(Nullable!string remote, string remoteUrl) {
   if (remote.isNull)
     return Nullable!string.init;
   enum marker = "${bas_remote_url}";
   auto value = remote.get;
   if (!value.canFind(marker))
     return nullable(value);
-  auto remoteUrl = environment.get("bas_remote_url", "");
   if (remoteUrl.empty)
     return Nullable!string.init;
-  auto cut = remoteUrl.indexOf("/api/");
-  if (cut >= 0)
-    remoteUrl = remoteUrl[0 .. cut];
-  return nullable(value.replace(marker, remoteUrl));
+  return nullable(value.replace(marker, remoteBaseUrl(remoteUrl)));
 }
 
 /** 解析 `<engine>` 及其 `<listener>` / `<context>` / `<jar>` 子节点。 */
@@ -931,7 +927,7 @@ Resource parseResource(XmlElem elem) {
 }
 
 /** 解析 `<farm>`：绑定引擎、`server-options`，并递归解析各 `<server>`。 */
-Farm parseFarm(Container conf, XmlElem elem) {
+Farm parseFarm(Container conf, XmlElem elem, RemoteConfig remote) {
   auto name = requireAttr(elem, "name", "<farm>");
   enforce!ServerXmlException(!name.canFind('.'), "farm name " ~ name ~ " cannot contains dot");
   auto engName = requireAttr(elem, "engine", "<farm>");
@@ -944,7 +940,7 @@ Farm parseFarm(Container conf, XmlElem elem) {
 
   auto serverOptions = findFirstChildText(elem, "server-options");
   if (serverOptions.length)
-    farm.serverOptions = nullable(expandServerOptionsEnv(serverOptions));
+    farm.serverOptions = nullable(expandServerOptions(serverOptions, remote.url));
 
   foreach (c; elementChildren(elem)) {
     if (c.name == "http")
@@ -960,16 +956,15 @@ Farm parseFarm(Container conf, XmlElem elem) {
   return farm;
 }
 
-/** 展开 `server-options` 中的 `${bas_remote_url}`；环境变量缺失时原样返回。 */
-string expandServerOptionsEnv(string opts) {
+/** 展开 `server-options` 中的 `${bas_remote_url}`；未配置时原样返回。 */
+string expandServerOptions(string opts, string remoteUrl) {
   enum marker = "${bas_remote_url}";
   auto trimmed = trimLines(opts);
   if (!trimmed.canFind(marker))
     return trimmed;
-  auto remoteUrl = environment.get("bas_remote_url", "");
   if (remoteUrl.empty)
     return trimmed;
-  return trimmed.replace(marker, remoteUrl);
+  return trimmed.replace(marker, remoteBaseUrl(remoteUrl));
 }
 
 /** 解析 `<server>`：http 端口、host 归属与堆大小（缺省继承 farm）。 */

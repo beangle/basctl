@@ -14,14 +14,10 @@ if [ -f "$BAS_HOME/bin/setenv.sh" ]; then
   . "$BAS_HOME/bin/setenv.sh"
 fi
 
-# basctl 作为子进程运行，setenv.sh 里未 export 的变量要显式导出
-export bas_remote_url
-
-# 远端配置：非离线时先刷新 conf/server.xml（与旧行为一致，取不到即中止启动）
-if [ -n "$bas_remote_url" ] && [ "$bas_remote_connect" != "offline" ]; then
+# 远端配置：存在 basctl.conf 时尽力刷新 conf/server.xml；失败只告警，继续用本地配置启动
+if [ "${BAS_SKIP_REMOTE_PULL:-0}" != "1" ] && [ -f "$BAS_HOME/conf/basctl.conf" ]; then
   if ! "$basctl_cmd" pull "$BAS_HOME"; then
-    echo "cannot get server.xml,startup was aborted."
-    exit 1
+    echo "warning: cannot refresh conf/server.xml from remote; starting with the existing file." >&2
   fi
 fi
 
