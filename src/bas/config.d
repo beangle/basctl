@@ -60,10 +60,10 @@ enum containerTypeUndertow = "undertow";
 enum containerTypeJetty = "jetty";
 
 /**
- * `<setline hostname>` 的缺省命名空间：只认 `Host: localhost`（浏览器把 `*.localhost`
- * 也解析到回环）。要让「用 IP / 任意域名访问」也能匹配，得显式写 `hostname="*"`。
+ * `<setline hostname>` 的缺省命名空间：`*` 匹配任意 Host，用 IP 或任意域名访问都能命中。
+ * 多份 `BAS_HOME` 共享同一个 setline 时，各自显式写域名分组，避免互相整组覆盖。
  */
-enum defaultSetlineHostname = "localhost";
+enum defaultSetlineHostname = "*";
 
 /** 支持的引擎类型。`tomcat-server` 与 `tomcat` 是前缀关系，解析时按最长类型匹配。 */
 enum supportedEngineTypes = [containerTypeTomcatServer, containerTypeTomcat, containerTypeUndertow, containerTypeJetty];

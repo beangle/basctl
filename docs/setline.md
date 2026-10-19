@@ -37,19 +37,19 @@ basctl setline [server.xml]
 端口也只有运行信息里才有。
 
 setline 的 `routes` 以 Host 分组，分组键就是 `server.xml` 的 `<setline hostname>`（缺省
-`localhost`，写 `*` 表示任意 Host）——一台机器上共享同一个 setline 的多份 `BAS_HOME` 各写自己的
+`*`，匹配任意 Host）——一台机器上共享同一个 setline 的多份 `BAS_HOME` 各写自己的
 `hostname`，互不覆盖。访问地址则是 `http://<hostname>:<setline 的 listen 端口>/...`，那个端口在
 setline 自己的配置里，basctl 不猜也不改：
 
 ```sh
 $ basctl setline
-4 routes synced to http://127.0.0.1:10080 (host=localhost)
+4 routes synced to http://127.0.0.1:10080 (host=*)
 ```
 
 ## 启用、命名空间与管理口端口：`<setline>`
 
 `<setline>` 出现即启用、不出现即禁用——配置本身就是开关。它有两项：`port` 必填，
-`hostname` 可省（缺省 `localhost`）。不写 `<setline>` 时 basctl 完全不碰 setline，`start` /
+`hostname` 可省（缺省 `*`）。不写 `<setline>` 时 basctl 完全不碰 setline，`start` /
 `stop` / `status` 也不会因为"没有端口"报错。
 
 ```xml
@@ -59,7 +59,7 @@ $ basctl setline
 </bas>
 ```
 
-- `hostname`（缺省 `localhost`）：路由写进哪个命名空间，见上；
+- `hostname`（缺省 `*`）：路由写进哪个命名空间，见上；
 - `port`（**必填**，没有缺省）：setline 的**管理口**（`adminListen`）端口，basctl 拨
   `127.0.0.1:<port>` 推 `PUT /_setline/routes/all`、读 `GET /_setline/routes`。缺了或写法非法，
   解析 `server.xml` 时就报错。**只写端口，不写 host**：管理口的写接口只认回环来的连接（对端与
@@ -105,7 +105,7 @@ systemd / 容器入口 / 你自己的事。
 
 ```
 ---------------setline---------------
-host=localhost port=10080 (up)
+host=* port=10080 (up)
   /api  setline has 8081, want [8081, 8088]
   /tools  missing on setline (want 8090)
   /old  not in this BAS_HOME (setline has 9000); a `setline --sync` removes it
@@ -119,7 +119,7 @@ host=localhost port=10080 (up)
   只警告过），或端口漂移后没对账（`stop` / `start` 之间漏了一次，手工 `basctl setline` 即修）；
 - `not in this BAS_HOME`：实例已停但路由还留着（对账没跑到）；这类多出来的路由按路径排序输出，
   与"少的"一样都是对账没跟上的信号；
-- `host=localhost (No setline admin port: ...)`：手工构造的容器（`Container` 是公开类型）缺
+- `host=* (No setline admin port: ...)`：手工构造的容器（`Container` 是公开类型）缺
   端口时的兜底；正常路径上"有 `<setline>` 就有 `port`"由配置校验保证，写坏了在解析
   `server.xml` 时就报错。
 

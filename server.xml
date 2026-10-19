@@ -27,12 +27,12 @@
 
   <!--
     <setline> 出现即启用路由对账：basctl 起停实例时把运行中实例的路由推给本机的 setline。
-      hostname  路由命名空间（缺省 localhost，* 表示任意 Host）——共享同一个 setline 的多份
-                BAS_HOME 各占一格。
+      hostname  路由命名空间（缺省 *，表示任意 Host）——共享同一个 setline 的多份 BAS_HOME
+                各写自己的域名，各占一格。
       port      本 BAS_HOME 要推路由的 setline 管理口（adminListen）**端口**。写接口只在管理口
                 上、且只认回环来的连接，所以 basctl 拨的就是 127.0.0.1:port，地址没有可配的余地。
                 必填，没有缺省：端口是这台机器上的事实，写在这里比藏在别处看得见。
                 setline 自己的配置（listen / adminListen）不归 basctl 生成。
   -->
-  <setline hostname="localhost" port="10080"/>
+  <setline port="10080"/>
 </bas>

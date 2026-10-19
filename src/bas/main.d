@@ -290,7 +290,7 @@ int cmdResolve(string[] args) {
  * 判定归属，打印冲突并退出，不推任何路由。
  *
  * 缺省 server.xml 取 `$BAS_HOME/conf/server.xml`，路由落在 `<setline hostname>` 命名空间下（缺省
- * `localhost`，`*` 表示任意 Host）。管理口端口只从 `<setline port>` 来（配了 `<setline>` 就必须
+ * `*`，表示任意 Host）。管理口端口只从 `<setline port>` 来（配了 `<setline>` 就必须
  * 写它，是配置校验的一部分；命令行不再覆盖），basctl 拨 `127.0.0.1:<port>`（写接口只在管理口上、
  * 且只认回环，见 {@link resolveSetlinePort}）。没配 `<setline>` 就是这份配置没启用 setline，
  * 没有端口可拨，报一句就退出——不替谁猜一个缺省端口。
@@ -377,7 +377,7 @@ private void setlineUsage() {
   stderr.writeln("  default and no command line override. A config without <setline> does not use");
   stderr.writeln("  setline at all, so this command has nothing to push.");
   stderr.writeln("  Routes go under the namespace declared by <setline hostname=\"...\"> (default");
-  stderr.writeln("  localhost, \"*\" for any Host) so several BAS_HOMEs can share one setline.");
+  stderr.writeln("  \"*\" for any Host); give each BAS_HOME its own hostname when sharing one setline.");
 }
 
 /** `BAS_HOME` 有值时取其指向目录，否则取当前工作目录。 */

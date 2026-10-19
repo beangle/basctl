@@ -4,8 +4,8 @@
 
   与宿主用的样例（仓库根的 server.xml）的区别只有两处：
 
-  1. `<setline hostname="localhost" port="10080"/>` 声明路由命名空间与 basctl 要推路由的
-     **管理口端口**（写接口只在管理口上、且只认回环来的连接）。setline 进程由入口脚本自己拉起，
+  1. `<setline port="10080"/>` 声明 basctl 要推路由的**管理口端口**（写接口只在管理口上、且只认
+     回环来的连接）；hostname 省略时使用 `*`，匹配任意 Host。setline 进程由入口脚本自己拉起，
      它自己那份配置
      （`listen` 缺省 `*:8080`、`adminListen` 缺省 `127.0.0.1:10080`）也由入口脚本写进
      `conf/setline.json`——basctl 只推路由，不生成 setline 的配置。入口脚本铺这份样例时会按
@@ -18,7 +18,7 @@
      version="0.14.0">
   <repository remote="https://maven.aliyun.com/repository/public"/>
 
-  <setline hostname="localhost" port="10080"/>
+  <setline port="10080"/>
 
   <engines>
     <engine name="tomcat" type="tomcat-server" version="11.0.26"/>

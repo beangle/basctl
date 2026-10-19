@@ -366,12 +366,11 @@ accept-count/connection-timeout；Undertow 只用 accept-count/connection-timeou
         （systemd / 容器入口 / 手工拉起），自己那份配置（listen / adminListen / 调参）不归 basctl
         生成；basctl 只推路由，既不拉起也不停止它。</xs:documentation>
     </xs:annotation>
-    <xs:attribute name="hostname" type="xs:string" use="optional" default="localhost">
+    <xs:attribute name="hostname" type="xs:string" use="optional" default="*">
       <xs:annotation>
         <xs:documentation>路由命名空间：setline 按请求 Host（去端口、转小写）精确匹配，缺省
-          localhost（浏览器把 *.localhost 也解析到回环）。写 * 表示匹配任意 Host，
-          即用 IP 或任意域名访问都走这一组路由。一台机器上共享同一个 setline 的多份
-          BAS_HOME 靠它各占一格，互不覆盖。</xs:documentation>
+          *，表示匹配任意 Host，即用 IP 或任意域名访问都走这一组路由。一台机器上共享同一个
+          setline 的多份 BAS_HOME 应各写自己的域名分组，互不覆盖。</xs:documentation>
       </xs:annotation>
     </xs:attribute>
     <xs:attribute name="port" type="xs:string" use="required">

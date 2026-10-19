@@ -23,7 +23,7 @@
  *
  * 管理口端口由 {@link bas.endpoint.resolveSetlinePort} 统一解析（只认 `server.xml` 的
  * `<setline port>`，没有缺省、没有命令行覆盖）；命名空间来自
- * `server.xml` 的 `<setline hostname>`（缺省 `localhost`）。一台机器上共享同一个 setline 的多份
+ * `server.xml` 的 `<setline hostname>`（缺省 `*`，匹配任意 Host）。一台机器上共享同一个 setline 的多份
  * `BAS_HOME` 靠命名空间各占一格——`PUT /_setline/routes/all?host=<ns>` 只替换自己那一格。
  *
  * 管理口（`<setline port>`）是 setline 的写接口所在：它只在管理口上，而管理口缺省绑回环，

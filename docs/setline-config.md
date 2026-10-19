@@ -31,7 +31,7 @@ setline，没东西可推"。
 
 | 属性 | 必填 | 缺省 | 说明 |
 |---|---|---|---|
-| `hostname` | 否 | `localhost` | 路由命名空间。setline 按请求 `Host`（去端口、转小写）精确匹配，所以访问地址是 `http://<hostname>:<setline 的 listen 端口>/...`；显式写 `*` 表示匹配任意 Host（用 IP 或任意域名访问都走这一组路由） |
+| `hostname` | 否 | `*` | 路由命名空间。setline 按请求 `Host`（去端口、转小写）精确匹配，所以访问地址是 `http://<hostname>:<setline 的 listen 端口>/...`；缺省 `*` 表示匹配任意 Host（用 IP 或任意域名访问都走这一组路由） |
 | `port` | **是**（元素出现时） | 无 | 本 `BAS_HOME` 要推路由的 setline 管理口（`adminListen`）**端口**，如 `10080`。只写端口不写 host：管理口的写接口只认回环来的连接（对端与 Host 都是回环），basctl 拨的固定是 `127.0.0.1:<port>`，写别的地址进去必然被拒。缺了是配置错误，解析时就报；`hostname` 才是可以省的那个 |
 
 关于 `port` 这个名字：它和 setline 自己配置里的 `listen` **不是同一个值**——`listen` 是对外接
@@ -43,8 +43,8 @@ setline，没东西可推"。
 自己那份配置也不归 basctl 生成（那是拥有 setline 进程的那个人的事）。
 
 `hostname` 只接受域名允许的字符（小写字母、数字、`-`、`.`）或 `*`，写坏了直接报错：路由写进谁家
-的命名空间必须看得见。缺省 `localhost` 是因为浏览器把 `*.localhost` 都解析到回环；命令行访问
-需要 `curl --resolve alice.localhost:<listen 端口>:127.0.0.1` 或写 hosts，或用 `hostname="*"`。
+的命名空间必须看得见。缺省 `*` 让 IP 和任意域名访问都能命中；多份 `BAS_HOME` 共享一个 setline
+时各写自己的域名，显式域名需要 DNS 或 `curl --resolve alice.localhost:<listen 端口>:127.0.0.1`。
 
 **启用判定**：`<setline>` 出现即启用；不出现即禁用，等价于 `setline_enabled=false`。判定在
 basctl 内部完成（它本来就解析 `server.xml`），**不引入 shell 变量**——`bas.sh` 里再放一个
@@ -123,8 +123,8 @@ basctl start all     # 各自只写自己那一格
 # 访问 http://alice.localhost:<listen 端口>/tools、http://bob.localhost:<listen 端口>/tools
 ```
 
-两边的前缀撞了也不要紧：冲突检测与路由替换都以命名空间为边界。**别用 `*` 做分组**——`*` 是
-"任意 Host"的兜底命名空间，两个 `BAS_HOME` 都用它就会互相整组覆盖。
+两边的前缀撞了也不要紧：冲突检测与路由替换都以命名空间为边界。缺省分组 `*` 适合只有一份
+`BAS_HOME` 接入 setline 的机器；多份共享时必须显式写域名，否则都会落进 `*` 而互相整组覆盖。
 
 刻意不做的事：分组键只来自 `server.xml`，不提供 `--group` 这类命令行/环境开关（同 R5 的结论——
 它会变成一个没有配置来源的旋钮）。

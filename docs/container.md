@@ -21,8 +21,8 @@ setline 最贴的形态：
 
 所以容器里的 `conf/server.xml` 有两处约定：
 
-1. `<setline hostname="localhost" port="10080"/>`——声明路由命名空间与 basctl 要推路由的
-   **管理口端口**（setline 的 `adminListen`，写接口只在管理口上、且只认回环来的连接）。setline
+1. `<setline port="10080"/>`——声明 basctl 要推路由的**管理口端口**（setline 的 `adminListen`，
+   写接口只在管理口上、且只认回环来的连接）；hostname 省略时使用 `*`，匹配任意 Host。setline
    自己对外的 `listen` 由
    入口脚本给（`BAS_SETLINE_LISTEN`，缺省 `*:8080`）：容器里必须监听所有地址，写 `127.0.0.1`
    在容器外访问不到，端口与 `-p` 的右边一致。两个监听都写在入口脚本生成的

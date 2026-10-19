@@ -41,7 +41,7 @@ import std.format : format;
   assert(cfg.hosts[0].name == "localhost" && cfg.hosts[0].ip == "127.0.0.1");
 
   assert(!cfg.setlineHostname.isNull);
-  assert(cfg.setlineHostname.get == "localhost");
+  assert(cfg.setlineHostname.get == "*");
 
   assert(cfg.farms.length == 2);
   assert(cfg.farms[0].name == "tools");
@@ -140,7 +140,7 @@ import std.format : format;
   assertThrown!ServerXmlException(parseServerXml(xml));
 }
 
-@("parse the optional setline entry: hostname defaults to localhost, \"*\" is allowed") unittest {
+@("parse the optional setline entry: hostname defaults to \"*\"") unittest {
   auto cfg = parseServerXml(`<bas version="1">
     <setline hostname="Alice.LOCALHOST" port="10080"/>
     <engines><engine name="t" type="tomcat" version="11"/></engines>
@@ -149,10 +149,10 @@ import std.format : format;
   assert(!cfg.setlineHostname.isNull);
   assert(cfg.setlineHostname.get == "alice.localhost", cfg.setlineHostname.get);
 
-  // 不写 hostname：启用，命名空间缺省 localhost（只用 Host: localhost 访问得到）
+  // 不写 hostname：启用，命名空间缺省 *（匹配任意 Host）
   auto bare = parseServerXml(
       `<bas version="1"><setline port="10080"/><engines/></bas>`);
-  assert(bare.setlineHostname.get == "localhost");
+  assert(bare.setlineHostname.get == "*");
 
   // 显式 * ：匹配任意 Host（用 IP / 任意域名访问也走同一组路由）
   auto any = parseServerXml(

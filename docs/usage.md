@@ -147,11 +147,11 @@ basctl run --engine=tomcat-11.0.25 --print  /repo/app.war   # 只打印将要执
 在 `conf/server.xml` 里加一个 `<setline>` 即启用（出现即启用，没有独立开关）：
 
 ```xml
-<setline hostname="localhost" port="10080"/>
+<setline port="10080"/>
 ```
 
-- `hostname` 是路由命名空间（缺省 `localhost`，`*` 表示任意 Host）——同一台机器上多份
-  `BAS_HOME` 共享一个 setline 时各占一格；`port` 是这份 `BAS_HOME` 要推路由的**管理口**端口
+- `hostname` 是路由命名空间，缺省 `*`（匹配任意 Host）——同一台机器上多份 `BAS_HOME` 共享
+  一个 setline 时，各写自己的域名分组；`port` 是这份 `BAS_HOME` 要推路由的**管理口**端口
   （setline 的 `adminListen`，缺省绑 `127.0.0.1:10080`），**必填**（没有缺省：端口是这台机器上
   的事实，写进配置才看得见）。只写端口，因为管理口的写接口只认回环来的连接，basctl 拨的就是
   `127.0.0.1:<port>`。

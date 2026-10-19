@@ -117,10 +117,10 @@ import std.typecons : nullable;
 
   // 没配 <setline> 时整节省略（不启用就没有端口，也不报错）
   assert(setlineStatusLines(parseServerXml(`<bas version="1"><engines/></bas>`), []).length == 0);
-  // hostname 缺省 localhost；管理口没人听时状态行照样只有一行，不拨号
+  // hostname 缺省 *；管理口没人听时状态行照样只有一行，不拨号
   assert(setlineStatusLines(
       parseServerXml(`<bas version="1"><setline port="` ~ port ~ `"/><engines/></bas>`), [])
-      == ["host=localhost port=" ~ port ~ " (down)"]);
+      == ["host=* port=" ~ port ~ " (down)"]);
 }
 
 @("setlineStatusLines reports a missing port instead of throwing") unittest {
