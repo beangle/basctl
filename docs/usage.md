@@ -57,8 +57,10 @@ basctl status
 # 4. 手工报一次，确认控制台能看见这台机器
 basctl report "$BAS_HOME/conf/server.xml"
 
-# 5. 常驻通道（生产机应交给 systemd）
-basctl agent "$BAS_HOME/conf/server.xml"
+# 5. 后台启动常驻通道（前台调试仍可直接运行 basctl agent）
+"$BAS_HOME/bin/start-agent.sh"
+tail -f "$BAS_HOME/agent/console.out"
+"$BAS_HOME/bin/stop-agent.sh"
 ```
 
 把 `url` / `profile` / `token` 换成 bashub 中这台机器对应 Profile 的值：`profile` 必须是
@@ -134,8 +136,10 @@ setline 与 bashub 通道互不依赖，配置、部署与安全边界统一见 
 
 ## 组件目录初始化
 
-`basctl init [workdir]` 把控制脚本（`env.sh`、`bas.sh`、`start.sh`、`stop.sh`、`restart.sh`）
-铺到 `<workdir>/bin` 并建好 `conf/`，用于从零搭建一个 bas 组件目录。若
+`basctl init [workdir]` 把控制脚本（`env.sh`、`bas.sh`、`start.sh`、`stop.sh`、`restart.sh`、
+`start-agent.sh`、`stop-agent.sh`）铺到 `<workdir>/bin` 并建好 `conf/`，用于从零搭建一个
+bas 组件目录。agent 的 PID 写在 `<workdir>/agent/agent.pid`，输出追加到
+`<workdir>/agent/console.out`，不会落在组件目录根部。若
 `conf/basctl.conf` 不存在，还会生成一份带注释、`[remote]` 三项留空的模板，权限为 `0600`。
 脚本与模板都内嵌在 basctl 里，随 basctl 版本发布，不再依赖单独的发行包：
 
@@ -165,7 +169,7 @@ basctl init --dry-run /opt/bas # 只打印将会写入的文件
 - `report` / `agent` 使用同一组地址与 token：拼出
   `<url>/api/bashub/monitor/agents/<profile>/channel`，再把 `http(s)` 换成 `ws(s)` 建立出站
   WebSocket。
-- `start.sh` / `restart.sh` 在 `conf/basctl.conf` **填写了任一字段**时才先尝试一次 `pull`；
+- `start.sh` / `restart.sh` / `start-agent.sh` 在 `conf/basctl.conf` **填写了任一字段**时才先尝试一次 `pull`；
   `init` 生成的空模板直接跳过，不会在每次启动时告警。拉取失败只打印警告，并继续用现有
   `conf/server.xml`；`restart.sh` 的拉取在 resolve / stop / start 之前完成。远端不可用不会
   让改配置失败挡住已安装版本的启动。

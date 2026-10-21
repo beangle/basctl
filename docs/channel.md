@@ -65,20 +65,18 @@ token = 9f8e7d6c5b4a39281706f5e4d3c2b1a0
 # 前台跑（调试用，Ctrl-C 退出）
 basctl agent "$BAS_HOME/conf/server.xml"
 
-# systemd（示例；unit 由 basctl init 铺还是发行包自带，见 roadmap 的待定项）
-[Unit]
-Description=bas agent (basctl)
-After=network-online.target
+# 后台跑：basctl init 生成的两个脚本
+"$BAS_HOME/bin/start-agent.sh"
+"$BAS_HOME/bin/stop-agent.sh"
 
-[Service]
-Environment=BAS_HOME=/opt/bas
-ExecStart=/usr/bin/basctl agent /opt/bas/conf/server.xml
-Restart=always
-User=bas
-
-[Install]
-WantedBy=multi-user.target
+# 等价入口
+"$BAS_HOME/bin/bas.sh" agent-start
+"$BAS_HOME/bin/bas.sh" agent-stop
 ```
+
+`start-agent.sh` 会先像 `start.sh` 一样尝试刷新远端配置，然后用 `nohup` 启动 agent。
+PID 写在 `$BAS_HOME/agent/agent.pid`，日志追加到 `$BAS_HOME/agent/console.out`；重复执行
+不会启动第二份 agent，`stop-agent.sh` 只停止 PID 文件里那个 `basctl agent` 进程。
 
 agent 只做「上报 + 固定指令」，**不做 supervisor**：实例崩了不会自动重启（这条一直不变），
 也没被超时或坏消息弄退出的风险——它宁可重连也不退出。`service:stop` / `service:restart`

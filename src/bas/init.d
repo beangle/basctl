@@ -36,7 +36,8 @@ import std.stdio : stderr, writeln;
 import std.string : startsWith, strip;
 
 /** 内嵌的控制脚本，按安装顺序排列。 */
-private immutable string[] scriptNames = ["env.sh", "bas.sh", "start.sh", "stop.sh", "restart.sh"];
+private immutable string[] scriptNames =
+  ["env.sh", "bas.sh", "start.sh", "stop.sh", "restart.sh", "start-agent.sh", "stop-agent.sh"];
 
 /** 内嵌的 `conf/basctl.conf` 注释模板；三项留空，不会意外启用远端。 */
 private enum remoteConfTemplate = import("bas/init/basctl.conf");
@@ -54,6 +55,10 @@ string scriptBody(string name) {
     return import("bas/bin/stop.sh");
   case "restart.sh":
     return import("bas/bin/restart.sh");
+  case "start-agent.sh":
+    return import("bas/bin/start-agent.sh");
+  case "stop-agent.sh":
+    return import("bas/bin/stop-agent.sh");
   default:
     return "";
   }
@@ -158,7 +163,8 @@ int runInit(string[] args) {
 void initUsage() {
   stderr.writeln("Usage: basctl init [--force] [--dry-run] [workdir]");
   stderr.writeln("  Install the control scripts (env.sh, bas.sh, start.sh, stop.sh,");
-  stderr.writeln("  restart.sh) into <workdir>/bin and create <workdir>/conf. When");
+  stderr.writeln("  restart.sh, start-agent.sh, stop-agent.sh) into <workdir>/bin and create");
+  stderr.writeln("  <workdir>/conf. When");
   stderr.writeln("  conf/basctl.conf is absent, write a commented 0600 template with empty");
   stderr.writeln("  remote fields; an existing file is never overwritten. Existing scripts");
   stderr.writeln("  are kept unless --force is given. <workdir> defaults to $BAS_HOME (or");

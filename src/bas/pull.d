@@ -113,5 +113,5 @@ void pullUsage() {
   stderr.writeln("  <workdir>/conf/basctl.conf. The old");
   stderr.writeln("  file is backed up as server_old.xml. <workdir> defaults to $BAS_HOME (or the");
   stderr.writeln("  current directory). --if-configured exits silently when all remote fields");
-  stderr.writeln("  are empty (used by start.sh / restart.sh with the generated template).");
+  stderr.writeln("  are empty (used by start.sh / restart.sh / start-agent.sh with the generated template).");
 }

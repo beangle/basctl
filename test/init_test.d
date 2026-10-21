@@ -25,10 +25,11 @@ import std.algorithm : canFind, startsWith;
 import std.file : exists, readText, rmdirRecurse, tempDir, write;
 import std.path : buildPath;
 import std.process : execute;
-import std.string : splitLines;
+import std.string : splitLines, strip;
 import std.uuid : randomUUID;
 
-private immutable string[] names = ["env.sh", "bas.sh", "start.sh", "stop.sh", "restart.sh"];
+private immutable string[] names =
+  ["env.sh", "bas.sh", "start.sh", "stop.sh", "restart.sh", "start-agent.sh", "stop-agent.sh"];
 
 private string newRoot(string tag) {
   return buildPath(tempDir, "basctl-init-" ~ tag ~ "-" ~ randomUUID().toString());
@@ -39,6 +40,11 @@ private string fakeBasctl(string root) {
   write(path, "#!/bin/bash\n"
       ~ "printf '%s\\n' \"$*\" >> \"$BAS_HOME/fake-calls\"\n"
       ~ "if [ \"$1\" = pull ]; then exit \"${FAKE_PULL_STATUS:-0}\"; fi\n"
+      ~ "if [ \"$1\" = agent ]; then\n"
+      ~ "  echo 'fake agent started'\n"
+      ~ "  trap 'exit 0' TERM\n"
+      ~ "  while :; do sleep 1; done\n"
+      ~ "fi\n"
       ~ "exit 0\n");
   setExecutable(path);
   return path;
@@ -49,7 +55,7 @@ private string fakeBasctl(string root) {
   scope (exit) if (exists(root)) rmdirRecurse(root);
 
   auto result = installScripts(root, false, false);
-  assert(result.written == 5);
+  assert(result.written == 7);
   assert(result.kept == 0);
   assert(result.confWritten);
   assert(!result.confKept);
@@ -71,12 +77,12 @@ private string fakeBasctl(string root) {
   write(bas, "CUSTOM");
 
   auto kept = installScripts(root, false, false);
-  assert(kept.written == 0 && kept.kept == 5);
+  assert(kept.written == 0 && kept.kept == 7);
   assert(!kept.confWritten && kept.confKept);
   assert(readText(bas) == "CUSTOM");
 
   auto forced = installScripts(root, true, false);
-  assert(forced.written == 5 && forced.kept == 0);
+  assert(forced.written == 7 && forced.kept == 0);
   assert(!forced.confWritten && forced.confKept);
   assert(readText(bas).canFind("basctl_cmd"));
 }
@@ -116,7 +122,7 @@ private string fakeBasctl(string root) {
   scope (exit) if (exists(root)) rmdirRecurse(root);
 
   auto result = installScripts(root, false, true);
-  assert(result.written == 5);
+  assert(result.written == 7);
   assert(result.confWritten);
   assert(!exists(root));
 }
@@ -177,4 +183,39 @@ private string fakeBasctl(string root) {
     if (line.startsWith("pull "))
       pulls++;
   assert(pulls == 1, calls);
+}
+
+@("start-agent.sh keeps its pid and log under agent/") unittest {
+  auto root = newRoot("agent");
+  auto pidFile = buildPath(root, "agent", "agent.pid");
+  auto logFile = buildPath(root, "agent", "console.out");
+  scope (exit) {
+    if (exists(pidFile))
+      execute(["bash", buildPath(root, "bin", "stop-agent.sh")]);
+    if (exists(root)) rmdirRecurse(root);
+  }
+
+  installScripts(root, false, false);
+  write(buildPath(root, "conf", "server.xml"), "<bas version=\"0.14.0\"/>\n");
+  auto fake = fakeBasctl(root);
+  auto started = execute(["bash", buildPath(root, "bin", "start-agent.sh")],
+      ["beangle_basctl": fake]);
+  assert(started.status == 0, started.output);
+  assert(started.output.canFind("log: " ~ logFile), started.output);
+
+  assert(exists(pidFile));
+  assert(exists(logFile));
+  assert(!exists(buildPath(root, "run")));
+  auto pid = strip(readText(pidFile));
+  assert(pid.length);
+  assert(execute(["kill", "-0", pid]).status == 0);
+  assert(readText(logFile).canFind("fake agent started"));
+
+  auto calls = readText(buildPath(root, "fake-calls"));
+  assert(calls.canFind("pull --if-configured " ~ root), calls);
+  assert(calls.canFind("agent " ~ buildPath(root, "conf", "server.xml")), calls);
+
+  auto stopped = execute(["bash", buildPath(root, "bin", "stop-agent.sh")]);
+  assert(stopped.status == 0, stopped.output);
+  assert(!exists(pidFile));
 }

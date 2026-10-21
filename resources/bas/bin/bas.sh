@@ -26,6 +26,8 @@ usage() {
   echo "  setline     Push the routes to setline         (basctl setline [--sync])"
   echo "  restart     resolve, then stop + start"
   echo "  pull        Fetch and update conf/server.xml    (basctl pull)"
+  echo "  agent-start Start the background control agent   (PID and log under agent/)"
+  echo "  agent-stop  Stop the background control agent"
   exit 1
 }
 
@@ -41,5 +43,7 @@ case "$cmd" in
   setline)  exec "$basctl_cmd" setline "$conf" "${@:2}" ;;
   restart)  exec "$BAS_HOME/bin/restart.sh" "${@:2}" ;;
   pull)     exec "$basctl_cmd" pull "$BAS_HOME" ;;
+  agent-start) exec "$BAS_HOME/bin/start-agent.sh" ;;
+  agent-stop)  exec "$BAS_HOME/bin/stop-agent.sh" ;;
   *)        usage ;;
 esac

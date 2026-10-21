@@ -8,7 +8,7 @@
 
 | 能力 | 命令 | 做什么 | 详情 |
 |---|---|---|---|
-| 组件目录初始化 | `basctl init` | 把 `env.sh` / `bas.sh` / `start.sh` / `stop.sh` / `restart.sh` 铺到 `<workdir>/bin` 并建 `conf/`；缺少 `conf/basctl.conf` 时生成带注释、字段留空的 `0600` 模板，已存在则不覆盖。脚本内嵌在 basctl 里，随版本发布，是脚本唯一的安装/升级途径 | [usage.md](usage.md) |
+| 组件目录初始化 | `basctl init` | 把 `env.sh` / `bas.sh` / `start.sh` / `stop.sh` / `restart.sh` / `start-agent.sh` / `stop-agent.sh` 铺到 `<workdir>/bin` 并建 `conf/`；缺少 `conf/basctl.conf` 时生成带注释、字段留空的 `0600` 模板，已存在则不覆盖。脚本内嵌在 basctl 里，随版本发布，是脚本唯一的安装/升级途径 | [usage.md](usage.md) |
 | 解析与预取 | `basctl make [server.xml] <pattern>`、`basctl resolve` | 解析 webapp（`gav://` / `http(s)://` / 本地路径），生成实例目录与 jstart launch spec，再 `jstart resolve` 预取依赖，不起进程 | [start.md](start.md) |
 | 起停 | `basctl start` / `basctl stop` | 定端口、写 `server.info`、后台 `jstart run`；停止时按 pid 优雅退出（`--timeout` / `--force`） | [start.md](start.md)、[server-info.md](server-info.md) |
 | 状态 | `basctl status` | 读 `servers/<name>/server.info` 列出运行中的实例；配了 `<setline>` 时另报命名空间、管理口通不通与 route 列 | [server-info.md](server-info.md)、[setline.md](setline.md) |
