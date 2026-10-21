@@ -21,14 +21,17 @@
  *
  *  - `java`：`make`（creator 与只准备）写出的启动命令、以及 jstart 最终 exec 的都是 java，
  *    按 `JAVA_HOME/bin/java` > `PATH` 解析（与 creator 里 `javaExecutable` 同一顺序）；
- *  - `jstart`：`start` / `make` / `resolve` 用它解析下载构件，命令名可用 `beangle_jstart` 覆盖；
+ *  - `jstart`：`start` / `make` / `resolve` 用它解析下载构件，命令名可用 `beangle_jstart` 覆盖。
+ *    它在 doctor 中只作可选提示：有些 jstart 操作（`resolve` / `fetch`）不需要 java，缺 jstart
+ *    也不代表当前机器不能完成与 java 无关的工作；
  *  - `setline`：只有 `server.xml` 里声明了 `<setline>` 才检查，而且检的是**管理口可达**而不是命令
  *    存在——setline 是机器级服务（systemd / 容器入口 / 手工拉起），basctl 只往它的写接口推
  *    路由，不调用它的可执行文件。管理口端口取自 `<setline port>`（拨 `127.0.0.1:<port>`），
  *    与 `setline` / `start` / `status` 走同一个解析入口。
  *
  * 只检查“就位没就位”，**不校验版本**：java / jstart / setline / 容器的版本策略分别属于各自的
- * 发布节奏，basctl 掺和只会制造漂移。缺件时打印安装提示，并让退出码非 0。
+ * 发布节奏，basctl 掺和只会制造漂移。必需项（java、已启用的 setline）缺件时打印安装提示，
+ * 并让退出码非 0；jstart 缺失只提示，不影响退出码。
  *
  * 打包（deb/rpm）不声明对这些命令的硬依赖：安装方式太多（系统包、sdkman、手工放置），
  * 硬依赖会挡住“先装 basctl、再按需补命令”的用法；缺件交给本命令在运行时提示。
@@ -53,6 +56,8 @@ enum CheckState {
   ok,
   /** 必需但没找到。 */
   missing,
+  /** 找到会更好，但当前命令不要求它存在。 */
+  optional,
   /** 当前配置下用不到，不判定。 */
   skipped
 }
@@ -65,16 +70,18 @@ struct ToolCheck {
   string path;
   /** 解析来源：`JAVA_HOME` / `PATH` / `beangle_jstart` / `server.xml` / `default`。 */
   string source;
-  /** `missing` / `skipped` 的一句话说明。 */
+  /** `missing` / `optional` / `skipped` 的一句话说明。 */
   string note;
 
-  /** 展示状态：`ok` / `MISSING` / `skip`。 */
+  /** 展示状态：`ok` / `MISSING` / `optional` / `skip`。 */
   string status() const {
     final switch (state) {
     case CheckState.ok:
       return "ok";
     case CheckState.missing:
       return "MISSING";
+    case CheckState.optional:
+      return "optional";
     case CheckState.skipped:
       return "skip";
     }
@@ -169,9 +176,10 @@ private ToolCheck checkJstart(in ToolEnv env) {
   auto found = resolveCommand(env.jstart.length ? env.jstart : "jstart", env.path);
   if (found.length)
     return available("jstart", found, source);
-  return unavailable("jstart", source == jstartEnvVar
+  return optional("jstart", source == jstartEnvVar
       ? jstartEnvVar ~ " points to " ~ env.jstart ~ ", but that command was not found"
-      : "install jstart, or set " ~ jstartEnvVar ~ " to its path");
+      : "not found on PATH; only commands that invoke jstart need it (set "
+        ~ jstartEnvVar ~ " to its path)");
 }
 
 /**
@@ -208,6 +216,11 @@ private ToolCheck available(string name, string path, string source) {
 /** 组装一条“缺失”的结果。 */
 private ToolCheck unavailable(string name, string note) {
   return ToolCheck(name, CheckState.missing, "", "", note);
+}
+
+/** 组装一条“可选但没找到”的结果。 */
+private ToolCheck optional(string name, string note) {
+  return ToolCheck(name, CheckState.optional, "", "", note);
 }
 
 /**
@@ -277,7 +290,7 @@ string renderChecks(string confFile, const(ToolCheck)[] checks) {
     auto detail = check.state == CheckState.ok
         ? check.path ~ " (" ~ check.source ~ ")"
         : check.note;
-    lines ~= leftJustify(check.name, width) ~ "  " ~ leftJustify(check.status(), 7) ~ " " ~ detail;
+    lines ~= leftJustify(check.name, width) ~ "  " ~ leftJustify(check.status(), 8) ~ " " ~ detail;
   }
   size_t missing;
   foreach (check; checks) {
@@ -290,7 +303,7 @@ string renderChecks(string confFile, const(ToolCheck)[] checks) {
   return lines.join("\n");
 }
 
-/** `basctl doctor`：[`runDoctor`] 的 CLI 壳：打印检查结果，缺件时返回 1。 */
+/** `basctl doctor`：[`runDoctor`] 的 CLI 壳：打印检查结果，必需项缺件时返回 1。 */
 int runDoctor(string confFile) {
   auto checks = checkTools(confFile);
   writeln(renderChecks(confFile, checks));

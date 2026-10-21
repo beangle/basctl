@@ -160,8 +160,8 @@ void printUsage() {
   stderr.writeln("                                (routes under <setline hostname>; admin address");
   stderr.writeln("                                from <setline port>, the only source;");
   stderr.writeln("                                one shot, no --watch)");
-  stderr.writeln("  doctor [server.xml]           Check that java / jstart are on this machine");
-  stderr.writeln("                                (setline too, but only when <setline> is configured)");
+  stderr.writeln("  doctor [server.xml]           Check java (required), jstart (optional) and setline");
+  stderr.writeln("                                (setline only when <setline> is configured)");
   stderr.writeln("  firewall [workdir]            Configure firewalld ports from conf/server.xml");
   stderr.writeln("  pull [--file=<basctl.conf>] [workdir]  Fetch conf/server.xml from the control endpoint");
   stderr.writeln("  report [server.xml]           Push one host/instance snapshot to the hub and exit");

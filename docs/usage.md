@@ -130,7 +130,7 @@ setline 与 bashub 通道互不依赖，配置、部署与安全边界统一见 
 | `basctl pull [--file=<basctl.conf>] [workdir]` | 按 `conf/basctl.conf` 的 `[remote]` 拉取 `conf/server.xml`：地址为 `<url>/api/bashub/config/<profile>/server`，请求用 `Authorization: Bearer <profile>:<token>`；旧配置备份为 `server_old.xml`。未配置 `[remote]` 时告警并以 0 退出，配置无效或下载失败时非 0 |
 | `basctl report [server.xml]` | 连一次控制台（bashub）报一次主机与实例现状后退出；地址与凭证都取同目录 `basctl.conf` 的 `[remote]`，报上去了退出码才是 0。见 [channel.md](channel.md) |
 | `basctl agent [server.xml]` | 常驻：连上控制台后周期上报、回保活、执行固定指令（取日志 / 启停实例），断线自动重连；`start` / `stop` 之后也会顺带报一次 |
-| `basctl doctor [server.xml]` | 检查 `java` / `jstart`（以及启用 setline 时管理口通不通）是否就位，缺件时退出码非 0，见 [doctor.md](doctor.md) |
+| `basctl doctor [server.xml]` | 检查 `java`（必需）、`jstart`（可选提示），以及启用 setline 时管理口通不通；必需项缺失时退出码非 0，见 [doctor.md](doctor.md) |
 
 ## 组件目录初始化
 
@@ -224,7 +224,7 @@ basctl firewall /opt/bas          # 交互式地放行 server.xml 里的端口
 | `Cannot find config file …` | `BAS_HOME` 不对，或 `conf/server.xml` 还没写 | `export BAS_HOME=…`，或直接用参数给配置文件路径 |
 | `Route conflict on /x` | 同一个路径被**端口集合不同**的多个 webapp 认领 | 给 webapp 显式声明 `<url path="…"/>`，让每个前缀有唯一归属 |
 | `No setline listening on …`（推送 / `start`） | setline 没在跑，或管理口端口不对 | 看 `<setline port>`（那是 setline 的 `adminListen` 端口）；basctl 不会替你拉起 setline |
-| `Cannot run jstart …` | `jstart` 不在 `PATH` | 装 jstart，或 `export beangle_jstart=/path/to/jstart`；`basctl doctor` 会直接告诉你缺哪个 |
+| `Cannot run jstart …` | `jstart` 不在 `PATH` | 装 jstart，或 `export beangle_jstart=/path/to/jstart`；`basctl doctor` 会提示它是否就位（`jstart` 为可选提示，不影响 doctor 退出码，但实际调用仍会失败） |
 | `status` 里某个实例是 `stale` | 进程已不在（崩了或手工 kill） | `basctl stop <name>` 清掉运行信息，再 `start`；对账会把它的路由摘掉 |
 | 容器外访问不到 | 出口端口没映射，或 setline 的 `listen` 绑成了 `127.0.0.1` | `-p 8080:8080` 且容器内 `listen` 绑 `*:8080`（入口脚本默认如此），见 [container.md](container.md) |
 

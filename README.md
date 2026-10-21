@@ -16,7 +16,7 @@
 | [docs/server-info.md](docs/server-info.md) | 实例运行信息 `server.info` 的格式与生命周期、动态端口分配 |
 | [docs/setline.md](docs/setline.md) | 本地代理：`<setline>` 配置、路由推送与 `status` 对账、多份 `BAS_HOME` 共享、部署与安全边界 |
 | [docs/engine-creator.md](docs/engine-creator.md) | 容器入口（creator）：jstart `[engine] init` 协议 |
-| [docs/doctor.md](docs/doctor.md) | 环境自检：`java` / `jstart` / setline 管理口 |
+| [docs/doctor.md](docs/doctor.md) | 环境自检：`java`（必需）/ `jstart`（可选提示）/ setline 管理口 |
 | [docs/container.md](docs/container.md) | 容器化「一机器一出口」：镜像内容、构建、运行、信号 |
 | [docs/channel.md](docs/channel.md) | 汇报通道（basctl → bashub）：怎么启用、`report` / `agent` 两条命令、上报什么、失败怎么办 |
 | [docs/channel-protocol.md](docs/channel-protocol.md) | 控制通道协议：端点与鉴权、消息信封、固定原语、节拍、未知消息的处理与扩展方式 |
@@ -51,8 +51,10 @@ IDE 补全与校验（见 `server.xml` 样例）。
 ## 构建与测试
 
 - `ldc2` >= 1.32，`dub` >= 1.34
-- `make` / `resolve` / `start` 需要本机有 `jstart`（负责构件的解析、下载与启动）；
-  这些命令是否就位可以用 `basctl doctor` 自查（见 [docs/doctor.md](docs/doctor.md)）
+- 构建与运行需要 OpenSSL 3.x（`wss://` 控制通道使用 `vibe-stream:tls/openssl-3.0`）
+- `make` / `resolve` / `start` / `run` 需要本机有 `jstart`（负责构件的解析、下载与启动）；
+  `basctl doctor` 会显示它是否就位，但在 doctor 中只是可选提示，缺失不影响退出码
+  （见 [docs/doctor.md](docs/doctor.md)）
 
 ```sh
 dub build --build=release-nobounds --compiler=ldc2

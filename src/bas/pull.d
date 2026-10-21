@@ -31,7 +31,7 @@ import bas.remote : RemoteConfig, bearerCredential, loadRemoteConf, remoteConfPa
 import std.file : exists, getcwd, mkdirRecurse, rename;
 import std.path : absolutePath, buildPath;
 import std.process : environment;
-import std.stdio : stderr, writeln;
+import std.stdio : stderr, stdout, write, writeln;
 import std.string : startsWith, strip;
 
 /** `pull [--file=<basctl.conf>] [--if-configured] [workdir]`：下载并替换 `<workdir>/conf/server.xml`。 */
@@ -85,23 +85,23 @@ int runPull(string[] args) {
   }
 
   auto url = serverConfigUrl(remote);
-  writeln("fetching " ~ url ~ "...");
+  write("fetching " ~ url ~ "...");
+  stdout.flush();
 
   auto confDir = buildPath(workdir, "conf");
   mkdirRecurse(confDir);
   auto newer = buildPath(confDir, "server_newer.xml");
   if (!curlDownload(url, newer, ["Authorization: Bearer " ~ bearerCredential(remote)])) {
-    stderr.writeln("cannot get " ~ url);
+    writeln(" failed");
     return 1;
   }
 
   auto current = buildPath(confDir, "server.xml");
   if (exists(current)) {
     rename(current, buildPath(confDir, "server_old.xml"));
-    writeln("rename server.xml to server_old.xml.");
   }
   rename(newer, current);
-  writeln("conf/server.xml was updated.");
+  writeln(" updated");
   return 0;
 }
 

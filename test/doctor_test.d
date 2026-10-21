@@ -51,7 +51,7 @@ private string adminAddress(int port) {
   assert(findOnPath("definitely-not-a-command", dir) == "");
 }
 
-@("doctor requires java and jstart, and setline only as a reachable entry") unittest {
+@("doctor requires java, reports optional jstart, and checks setline only when configured") unittest {
   auto dir = fakeToolsDir();
   scope (exit) rmdirRecurse(dir);
 
@@ -126,15 +126,15 @@ private string adminAddress(int port) {
   auto checks = checkTools(confFile, ToolEnv("", dir, buildPath(dir, "jstart")));
   assert(checks[1].state == CheckState.ok && checks[1].source == jstartEnvVar, checks[1].source);
 
-  // 变量指向不存在的命令：报缺失，提示里带变量名
+  // 变量指向不存在的命令：只作可选提示，不把 jstart 当成必需项
   checks = checkTools(confFile, ToolEnv("", dir, buildPath(dir, "nope")));
-  assert(checks[1].state == CheckState.missing && checks[1].note.canFind(jstartEnvVar));
+  assert(checks[1].state == CheckState.optional && checks[1].note.canFind(jstartEnvVar));
 }
 
 @("renderChecks prints one line per command plus a verdict") unittest {
   ToolCheck[] checks = [
     ToolCheck("java", CheckState.ok, "/opt/jdk/bin/java", "JAVA_HOME", ""),
-    ToolCheck("jstart", CheckState.missing, "", "", "install jstart"),
+    ToolCheck("jstart", CheckState.optional, "", "", "install jstart when needed"),
     ToolCheck("setline", CheckState.skipped, "", "", "not required: no <setline>"),
   ];
   auto text = renderChecks("/tmp/missing-server.xml", checks);
@@ -142,7 +142,16 @@ private string adminAddress(int port) {
   assert(lines.length == 5, text);
   assert(lines[0].canFind("config") && lines[0].canFind("not found"));
   assert(lines[1].canFind("java") && lines[1].canFind("ok") && lines[1].canFind("JAVA_HOME"));
-  assert(lines[2].canFind("jstart") && lines[2].canFind("MISSING"));
+  assert(lines[2].canFind("jstart") && lines[2].canFind("optional"));
   assert(lines[3].canFind("setline") && lines[3].canFind("skip"));
-  assert(lines[4] == "doctor: 1 required command(s) missing.");
+  assert(lines[4] == "doctor: all required commands are available.");
+}
+
+@("renderChecks counts java but not optional jstart as missing") unittest {
+  ToolCheck[] checks = [
+    ToolCheck("java", CheckState.missing, "", "", "install a JDK"),
+    ToolCheck("jstart", CheckState.optional, "", "", "install jstart when needed"),
+  ];
+  auto text = renderChecks("/tmp/missing-server.xml", checks);
+  assert(text.canFind("doctor: 1 required command(s) missing."), text);
 }

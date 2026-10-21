@@ -106,10 +106,9 @@ basctl 侧 `src/bas/{channel,agent,hub,report,logs}.d`、bashub 侧
 长期一条连接。若 bashub 侧的 WS 接入最终被证明接不住（比如 ems 的过滤链改不动），再退回长轮询：
 **原语表不变，只换承载**。
 
-顺带一个已存在的事实：basctl 的 `dub.json` 声明了 `vibe-http` / `vibe-d:web` / `vibe-inet`，但HTTP
-一直全走 `curl` 子进程，这些依赖一行没用。走 WS 正好把它们用起来：客户端连接来自
-`vibe.http.websockets`，事件循环来自 `vibe-core`。**核对结果**：`vibe-d:web` / `vibe-inet` 与
-`vibe-stream:tls` 仍被 transitively 需要（WS 走 `wss` 要 TLS），暂不删。
+通道使用模块化 vibe：客户端连接来自 `vibe.http.websockets`，地址解析来自 `vibe.inet.url`，
+事件循环来自 `vibe-core`；`wss` 的 TLS 由 `vibe-stream:tls/openssl-3.0` 提供，直接依赖
+OpenSSL 3.x。`pull` 与 war 直链下载仍走宿主 `curl` 子进程。
 
 ### 阶段
 

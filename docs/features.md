@@ -16,7 +16,7 @@
 | 嵌入式跑单应用 | `basctl run --engine=<type>-<version> <app>` | 一个参数给出容器类型与版本，生成单应用 spec 后前台 `jstart run`；纯前台，Ctrl-C 退出 | [run.md](run.md) |
 | 本地代理与对账 | `basctl setline` | 按运行中的实例把路由推给已经在跑的 setline（推一次即退出，只推，不生成 setline 的配置、不拉起它） | [setline.md](setline.md) |
 | 容器入口（creator） | `basctl make <type>` | jstart `[engine] init` 协议的回调，把容器启动命令写回 spec | [engine-creator.md](engine-creator.md) |
-| 环境自检 | `basctl doctor` | 检查 `java` / `jstart`（启用 setline 时还有管理口可达性） | [doctor.md](doctor.md) |
+| 环境自检 | `basctl doctor` | 检查 `java`（必需）与 `jstart`（可选提示）；启用 setline 时还检查管理口可达性 | [doctor.md](doctor.md) |
 | 防火墙 | `basctl firewall` | 按 `server.xml` 交互式配置 firewalld 的放行端口 | [usage.md](usage.md) |
 | 汇报与指令通道 | `basctl report` / `basctl agent` | 主动拨一条出站 WebSocket 到控制台（bashub），把本机现状（主机家底 + 活着的实例）报上去，并接收固定原语（立即上报 / 取日志）；`start` / `stop` 之后顺带报一次 | [channel.md](channel.md)、[channel-protocol.md](channel-protocol.md) |
 | 拉取配置 | `basctl pull` | 从控制端拉取 `conf/server.xml`（旧配置备份为 `server_old.xml`） | [usage.md](usage.md) |
