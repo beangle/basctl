@@ -29,7 +29,7 @@ import bas.jstart;
 import std.algorithm : canFind, endsWith;
 import std.file : exists, isDir, timeLastModified;
 import std.path : absolutePath, buildPath;
-import std.string : empty, replace, split, strip;
+import std.string : empty, replace, split, startsWith, strip;
 import std.stdio : writeln;
 import std.typecons : Nullable;
 
@@ -63,7 +63,8 @@ string[] resolveWebapps(string basHome, Repository releaseRepo, SnapshotRepo sna
         missings ~= gav.asGav();
       }
     } else if (isRemote(app.uri)) {
-      auto fileName = downloadToDir(app.uri, buildPath(basHome, "webapps"));
+      auto fileName = downloadToDir(app.uri, buildPath(basHome, "webapps"),
+          authHeadersFor(app.uri, releaseRepo, snapshotRepo));
       app.docBase = buildPath(basHome, "webapps", fileName);
     } else {
       auto docBase = app.uri;
@@ -82,7 +83,7 @@ string[] resolveWebapps(string basHome, Repository releaseRepo, SnapshotRepo sna
     if (!missingDocBase) {
       if (exists(app.docBase)) {
         if (app.resolveSupport && resolvable(app.docBase)) {
-          auto resolved = resolve(app.docBase, releaseRepo.local, releaseRepo.remotes, releaseRepo.token);
+          auto resolved = resolve(app.docBase, releaseRepo);
           if (resolved.isNull) {
             writeln("Cannot launch webapp:" ~ app.docBase);
             missings ~= app.docBase;
@@ -129,4 +130,31 @@ bool resolvable(string path) {
   if (path.endsWith(".jar") || path.endsWith(".war"))
     return true;
   return exists(path) && isDir(path);
+}
+
+/** 仅当 URL 落在已配置仓库根之下时附上该仓库令牌，避免向无关主机泄漏凭据。 */
+private string[] authHeadersFor(string url, Repository releaseRepo, SnapshotRepo snapshotRepo) {
+  string best;
+  string token;
+  auto snapshotRemotes = snapshotRepo.remotes;
+  auto snapshotTokens = snapshotRepo.tokens;
+  foreach (i, base; snapshotRemotes) {
+    if (urlMatches(url, base) && base.length > best.length) {
+      best = base;
+      token = i < snapshotTokens.length ? snapshotTokens[i] : "";
+    }
+  }
+  auto releaseRemotes = releaseRepo.remotes;
+  auto releaseTokens = releaseRepo.tokens;
+  foreach (i, base; releaseRemotes) {
+    if (urlMatches(url, base) && base.length > best.length) {
+      best = base;
+      token = i < releaseTokens.length ? releaseTokens[i] : "";
+    }
+  }
+  return token.length ? ["Authorization: Bearer " ~ token] : [];
+}
+
+private bool urlMatches(string url, string base) {
+  return base.length > 0 && (url == base || url.startsWith(base ~ "/"));
 }

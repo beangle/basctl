@@ -108,6 +108,19 @@ import std.algorithm : canFind;
       "--snapshot-remote=http://snap"]);
 }
 
+@("repoArgs embeds release and snapshot tokens in repository specs") unittest {
+  auto cfg = parseServerXml(`<bas version="0.13.16">
+      <repository local="/m2" remote="http://r1,http://r2" token="release-key-1,release-key-2"/>
+      <snapshot-repo remote="http://snap1,http://snap2" token="snapshot-key-1,"/>
+      <engines><engine name="tomcat" type="tomcat-server" version="11.0.18"/></engines>
+      <hosts><host name="local" ip="127.0.0.1"/></hosts>
+      <farms><farm name="f" engine="tomcat"><server name="s" http="8080"/></farm></farms>
+      <webapps><webapp uri="gav://g:a:1" run-at="f" path="/"/></webapps></bas>`);
+  assert(repoArgs(cfg) == ["--local=/m2",
+      "--remote=release-key-1@http://r1,release-key-2@http://r2",
+      "--snapshot-remote=snapshot-key-1@http://snap1,http://snap2"]);
+}
+
 @("repoArgs falls back to the snapshot local and omits empty repositories") unittest {
   auto cfg = parseServerXml(`<bas version="0.13.16">
       <snapshot-repo local="/m2snap"/>

@@ -22,11 +22,15 @@ import bas.jstart;
 import std.typecons : Nullable, nullable;
 
 @("build args keeps official and snapshot remotes separate") unittest {
-  auto args = buildArgs("jstart", "resolve", "g:a:1", nullable("/repo"), ["https://a", "https://b"], false, []);
-  assert(args == ["jstart", "resolve", "g:a:1", "--local=/repo", "--remote=https://a,https://b"]);
+  auto args = buildArgs("jstart", "resolve", "g:a:1", nullable("/repo"),
+      ["release-key-a@https://a", "https://b"], false, []);
+  assert(args == ["jstart", "resolve", "g:a:1", "--local=/repo",
+      "--remote=release-key-a@https://a,https://b"]);
 
-  auto snap = buildArgs("jstart", "fetch", "g:a:1-SNAPSHOT", Nullable!string.init, [], true, ["https://snap"]);
-  assert(snap == ["jstart", "fetch", "g:a:1-SNAPSHOT", "--snapshot-remote=https://snap", "--offline"]);
+  auto snap = buildArgs("jstart", "fetch", "g:a:1-SNAPSHOT", Nullable!string.init, [],
+      true, ["snapshot-key@https://snap"]);
+  assert(snap == ["jstart", "fetch", "g:a:1-SNAPSHOT",
+      "--snapshot-remote=snapshot-key@https://snap", "--offline"]);
 }
 
 @("last line skips trailing blanks") unittest {

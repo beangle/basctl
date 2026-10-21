@@ -123,7 +123,12 @@ token = fedcba9876543210fedcba9876543210
   现有 `conf/server.xml` 启动。`restart.sh` 同样先尽力拉取，再 resolve / stop / start；
   远端不可用不会让改配置失败挡住已安装版本的启动。
 - `server.xml` 里仍可写 `${bas_remote_url}` / `${bas_remote_token}`，解析时会用
-  `basctl.conf` 的 `remote.url` / `remote.token` 展开，而不是读取环境变量。
+  `basctl.conf` 的 `remote.url` / `remote.token` 展开，而不是读取环境变量。SNAPSHOT
+  下载另有自己的 `token`：bashub 会把 Profile 的 micdn `<auth download-key>` 写入
+  `<snapshot-repo token="...">`；没有配置 key 时不写 `token`，按匿名下载处理。
+- 同一个 `<repository>` / `<snapshot-repo>` 有多个 `remote` 时，`token` 可写成与地址
+  等长的逗号列表（如 `token="key1,key2"`）；basctl 会合并成
+  `--remote=key1@url1,url2` 交给 jstart。空段表示对应仓库匿名，凭证不会跨仓库复用。
 - 文件含凭证，建议 `chmod 600 conf/basctl.conf`。
 
 ## 常见场景
@@ -205,7 +210,6 @@ basctl firewall /opt/bas          # 交互式地放行 server.xml 里的端口
 | `beangle_jstart` | 用 jstart 的命令 | jstart 可执行文件路径，缺省按 `PATH` 找 `jstart` |
 | `beangle_basctl` | jstart 回调 creator 时 | basctl 可执行文件路径；缺省用自身（`/proc/self/exe`），debug 构建或改名时可用它指定 |
 | `M2_REPO` / `M2_REMOTE_REPO` | `run`（`--local` / `--remote` 的缺省值） | 本地 / 远端构件仓库 |
-| `micdn_token` | 传给 jstart 的下载 token | 由 `server.xml` 的 token 临时设置，命令结束后恢复原值 |
 
 ## 排错
 

@@ -496,6 +496,18 @@ class Repository {
       return [];
     return splitRepos(remote.get);
   }
+
+  /** 与 {@link remotes} 按位置对应的读令牌；空段表示该仓库匿名。 */
+  string[] tokens() const {
+    if (token.isNull)
+      return [];
+    return splitTokenList(token.get);
+  }
+
+  /** 传给 jstart 的 `[token@]url` 列表；无 token 的仓库保持裸 URL。 */
+  string[] repoSpecs() const {
+    return mergeRepos(remotes, tokens);
+  }
 }
 
 /** 开发版（SNAPSHOT）仓库配置（server.xml 的 `<snapshot-repo>`）。 */
@@ -519,6 +531,18 @@ class SnapshotRepo {
       return [];
     return splitRepos(remote.get);
   }
+
+  /** 与 {@link remotes} 按位置对应的开发版读令牌；空段表示该仓库匿名。 */
+  string[] tokens() const {
+    if (token.isNull)
+      return [];
+    return splitTokenList(token.get);
+  }
+
+  /** 传给 jstart 的 `[token@]url` 列表；无 token 的仓库保持裸 URL。 */
+  string[] repoSpecs() const {
+    return mergeRepos(remotes, tokens);
+  }
 }
 
 /** 拆分逗号分隔的仓库地址列表，丢弃空段（不追加 Central，交由 jstart 处理）。 */
@@ -530,6 +554,31 @@ private string[] splitRepos(string urls) {
       res ~= t;
   }
   return res;
+}
+
+/** 拆分逗号分隔的 token 列表；保留空段，保证与 {@link splitRepos} 的结果按位置对齐。 */
+private string[] splitTokenList(string tokens) {
+  string[] res;
+  size_t start = 0;
+  foreach (i, ch; tokens) {
+    if (ch == ',') {
+      res ~= strip(tokens[start .. i]);
+      start = i + 1;
+    }
+  }
+  if (start < tokens.length || tokens.length > 0)
+    res ~= strip(tokens[start .. $]);
+  return res;
+}
+
+/** 将按位置对应的仓库与 token 合成 jstart 的 `[token@]url` 列表。 */
+private string[] mergeRepos(const(string)[] repos, const(string)[] tokens) {
+  string[] specs;
+  foreach (i, repo; repos) {
+    auto token = i < tokens.length ? strip(tokens[i]) : "";
+    specs ~= token.length ? token ~ "@" ~ repo : repo;
+  }
+  return specs;
 }
 
 /** `server.xml` 根对象：engines / hosts / farms / webapps / resources。 */

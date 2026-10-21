@@ -822,7 +822,8 @@ private string shellJoin(const(string)[] args) {
 /**
  * 调用 jstart（`resolve` / `run`）时的仓库参数：本地库取 `<repository local>`，
  * 缺省退回 `<snapshot-repo local>`；上游分别是 `<repository remote>` 与
- * `<snapshot-repo remote>`（快照仓库走独立的 `--snapshot-remote=`）。
+ * `<snapshot-repo remote>`（快照仓库走独立的 `--snapshot-remote=`），token 合并为
+ * `[token@]url` 随地址一起传递。
  * 都没配时不传，交给 jstart 的内置默认。
  */
 string[] repoArgs(Container container) {
@@ -832,10 +833,10 @@ string[] repoArgs(Container container) {
     local = container.snapshotRepo.local;
   if (!local.isNull && strip(local.get).length)
     args ~= "--local=" ~ strip(local.get);
-  if (container.repository.remotes.length)
-    args ~= "--remote=" ~ container.repository.remotes.join(",");
-  if (container.snapshotRepo.remotes.length)
-    args ~= "--snapshot-remote=" ~ container.snapshotRepo.remotes.join(",");
+  if (container.repository.repoSpecs.length)
+    args ~= "--remote=" ~ container.repository.repoSpecs.join(",");
+  if (container.snapshotRepo.repoSpecs.length)
+    args ~= "--snapshot-remote=" ~ container.snapshotRepo.repoSpecs.join(",");
   return args;
 }
 

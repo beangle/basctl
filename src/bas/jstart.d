@@ -21,8 +21,8 @@
  *  - `jstart resolve <target>`：取得目标（gav / 本地 war / url）并补齐依赖，回显本地绝对路径；
  *  - `jstart fetch <target>`：只取回一个构件（gav / url），回显本地绝对路径。
  *
- * `--remote=` 是正式版上游，`--snapshot-remote=` 是开发版上游（两者独立）；读取受保护仓库的
- * 令牌按 jstart 的约定通过子进程环境变量 `micdn_token` 传递。命令位置可用 `beangle_jstart` 覆盖。
+ * `--remote=` 是正式版上游，`--snapshot-remote=` 是开发版上游（两者独立）；每个仓库写作
+ * `[token@]url`，不再读取或改写环境变量。命令位置可用 `beangle_jstart` 覆盖。
  */
 module bas.jstart;
 
@@ -46,54 +46,27 @@ string jstartCommand() {
 
 /** resolve：下载目标并补齐依赖，返回本地绝对路径。 */
 Nullable!string resolve(string target, Repository repo) {
-  return exec("resolve", target, repo.local, repo.remotes, repo.token, false, []);
+  return exec("resolve", target, repo.local, repo.repoSpecs, false, []);
 }
 
 /** resolve（开发版）：未配置上游时以 `--offline` 只使用本地已有构件。 */
 Nullable!string resolve(string target, SnapshotRepo repo) {
-  return exec("resolve", target, repo.local, [], repo.token, repo.remotes.length == 0, repo.remotes);
+  return exec("resolve", target, repo.local, [], repo.remotes.length == 0, repo.repoSpecs);
 }
 
 /** fetch：只取回一个构件，返回本地绝对路径。 */
 Nullable!string fetch(string target, Repository repo) {
-  return exec("fetch", target, repo.local, repo.remotes, repo.token, false, []);
+  return exec("fetch", target, repo.local, repo.repoSpecs, false, []);
 }
 
 /** fetch（开发版）：未配置上游时以 `--offline` 只使用本地已有构件。 */
 Nullable!string fetch(string target, SnapshotRepo repo) {
-  return exec("fetch", target, repo.local, [], repo.token, repo.remotes.length == 0, repo.remotes);
-}
-
-/** fetch：显式指定本地仓库 / 上游 / 令牌。 */
-Nullable!string fetch(string target, Nullable!string local, const(string)[] remotes, Nullable!string token) {
-  return exec("fetch", target, local, remotes, token, false, []);
-}
-
-/** resolve：显式指定本地仓库 / 上游 / 令牌。 */
-Nullable!string resolve(string target, Nullable!string local, const(string)[] remotes, Nullable!string token) {
-  return exec("resolve", target, local, remotes, token, false, []);
+  return exec("fetch", target, repo.local, [], repo.remotes.length == 0, repo.repoSpecs);
 }
 
 private Nullable!string exec(string sub, string target, Nullable!string local, const(string)[] remotes,
-    Nullable!string token, bool offline, const(string)[] snapshotRemotes) {
+    bool offline, const(string)[] snapshotRemotes) {
   auto args = buildArgs(jstartCommand(), sub, target, local, remotes, offline, snapshotRemotes);
-
-  bool hadToken;
-  string previousToken;
-  if (!token.isNull) {
-    hadToken = "micdn_token" in environment;
-    if (hadToken)
-      previousToken = environment.get("micdn_token");
-    environment["micdn_token"] = token.get;
-  }
-  scope (exit) {
-    if (!token.isNull) {
-      if (hadToken)
-        environment["micdn_token"] = previousToken;
-      else
-        environment.remove("micdn_token");
-    }
-  }
 
   import std.process : ProcessException;
   import std.typecons : Tuple;
@@ -120,10 +93,12 @@ string[] buildArgs(string command, string sub, string target, Nullable!string lo
   string[] args = [command, sub, target];
   if (!local.isNull && strip(local.get).length)
     args ~= "--local=" ~ strip(local.get);
-  if (remotes.length)
+  if (remotes.length) {
     args ~= "--remote=" ~ remotes.join(",");
-  if (snapshotRemotes.length)
+  }
+  if (snapshotRemotes.length) {
     args ~= "--snapshot-remote=" ~ snapshotRemotes.join(",");
+  }
   if (offline)
     args ~= "--offline";
   return args;

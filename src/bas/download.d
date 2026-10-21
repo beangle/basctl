@@ -60,11 +60,11 @@ bool curlDownload(string url, string local, string[] headers = null) {
   return true;
 }
 
-/** 下载到 `dir`，返回文件名；已存在则跳过。 */
-string downloadToDir(string url, string dir) {
+/** 下载到 `dir`，返回文件名；已存在则跳过。`headers` 透传给 curl。 */
+string downloadToDir(string url, string dir, string[] headers = null) {
   auto fileName = url[url.lastIndexOf('/') + 1 .. $];
   auto dest = dir ~ "/" ~ fileName;
   if (!exists(dest))
-    curlDownload(url, dest);
+    curlDownload(url, dest, headers);
   return fileName;
 }
