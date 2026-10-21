@@ -24,7 +24,7 @@
  *     `--port-range` 区间内分配一个空闲端口（见 {@link bas.portalloc}）；随后写
  *     `servers/<name>/server.info`（不含 pid，兼作端口预留，见 {@link bas.serverinfo}）；
  *  3. 逐个解析 webapp（沿用 `make`/`resolve` 的语义），为每个 `<server>` 生成一份
- *     launch spec `conf/<farm.server>.jstart`——一个 `<server>` 一个 JVM：
+ *     launch spec `servers/<farm.server>/launch.jstart`——一个 `<server>` 一个 JVM：
  *     `type="tomcat-server"` 时每个 webapp 一段 `[subapp <id>]`（各自 docBase 与 `libs`，
  *     依赖互不串味），`tomcat` / `undertow` / `jetty` 时写单应用 `[app] entry`（只允许一个 webapp）；
  *  4. `jstart resolve <spec>` 校验 spec 与依赖齐备；
@@ -80,6 +80,9 @@ import std.typecons : Nullable, nullable;
 
 /** 启动后等待多久（毫秒）再确认进程存活，用于 Webapp 启动失败/依赖缺失的快速反馈。 */
 private enum startupProbeMs = 2000;
+
+/** 实例 launch spec 文件名；与 `engine-subapps.jstart` 等 jstart 固定约定分开。 */
+private enum launchSpecFile = "launch.jstart";
 
 /** `stop` 默认等进程退出的秒数（与 jstart 的历史缺省一致）。 */
 enum defaultStopTimeoutSec = 15;
@@ -283,7 +286,7 @@ private void startUsage() {
  * `basctl make [server.xml] <farm|server|all>`：只准备不启动。
  *
  * 与 `start` 共用选实例、引擎默认与 {@link prepareServer}，逐个生成
- * `conf/<name>.jstart` 并 `jstart resolve`（把依赖抓到本地库）；不写 pid、不起进程，
+ * `servers/<name>/launch.jstart` 并 `jstart resolve`（把依赖抓到本地库）；不写 pid、不起进程，
  * 启动交给 `start`。适合离线预取与启动前巡检。
  */
 int runMake(string configFile, string pattern) {
@@ -636,7 +639,7 @@ ServerInfo describeInstance(Container container, Server server, string startedAt
 
 /**
  * 为单个 `<server>` 生成 spec：解析 webapp、确保引擎依赖本地齐备、写出 `[engine] init` 命令行
- * 与 `conf/<name>.jstart`。成功返回 spec 路径，失败返回空。
+ * 与 `servers/<name>/launch.jstart`。成功返回 spec 路径，失败返回空。
  */
 private Nullable!string prepareServer(string basHome, Container container, Server server) {
   auto webapps = container.getWebapps(server);
@@ -689,14 +692,22 @@ private Nullable!string prepareServer(string basHome, Container container, Serve
   }
 
   auto initCommand = engineInitCommand(containerType);
-  auto spec = buildPath(basHome, "conf", server.qualifiedName ~ ".jstart");
+  auto spec = instanceLaunchSpec(basHome, server.qualifiedName);
   mkdirRecurse(dirName(spec));
   write(spec, renderLaunchSpec(buildPath(basHome, "servers"), server.qualifiedName, basHome,
       initCommand, engineDeps, runtimeArgsFor(server), appArgs, subapps, entry));
+  auto legacySpec = buildPath(basHome, "conf", server.qualifiedName ~ ".jstart");
+  if (exists(legacySpec))
+    remove(legacySpec);
   writeln(server.qualifiedName ~ ": wrote " ~ spec);
   if (!resolveSpec(spec, repoArgs(container)))
     return Nullable!string.init;
   return nullable(spec);
+}
+
+/** 实例 launch spec 的存放路径：`<basHome>/servers/<instance>/launch.jstart`。 */
+string instanceLaunchSpec(string basHome, string instance) {
+  return buildPath(basHome, "servers", instance, launchSpecFile);
 }
 
 /**

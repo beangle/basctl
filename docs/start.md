@@ -25,7 +25,7 @@ basctl start all --no-setline                # 临时不把这批实例的路由
    `--port=`。格式见 [server-info.md](server-info.md)；
 3. **解析 webapp**：沿用 `make` / `resolve` 的语义（`gav://`、http(s) 直链、本地路径、
    SNAPSHOT 本地覆盖）；失败写 `servers/<farm.server>/error` 并跳过该实例；
-4. **生成 spec**：`conf/<farm.server>.jstart`——一个 `<server>` 一份 spec（一个 JVM），
+4. **生成 spec**：`servers/<farm.server>/launch.jstart`——一个 `<server>` 一份 spec（一个 JVM），
    并按 `<engine type>` 把 `[engine] init` 写成对应 creator 的 `make <type>` 命令行
    （`tomcat-server` / `tomcat` / `undertow` / `jetty`，与 type 同名）；
 5. **`jstart resolve <spec>`**：校验 spec 与各 webapp 的依赖齐备，失败即不启动该实例；
@@ -55,7 +55,7 @@ basctl start all --no-setline                # 临时不把这批实例的路由
 3. SIGTERM → 等 `--timeout`（缺省 15 秒）→ 还没退就报错退出（**不会**自动升级成 SIGKILL）；
 4. `--force` 跳过第 2、3 步，直接 SIGKILL。
 
-停完删除 `server.info`。因为 pid 记在运行信息里，`conf/<farm.server>.jstart` 删了也能停；
+停完删除 `server.info`。因为 pid 记在运行信息里，`servers/<farm.server>/launch.jstart` 删了也能停；
 反过来，**未由 basctl 启动**的实例没有 `server.info`，停不掉，会报 `no run info`。
 配了 `<setline>` 时，停完还会按 `servers/*/server.info` 对账一次路由（摘除这些端口），
 失败同样是只警告；`--no-setline` 跳过。

@@ -32,6 +32,11 @@ import std.algorithm : canFind;
   assert(subappId("/portal", ["portal", "portal-2"]) == "portal-3");
 }
 
+@("instance launch spec lives in the instance directory") unittest {
+  assert(instanceLaunchSpec("/opt/bas", "platform.server1")
+      == "/opt/bas/servers/platform.server1/launch.jstart");
+}
+
 @("standaloneWebappError restricts embed engines to one webapp") unittest {
   assert(standaloneWebappError("tomcat", "tomcat", 1) == "");
   assert(standaloneWebappError("undertow", "undertow", 1) == "");
