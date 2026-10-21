@@ -38,7 +38,8 @@ import bas.config : Container, parseServerXmlFile;
 import bas.hub : agentUrl;
 import bas.logs : consoleLog, countLines, maxLogLines, plainName, readLogWindow;
 import bas.net : hostName;
-import bas.remote : RemoteConfig, loadRemoteConf, profileControlUrl, remoteConfFileName, validateRemoteConf;
+import bas.remote : RemoteConfig, agentChannelUrl, bearerCredential, loadRemoteConf, remoteConfFileName,
+  validateRemoteConf;
 import bas.report : basReport, osReport;
 import bas.starter : serviceAction;
 
@@ -84,7 +85,8 @@ private enum connectTimeout = 20.seconds;
 /** 一次会话需要的全部输入。地址与 token 都来自同目录 `conf/basctl.conf`，没有第二处来源。 */
 struct AgentContext {
   string endpoint;
-  string token;
+  /** 握手凭证：`<profile>:<Profile.key>`。 */
+  string credential;
   /** 当前配置路径；service:* 动作与 report:bas 都从同一份 server.xml 找实例。 */
   string configFile;
   string host;
@@ -205,7 +207,7 @@ AgentContext agentContext(const Container conf, string configFile, string basctl
 /** 已读取并校验过的远程配置；`publishSnapshot` 用它避免重复读文件。 */
 private AgentContext agentContext(const Container conf, const RemoteConfig remote, string configFile,
     string basctlVersion, bool once) {
-  return AgentContext(agentUrl(profileControlUrl(remote)), remote.token, configFile, hostName(),
+  return AgentContext(agentUrl(agentChannelUrl(remote)), bearerCredential(remote), configFile, hostName(),
       dirName(dirName(absolutePath(configFile))), conf.version_, basctlVersion, once);
 }
 
@@ -229,7 +231,7 @@ private void agentLoop(ref AgentContext ctx) @system nothrow {
   exitEventLoop(true);
 }
 
-/** 拨号、握手（`Authorization: Bearer <key>`），连上后交给 {@link serve}。 */
+/** 拨号、握手（`Authorization: Bearer <profile>:<Profile.key>`），连上后交给 {@link serve}。 */
 private void connectOnce(ref AgentContext ctx) {
   swallow({ logInfo("channel: connecting to %s", ctx.endpoint); });
   auto settings = new HTTPClientSettings;
@@ -239,7 +241,7 @@ private void connectOnce(ref AgentContext ctx) {
   settings.readTimeout = silentTimeout;
   auto ws = connectWebSocketEx(URL(ctx.endpoint),
       (scope HTTPClientRequest req) @safe {
-        req.headers["Authorization"] = "Bearer " ~ ctx.token;
+        req.headers["Authorization"] = "Bearer " ~ ctx.credential;
       }, settings);
   scope (exit) {
     if (ws.connected)

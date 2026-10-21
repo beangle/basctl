@@ -62,8 +62,9 @@ import std.uuid : randomUUID;
 
   assert(code == 0, "one-shot report should exit cleanly");
   // 路径里的 profile 与凭证都在握手里：hub 靠这两样认「这是哪台机器」
-  assert(hub.request.startsWith("GET /api/demo.prod/agents HTTP/1.1\r\n"), hub.request);
-  assert(hub.request.canFind("Authorization: Bearer k1"), hub.request);
+  assert(hub.request.startsWith(
+      "GET /api/bashub/monitor/agents/demo.prod/channel HTTP/1.1\r\n"), hub.request);
+  assert(hub.request.canFind("Authorization: Bearer demo.prod:k1"), hub.request);
   assert(hub.request.canFind("Upgrade: websocket"), hub.request);
 
   // 三条：hello（身份与能力）+ 两份上报（整份替换语义）
@@ -216,7 +217,7 @@ private final class FakeHub {
   string request;
   /** 收到的每条**文本**帧；控制帧（关闭）不进这里。 */
   string[] messages;
-  /** 监听端口：配置里写 `http://127.0.0.1:<port>/api/<profile>`。 */
+  /** 监听端口：配置里写 `http://127.0.0.1:<port>`，basctl 再拼 bashub 的能力域路径。 */
   ushort port;
 
   private Socket listener;

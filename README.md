@@ -10,12 +10,11 @@
 | 文档 | 内容 |
 |---|---|
 | [docs/features.md](docs/features.md) | 功能清单、核心模型（意图 / 现状 / 运行态与对账）、目录约定、`make` 的两种模式、与 jstart 的关系、边界与非目标 |
-| [docs/usage.md](docs/usage.md) | 安装、五分钟上手、命令一览、常见场景（`run` / setline / 容器 / pull / firewall）、环境变量、排错 |
+| [docs/usage.md](docs/usage.md) | 安装、五分钟上手（接入 bashub / 独立使用）、命令一览、常见场景（`run` / 容器 / pull / firewall）、环境变量、排错 |
 | [docs/start.md](docs/start.md) | `start` 的流程与生成的 jstart spec |
 | [docs/run.md](docs/run.md) | `run`：嵌入式运行单个 webapp |
 | [docs/server-info.md](docs/server-info.md) | 实例运行信息 `server.info` 的格式与生命周期、动态端口分配 |
-| [docs/setline.md](docs/setline.md) | 本地代理：把运行中实例的路由推给 setline（推一次即退出）、`status` 的 route 列 |
-| [docs/setline-config.md](docs/setline-config.md) | `<setline>` 的配置与启用规则、多份 `BAS_HOME` 共享、安全边界 |
+| [docs/setline.md](docs/setline.md) | 本地代理：`<setline>` 配置、路由推送与 `status` 对账、多份 `BAS_HOME` 共享、部署与安全边界 |
 | [docs/engine-creator.md](docs/engine-creator.md) | 容器入口（creator）：jstart `[engine] init` 协议 |
 | [docs/doctor.md](docs/doctor.md) | 环境自检：`java` / `jstart` / setline 管理口 |
 | [docs/container.md](docs/container.md) | 容器化「一机器一出口」：镜像内容、构建、运行、信号 |

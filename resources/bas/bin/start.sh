@@ -14,9 +14,10 @@ if [ -f "$BAS_HOME/bin/setenv.sh" ]; then
   . "$BAS_HOME/bin/setenv.sh"
 fi
 
-# 远端配置：存在 basctl.conf 时尽力刷新 conf/server.xml；失败只告警，继续用本地配置启动
+# 远端配置：填写了任一字段时尽力刷新 conf/server.xml；空模板直接跳过，
+# 失败只告警，继续用本地配置启动
 if [ "${BAS_SKIP_REMOTE_PULL:-0}" != "1" ] && [ -f "$BAS_HOME/conf/basctl.conf" ]; then
-  if ! "$basctl_cmd" pull "$BAS_HOME"; then
+  if ! "$basctl_cmd" pull --if-configured "$BAS_HOME"; then
     echo "warning: cannot refresh conf/server.xml from remote; starting with the existing file." >&2
   fi
 fi

@@ -21,13 +21,17 @@ import bas.hub;
 
 import std.exception : assertThrown;
 
-@("the dial address is the profile control url plus /agents, http(s) becomes ws(s)") unittest {
-  assert(agentUrl("https://sas.openurp.net/api/demo") == "wss://sas.openurp.net/api/demo/agents");
-  assert(agentUrl("http://127.0.0.1:8080/api/demo") == "ws://127.0.0.1:8080/api/demo/agents");
+@("the dial address only changes http(s) to ws(s)") unittest {
+  assert(agentUrl("https://sas.openurp.net/api/bashub/monitor/agents/demo.prod/channel")
+      == "wss://sas.openurp.net/api/bashub/monitor/agents/demo.prod/channel");
+  assert(agentUrl("http://127.0.0.1:8080/api/bashub/monitor/agents/demo.prod/channel")
+      == "ws://127.0.0.1:8080/api/bashub/monitor/agents/demo.prod/channel");
   // 已经是 websocket 的地址就原样留着（本地调试直接写 ws:// 更省事）
-  assert(agentUrl("ws://127.0.0.1:8080/api/demo") == "ws://127.0.0.1:8080/api/demo/agents");
-  assert(agentUrl("wss://sas.openurp.net/api/demo") == "wss://sas.openurp.net/api/demo/agents");
+  assert(agentUrl("ws://127.0.0.1:8080/api/bashub/monitor/agents/demo.prod/channel")
+      == "ws://127.0.0.1:8080/api/bashub/monitor/agents/demo.prod/channel");
+  assert(agentUrl("wss://sas.openurp.net/api/bashub/monitor/agents/demo.prod/channel")
+      == "wss://sas.openurp.net/api/bashub/monitor/agents/demo.prod/channel");
   // 认不出的 scheme 直接报错，不猜
-  assertThrown(agentUrl("ftp://sas.openurp.net/api/demo"));
-  assertThrown(agentUrl("sas.openurp.net/api/demo"));
+  assertThrown(agentUrl("ftp://sas.openurp.net/api/bashub/monitor/agents/demo.prod/channel"));
+  assertThrown(agentUrl("sas.openurp.net/api/bashub/monitor/agents/demo.prod/channel"));
 }

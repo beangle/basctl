@@ -90,7 +90,7 @@ enum defaultStopTimeoutSec = 15;
  *
  * 任一实例准备失败只跳过该实例（写 `servers/<name>/error`，并撤销它的端口预留），其余照常启动。
  */
-/** `<setline>` 出现即启用（配置就是开关，见 docs/setline-config.md）。 */
+/** `<setline>` 出现即启用（配置就是开关，见 docs/setline.md）。 */
 private bool setlineEnabled(const Container container) {
   return !container.setlineHostname.isNull && strip(container.setlineHostname.get).length > 0;
 }

@@ -120,7 +120,8 @@ podman run -d --name bas --userns=keep-id --init -p 8080:8080 \
 1. `mkdir` + `chown` 修好卷的属主（绑定目录常常是 root 的），之后所有 `basctl` 调用用
    `su-exec` 降权到 `bas` 用户（`bin/*.sh` 拒绝 root 运行）；
 2. 没有 `conf/server.xml` 就铺样例；
-3. `basctl init "$BAS_HOME"` 补齐 `bin/*.sh` 控制脚本（已存在的保留）；
+3. `basctl init "$BAS_HOME"` 补齐 `bin/*.sh` 控制脚本（已存在的保留），并生成
+   `conf/basctl.conf` 注释模板（已存在则不覆盖）；
 4. 删掉 `servers/*/server.info`——**新容器 = 新进程空间**，上一轮的 pid 已经指不到任何人，
    留着会让路由和 `status` 指向别的进程；
 5. setline：容器入口**自己拉起它、也自己给配置**（容器里 setline 的进程归入口脚本）——卷里没有
@@ -150,7 +151,7 @@ podman run -d --name bas --userns=keep-id --init -p 8080:8080 \
 - **容器内不做 supervisor**：某个实例崩了不会自动重启，也没有 `HEALTHCHECK`（podman 以 OCI
   格式提交时会忽略它）。要看「容器到底活着吗」用编排层的探针，要自动重启用编排层的重启策略；
 - **不做 host 分组**：一个容器一份 `BAS_HOME`、一个出口（多份 `BAS_HOME` 共享一个 setline 的
-  做法见 [setline-config.md](setline-config.md)）；
+  做法见 [setline.md](setline.md)）；
 - **不把 `server.xml` 塞进环境变量**：配置仍然只有 `conf/server.xml` 一个来源，容器只负责挂卷。
 
 ## 验收

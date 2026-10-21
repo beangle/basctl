@@ -19,6 +19,7 @@ module test.init_test;
 
 import bas.fsutil : setExecutable;
 import bas.init : installScripts, runInit;
+import bas.remote : parseRemoteConf;
 
 import std.algorithm : canFind, startsWith;
 import std.file : exists, readText, rmdirRecurse, tempDir, write;
@@ -50,6 +51,8 @@ private string fakeBasctl(string root) {
   auto result = installScripts(root, false, false);
   assert(result.written == 5);
   assert(result.kept == 0);
+  assert(result.confWritten);
+  assert(!result.confKept);
   assert(exists(buildPath(root, "conf")));
   foreach (name; names) {
     auto path = buildPath(root, "bin", name);
@@ -69,11 +72,43 @@ private string fakeBasctl(string root) {
 
   auto kept = installScripts(root, false, false);
   assert(kept.written == 0 && kept.kept == 5);
+  assert(!kept.confWritten && kept.confKept);
   assert(readText(bas) == "CUSTOM");
 
   auto forced = installScripts(root, true, false);
   assert(forced.written == 5 && forced.kept == 0);
+  assert(!forced.confWritten && forced.confKept);
   assert(readText(bas).canFind("basctl_cmd"));
+}
+
+@("installScripts writes a commented basctl.conf template with empty remote fields") unittest {
+  auto root = newRoot("remote-template");
+  scope (exit) if (exists(root)) rmdirRecurse(root);
+
+  auto result = installScripts(root, false, false);
+  assert(result.confWritten);
+
+  auto conf = buildPath(root, "conf", "basctl.conf");
+  auto text = readText(conf);
+  assert(text.canFind("# basctl.conf"), text);
+  assert(text.canFind("[remote]"), text);
+  assert(text.canFind("url ="), text);
+  assert(text.canFind("profile ="), text);
+  assert(text.canFind("token ="), text);
+
+  auto remote = parseRemoteConf(text);
+  assert(!remote.complete);
+  assert(!remote.url.length && !remote.profile.length && !remote.token.length);
+
+  version (Posix) {
+    import core.sys.posix.sys.stat : lstat, stat_t;
+    import std.conv : octal;
+    import std.string : toStringz;
+
+    stat_t st;
+    assert(lstat(conf.toStringz, &st) == 0);
+    assert((st.st_mode & octal!777) == octal!600);
+  }
 }
 
 @("installScripts dry run touches nothing") unittest {
@@ -82,6 +117,7 @@ private string fakeBasctl(string root) {
 
   auto result = installScripts(root, false, true);
   assert(result.written == 5);
+  assert(result.confWritten);
   assert(!exists(root));
 }
 
@@ -114,7 +150,7 @@ private string fakeBasctl(string root) {
   assert(result.status == 0, result.output);
   assert(result.output.canFind("warning: cannot refresh conf/server.xml"), result.output);
   auto calls = readText(buildPath(root, "fake-calls"));
-  assert(calls.canFind("pull " ~ root), calls);
+  assert(calls.canFind("pull --if-configured " ~ root), calls);
   assert(calls.canFind("start " ~ buildPath(root, "conf", "server.xml") ~ " tools"), calls);
 }
 
@@ -135,7 +171,7 @@ private string fakeBasctl(string root) {
   assert(calls.canFind("stop " ~ buildPath(root, "conf", "server.xml") ~ " tools"), calls);
   assert(calls.canFind("start " ~ buildPath(root, "conf", "server.xml") ~ " tools"), calls);
   // restart 在停机前已经尝试过 pull，start.sh 不应再拉一次
-  assert(calls.canFind("pull " ~ root), calls);
+  assert(calls.canFind("pull --if-configured " ~ root), calls);
   size_t pulls;
   foreach (line; calls.splitLines())
     if (line.startsWith("pull "))

@@ -11,6 +11,8 @@ basctl 主动拨一条出站 WebSocket 到控制台（bashub），把**这台机
 
 地址、Profile 和凭证都放在与 `server.xml` 同目录的 `conf/basctl.conf`，与 `pull` 完全共用：
 
+> `basctl init` 会生成带注释的模板；把 `[remote]` 的三项填上即可。
+
 ```ini
 [remote]
 url = https://hub.example.com
@@ -19,9 +21,11 @@ token = 9f8e7d6c5b4a39281706f5e4d3c2b1a0
 ```
 
 - `[remote] url` / `profile` / `token` 三项齐全才启用；`basctl` 拼出
-  `https://hub.example.com/api/<profile>`，再拼 `/agents` 拨号，`http(s)` 自动换成 `ws(s)`。
+  `https://hub.example.com/api/bashub/monitor/agents/<profile>/channel` 拨号，`http(s)` 自动
+  换成 `ws(s)`。
 - `token` 同时用于 `pull` 和通道握手，取值是 bashub 的 `Profile.key`。在 bashub 的配置详情里可以查看，
-  `POST /api/hub/profiles/{id}/reset-key` 可以重置（重置后旧的拉取与通道连接一起失效）。
+  发送时拼成 `<profile>:<Profile.key>`；`POST /api/bashub/config/profiles/{id}/reset-key` 可以
+  重置（重置后旧的拉取与通道连接一起失效）。
 - `server.xml` **不再**保存通道地址或凭证；旧文件里遗留的 `<hub>` 元素会被直接忽略。
 - 不再读取 `bas_remote_url` 等环境变量。
 

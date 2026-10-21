@@ -17,7 +17,8 @@
 /** Unit tests for conf/basctl.conf. */
 module test.remote_test;
 
-import bas.remote : RemoteConfig, parseRemoteConf, profileControlUrl, validateRemoteConf;
+import bas.remote : RemoteConfig, agentChannelUrl, bearerCredential, parseRemoteConf, serverConfigUrl,
+  validateRemoteConf;
 
 import std.exception : assertThrown;
 
@@ -32,8 +33,13 @@ token = "secret"
   assert(conf.url == "https://hub.example.com/bashub/");
   assert(conf.profile == "openurp.prod");
   assert(conf.token == "secret");
+  assert(conf.configured);
   assert(conf.complete);
-  assert(profileControlUrl(conf) == "https://hub.example.com/bashub/api/openurp.prod");
+  assert(serverConfigUrl(conf)
+      == "https://hub.example.com/bashub/api/bashub/config/openurp.prod/server");
+  assert(agentChannelUrl(conf)
+      == "https://hub.example.com/bashub/api/bashub/monitor/agents/openurp.prod/channel");
+  assert(bearerCredential(conf) == "openurp.prod:secret");
 }
 
 @("other sections do not leak into remote") unittest {
@@ -41,6 +47,13 @@ token = "secret"
   assert(conf.url == "");
   assert(conf.profile == "demo.prod");
   assert(conf.token == "");
+  assert(conf.configured);
+  assert(!conf.complete);
+}
+
+@("an empty template is neither configured nor complete") unittest {
+  auto conf = parseRemoteConf("# template\n[remote]\nurl =\nprofile =\ntoken =\n");
+  assert(!conf.configured);
   assert(!conf.complete);
 }
 

@@ -26,17 +26,23 @@
  *     token = <Profile.key>
  *
  * `url` 是控制台根地址（含反向代理前缀），不是某个 Profile 的完整地址；Profile 与
- * 凭证分别由 `profile` / `token` 给出。
+ * 凭证分别由 `profile` / `token` 给出。所有端点按 bashub 的能力域拼接：
+ *
+ *     <url>/api/bashub/config/<profile>/server
+ *     <url>/api/bashub/monitor/agents/<profile>/channel
  */
 module bas.remote;
 
-import std.algorithm : endsWith, startsWith;
+import std.algorithm : startsWith;
 import std.file : exists, readText;
 import std.path : buildPath, dirName;
 import std.string : indexOf, splitLines, strip;
 
 /** 配置文件相对 `BAS_HOME/conf` 的文件名。 */
 enum remoteConfFileName = "basctl.conf";
+
+/** bashub API 的固定根路径。 */
+private enum bashubApiPath = "/api/bashub";
 
 /** Raised when `basctl.conf` is incomplete or malformed enough to use. */
 class RemoteConfigException : Exception {
@@ -50,6 +56,11 @@ struct RemoteConfig {
   string url;
   string profile;
   string token;
+
+  /** 是否至少填写了一项；用于区分空模板与填了一半的配置。 */
+  bool configured() const {
+    return url.length > 0 || profile.length > 0 || token.length > 0;
+  }
 
   /** 三项齐全才允许发起远程请求。 */
   bool complete() const {
@@ -125,30 +136,29 @@ void validateRemoteConf(const RemoteConfig conf, string path) {
     throw new RemoteConfigException("No remote.token in " ~ path);
 }
 
-/**
- * Profile 的控制面 URL：`<remote.url>/api/<remote.profile>`。
- *
- * 为了便于手工填写，也接受已经写到 `/api`、甚至已经写到 `/api/<profile>` 的地址。
- */
-string profileControlUrl(const RemoteConfig conf) {
-  auto base = remoteBaseUrl(conf.url);
-  auto profile = stripTrailingSlash(strip(conf.profile));
-  auto suffix = "/" ~ profile;
-  if (base.endsWith(suffix))
-    return base;
-  if (base.endsWith("/api"))
-    return base ~ suffix;
-  return base ~ "/api" ~ suffix;
-}
-
 /** 控制台根地址：去掉首尾空白与尾部斜杠，供 URL 拼接和 `${bas_remote_url}` 展开共用。 */
 string remoteBaseUrl(string url) {
   return stripTrailingSlash(strip(url));
 }
 
+/** bashub API 根地址：`<remote.url>/api/bashub`。 */
+string hubApiRoot(const RemoteConfig conf) {
+  return remoteBaseUrl(conf.url) ~ bashubApiPath;
+}
+
 /** basctl `pull` 下载 server.xml 的地址。 */
 string serverConfigUrl(const RemoteConfig conf) {
-  return profileControlUrl(conf) ~ "/config/server";
+  return hubApiRoot(conf) ~ "/config/" ~ conf.profile ~ "/server";
+}
+
+/** 节点通道的 HTTP(S) 地址；拨号时再转换成 WebSocket scheme。 */
+string agentChannelUrl(const RemoteConfig conf) {
+  return hubApiRoot(conf) ~ "/monitor/agents/" ~ conf.profile ~ "/channel";
+}
+
+/** `pull` 与通道握手共用的 Bearer 凭证；bashub 会同时校验 Profile 与 key。 */
+string bearerCredential(const RemoteConfig conf) {
+  return conf.profile ~ ":" ~ conf.token;
 }
 
 /** 去掉尾斜杠，但不破坏 `https://` 这类只有 scheme 的写法。 */

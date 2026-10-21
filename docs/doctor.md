@@ -16,7 +16,7 @@ basctl doctor /opt/bas/conf/server.xml
 | `jstart` | `start` / `make` / `resolve` 用它解析下载构件 | `beangle_jstart` 指向的命令优先，其次 `PATH` 上的 `jstart` |
 | `setline` | **只有** `server.xml` 里声明了 `<setline>` 才检查；检的是**管理口可达**，不是命令存在 | 管理口端口取自 `<setline port>`（元素必填，`doctor` 没有命令行覆盖），`127.0.0.1:<port>` 有人监听即 `ok` |
 
-`<setline>` 的判定与 [setline-config.md](setline-config.md) 一致：出现即启用，没有独立的开关。
+`<setline>` 的判定与 [setline.md](setline.md) 一致：出现即启用，没有独立的开关。
 没启用时这一行是 `skip`，`start` / `stop` / `status` 也完全不碰 setline。配置文件不存在或解析
 失败时按「未启用 setline」处理（不因此报错），说明会打在 `config` 行上。
 

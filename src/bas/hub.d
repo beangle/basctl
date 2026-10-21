@@ -26,11 +26,11 @@ import std.algorithm : startsWith;
 import std.string : strip;
 
 /**
- * 拨号地址：Profile 控制面地址后面拼 `/agents`，scheme 换成 WebSocket 的——`https` → `wss`、
- * `http` → `ws`（已经是 `ws` / `wss` 就原样留着）。
+ * 拨号地址：路由由 `bas.remote.agentChannelUrl` 拼好，这里只把 scheme 换成 WebSocket 的——
+ * `https` → `wss`、`http` → `ws`（已经是 `ws` / `wss` 就原样留着）。
  */
-string agentUrl(string profileControlUrl) {
-  auto base = strip(profileControlUrl);
+string agentUrl(string channelUrl) {
+  auto base = strip(channelUrl);
   string url;
   if (base.startsWith("https://"))
     url = "wss://" ~ base["https://".length .. $];
@@ -40,5 +40,5 @@ string agentUrl(string profileControlUrl) {
     url = base;
   else
     throw new Exception("Invalid control url (expect http/https): " ~ base);
-  return url ~ "/agents";
+  return url;
 }

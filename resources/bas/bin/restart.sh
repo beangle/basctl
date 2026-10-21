@@ -8,9 +8,9 @@ if [ -f "$BAS_HOME/bin/setenv.sh" ]; then
   . "$BAS_HOME/bin/setenv.sh"
 fi
 
-# 先尽力拉取新配置，再 resolve；拉取失败时仍用现有 server.xml 做停机前检查。
+# 先尽力拉取新配置（空模板跳过），再 resolve；拉取失败时仍用现有 server.xml 做停机前检查。
 if [ -f "$BAS_HOME/conf/basctl.conf" ]; then
-  if ! "$basctl_cmd" pull "$BAS_HOME"; then
+  if ! "$basctl_cmd" pull --if-configured "$BAS_HOME"; then
     echo "warning: cannot refresh conf/server.xml from remote; restart continues with the existing file." >&2
   fi
 fi

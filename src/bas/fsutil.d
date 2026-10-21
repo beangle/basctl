@@ -103,6 +103,16 @@ void setExecutable(string path) {
   }
 }
 
+/** Marks a file readable / writable only by its owner（0600）, no-op elsewhere. */
+void setPrivateFile(string path) {
+  version (Posix) {
+    import core.sys.posix.sys.stat : chmod;
+    import std.conv : octal;
+
+    chmod(path.toStringz, octal!600);
+  }
+}
+
 /**
  * Creates `path` (and its parents) and forces 0700 on `path` itself（POSIX）.
  *
