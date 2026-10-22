@@ -178,6 +178,9 @@ basctl init --dry-run /opt/bas # 只打印将会写入的文件
   `basctl.conf` 的 `remote.url` / `remote.token` 展开，而不是读取环境变量。SNAPSHOT
   下载另有自己的 `token`：bashub 会把 Profile 的 micdn `<auth download-key>` 写入
   `<snapshot-repo token="...">`；没有配置 key 时不写 `token`，按匿名下载处理。
+  SNAPSHOT 仓库仍会先被检查并尝试下载最新构建，再与 `BAS_HOME/webapps` 下的同名 war
+  比较修改时间；仓库暂时不可用（例如返回 401）时静默使用本地文件，不向启动终端输出
+  下载失败。
 - 同一个 `<repository>` / `<snapshot-repo>` 有多个 `remote` 时，`token` 可写成与地址
   等长的逗号列表（如 `token="key1,key2"`）；basctl 会合并成
   `--remote=key1@url1,url2` 交给 jstart。空段表示对应仓库匿名，凭证不会跨仓库复用。

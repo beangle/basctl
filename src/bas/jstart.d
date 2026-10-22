@@ -59,29 +59,37 @@ Nullable!string fetch(string target, Repository repo) {
   return exec("fetch", target, repo.local, repo.repoSpecs, false, []);
 }
 
-/** fetch（开发版）：未配置上游时以 `--offline` 只使用本地已有构件。 */
-Nullable!string fetch(string target, SnapshotRepo repo) {
-  return exec("fetch", target, repo.local, [], repo.remotes.length == 0, repo.repoSpecs);
+/**
+ * fetch（开发版）：未配置上游时以 `--offline` 只使用本地已有构件。
+ *
+ * SNAPSHOT 的上游存在与否是开发版常态，调用方通常还要与 `BAS_HOME/webapps`
+ * 下的本地覆盖比较，因此默认静默 jstart 的下载失败与告警。
+ */
+Nullable!string fetch(string target, SnapshotRepo repo, bool quiet = true) {
+  return exec("fetch", target, repo.local, [], repo.remotes.length == 0, repo.repoSpecs, quiet);
 }
 
 private Nullable!string exec(string sub, string target, Nullable!string local, const(string)[] remotes,
-    bool offline, const(string)[] snapshotRemotes) {
-  auto args = buildArgs(jstartCommand(), sub, target, local, remotes, offline, snapshotRemotes);
+    bool offline, const(string)[] snapshotRemotes, bool quiet = false) {
+  auto args = buildArgs(jstartCommand(), sub, target, local, remotes, offline, snapshotRemotes, quiet);
 
   import std.process : ProcessException;
   import std.typecons : Tuple;
 
   Tuple!(int, "status", string, "output") result;
   try
-    result = execute(args, null, Config.stderrPassThrough);
+    result = quiet ? execute(args, null) : execute(args, null, Config.stderrPassThrough);
   catch (ProcessException) {
-    stderr.writeln("Cannot run " ~ jstartCommand() ~ ", install jstart or set " ~ jstartEnvVar
-        ~ " to its path.");
+    if (!quiet)
+      stderr.writeln("Cannot run " ~ jstartCommand() ~ ", install jstart or set " ~ jstartEnvVar
+          ~ " to its path.");
     return Nullable!string.init;
   }
 
   if (result.status != 0) {
-    stderr.writeln(jstartCommand() ~ " " ~ sub ~ " " ~ target ~ " failed with exit code " ~ result.status.to!string);
+    if (!quiet)
+      stderr.writeln(jstartCommand() ~ " " ~ sub ~ " " ~ target ~ " failed with exit code "
+          ~ result.status.to!string);
     return Nullable!string.init;
   }
   return lastLine(result.output);
@@ -89,7 +97,7 @@ private Nullable!string exec(string sub, string target, Nullable!string local, c
 
 /** 拼出 jstart 命令行；`resolve`/`fetch` 共用同一套参数。 */
 string[] buildArgs(string command, string sub, string target, Nullable!string local, const(string)[] remotes,
-    bool offline, const(string)[] snapshotRemotes) {
+    bool offline, const(string)[] snapshotRemotes, bool quiet = false) {
   string[] args = [command, sub, target];
   if (!local.isNull && strip(local.get).length)
     args ~= "--local=" ~ strip(local.get);
@@ -101,6 +109,8 @@ string[] buildArgs(string command, string sub, string target, Nullable!string lo
   }
   if (offline)
     args ~= "--offline";
+  if (quiet)
+    args ~= "--quiet";
   return args;
 }
 

@@ -33,6 +33,13 @@ import std.typecons : Nullable, nullable;
       "--snapshot-remote=snapshot-key@https://snap", "--offline"]);
 }
 
+@("quiet snapshot fetch suppresses jstart diagnostics") unittest {
+  auto args = buildArgs("jstart", "fetch", "g:a:1-SNAPSHOT", Nullable!string.init, [],
+      false, ["snapshot-key@https://snap"], true);
+  assert(args == ["jstart", "fetch", "g:a:1-SNAPSHOT",
+      "--snapshot-remote=snapshot-key@https://snap", "--quiet"]);
+}
+
 @("last line skips trailing blanks") unittest {
   assert(lastLine("/repo/g/a/1/a-1.jar\n\n").get == "/repo/g/a/1/a-1.jar");
   assert(lastLine("").isNull);

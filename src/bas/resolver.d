@@ -31,7 +31,7 @@ import std.file : exists, isDir, timeLastModified;
 import std.path : absolutePath, buildPath;
 import std.string : empty, replace, split, startsWith, strip;
 import std.stdio : writeln;
-import std.typecons : Nullable;
+import std.typecons : Nullable, nullable;
 
 /**
  * 解析每个 webapp 的 docBase 与依赖，返回未能解析的坐标/路径。
@@ -51,13 +51,11 @@ string[] resolveWebapps(string basHome, Repository releaseRepo, SnapshotRepo sna
       if (gav.packaging == "jar")
         gav = gav.withPackaging("war");
       auto path = resolveArtifact(releaseRepo, snapshotRepo, gav);
+      if (gav.isSnapshot()) {
+        path = chooseSnapshotEntry(basHome, gav, path);
+      }
       if (!path.isNull) {
         app.docBase = path.get;
-        if (gav.isSnapshot()) {
-          auto localWar = buildPath(basHome, "webapps", gav.fileName());
-          if (exists(localWar) && timeLastModified(localWar) > timeLastModified(path.get))
-            app.docBase = absolutePath(localWar);
-        }
       } else {
         missingDocBase = true;
         missings ~= gav.asGav();
@@ -96,6 +94,20 @@ string[] resolveWebapps(string basHome, Repository releaseRepo, SnapshotRepo sna
     }
   }
   return missings;
+}
+
+/**
+ * 选择 SNAPSHOT 的入口：仓库解析结果与 `BAS_HOME/webapps` 下同名 war 中取较新的一个。
+ * 仓库不可达（例如 401）时，只要本地覆盖存在就直接使用，不让远端故障挡住本地启动。
+ */
+Nullable!string chooseSnapshotEntry(string basHome, Artifact gav, Nullable!string repoPath) {
+  auto localWar = buildPath(basHome, "webapps", gav.fileName());
+  auto hasLocal = exists(localWar);
+  if (repoPath.isNull)
+    return hasLocal ? nullable(absolutePath(localWar)) : Nullable!string.init;
+  if (hasLocal && timeLastModified(localWar) > timeLastModified(repoPath.get))
+    return nullable(absolutePath(localWar));
+  return repoPath;
 }
 
 /**
