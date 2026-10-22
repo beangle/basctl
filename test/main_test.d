@@ -43,8 +43,8 @@ import std.typecons : nullable;
 
   auto lines = statusLines(info);
   assert(lines.length == 3);
-  assert(lines[0] == "platform.server1(pid=23145 port=20001 engine=tomcat-server-11.0.26"
-      ~ " started=2026-10-07T10:12:33+08:00)");
+  // 引擎与启动时间仍写在 server.info 里，但不再占 status 首行
+  assert(lines[0] == "platform.server1(pid=23145 port=20001)");
   // 未声明 <url> 的 webapp 不写 urls（对外走 context），声明了的列出来
   assert(lines[1] == "  /portal  gav://org.beangle.ems:beangle-ems-portal:4.20.13");
   assert(lines[2] == "  /        gav://org.beangle.otk:beangle-otk-ws:war:0.0.30"

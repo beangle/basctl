@@ -162,7 +162,7 @@ jstart 只负责"解析 + 准备 + exec"，实例身份与停止交给 basctl（
 | `src/bas/serverinfo.d` | 模型、INI 读写、原子替换 |
 | `src/bas/portalloc.d` | 端口区间、`flock` 内的"探测 + 预留"、顺序挑选与复用 |
 | `src/bas/starter.d` | `start` 写运行信息（含补 pid）、`stop` 按 pid 停止、`describeInstance` 从配置推导内容 |
-| `src/bas/main.d` | `status` 按运行信息展示（`port` / `engine` / `started` / 各 webapp 的 `url`）；配了 `<setline>` 时另起一节报入口状态 |
+| `src/bas/main.d` | `status` 按运行信息展示（`pid` / `port` / 各 webapp 的 `url`；`engine`、`started` 只留在文件里）；配了 `<setline>` 时另起一节报入口状态 |
 | `src/bas/setline.d` | `runningPlan`：由运行信息（而非 `server.xml`）算路由与冲突 |
 | `src/bas/setlineproc.d` | 把现状推给 setline：`basctl setline`（推一次）、`start` / `stop` 之后的对账 |
 

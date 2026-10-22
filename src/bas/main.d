@@ -491,15 +491,13 @@ private void printSetlineStatus(string[] lines) {
 }
 
 /**
- * 一个运行中实例的展示行：首行是标识（pid / 端口 / 引擎 / 启动时间），随后每个 webapp 一行
+ * 一个运行中实例的展示行：首行是标识（pid / 端口），随后每个 webapp 一行
  * `<context>  <uri>`；声明了对外 url 的再补 `urls=...`，便于一眼看出这个 webapp 从哪些路径
- * 对外服务（未声明时按 context 对外）。
+ * 对外服务（未声明时按 context 对外）。引擎与启动时间只存在 `server.info` 里，不占首行的位置。
  */
 public string[] statusLines(const ServerInfo info) {
   string[] lines;
-  auto engine = info.engine.length ? " engine=" ~ info.engine : "";
-  auto started = info.started.length ? " started=" ~ info.started : "";
-  lines ~= format!"%s(pid=%s port=%s%s%s)"(info.id, info.pid, info.httpPort, engine, started);
+  lines ~= format!"%s(pid=%s port=%s)"(info.id, info.pid, info.httpPort);
 
   size_t width;
   foreach (app; info.webapps) {

@@ -122,7 +122,7 @@ setline 与 bashub 通道互不依赖，配置、部署与安全边界统一见 
 |---|---|
 | `basctl version` | 打印 `basctl <版本>`（单行纯文本，便于脚本取值） |
 | `basctl banner [server.xml]` | 操作者横幅：logo + bas 引擎版本（取自 `<bas version>`）+ basctl 版本 + 本机地址；`bas.sh version` 调它。图形为纯 ASCII，只在交互终端出现，重定向到日志/管道时只剩版本行与本机地址 |
-| `basctl status` | 列出 `$BAS_HOME/servers` 下运行中的实例：读 `server.info` 展示 pid、端口、引擎、启动时间与各 webapp 的对外 url；pid 已不在的显示为 `stale`。配了 `<setline>` 时另起一节报名命空间、管理口地址与通不通（`up` / `down`），并读一次 `GET /_setline/routes`（本机来源免凭据）给出 route 列（缺 / 端口对不上 / 多 / `routes in sync`） |
+| `basctl status` | 列出 `$BAS_HOME/servers` 下运行中的实例：读 `server.info` 展示 pid、端口与各 webapp 的对外 url（引擎与启动时间只留在 `server.info` 里，不再打印）；pid 已不在的显示为 `stale`。配了 `<setline>` 时另起一节报名命空间、管理口地址与通不通（`up` / `down`），并读一次 `GET /_setline/routes`（本机来源免凭据）给出 route 列（缺 / 端口对不上 / 多 / `routes in sync`） |
 | `basctl logs [server.xml] <farm.server> [-n <行数>] [-f]` | 读 `$BAS_HOME/logs/<farm.server>/console.out` 的尾部：`-n` 缺省 50 行、上限 2000；`-f` 持续跟随（Ctrl-C 退出），日志滚动后自动跟新文件。归档的旧日志在 `logs/archive/`，要查直接读文件 |
 | `basctl init [--force] [--dry-run] [workdir]` | 初始化组件目录：把控制脚本铺到 `<workdir>/bin`，并生成带注释的 `conf/basctl.conf` 模板（已存在则不覆盖） |
 | `basctl make [server.xml] <farm\|server\|all>` | 只准备不启动：生成 jstart spec 并 `jstart resolve` 预取依赖 |
