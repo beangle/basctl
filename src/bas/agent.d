@@ -49,16 +49,18 @@ import vibe.core.log : logInfo, logWarn;
 import vibe.http.client : HTTPClientRequest, HTTPClientSettings;
 import vibe.http.websockets : WebSocket, connectWebSocketEx;
 import vibe.inet.url : URL;
+import vibe.stream.tls : TLSContext, TLSPeerValidationMode;
 
 import core.time : Duration, seconds;
+import core.stdc.stdlib : abort;
 import std.datetime.stopwatch : MonoTime;
 import std.file : exists;
 import std.json : JSONValue;
 import std.path : absolutePath, buildPath, dirName;
-import std.process : spawnShell;
+import std.process : environment, spawnShell;
 import std.stdio : stderr, writeln;
 import std.conv : to;
-import std.string : format;
+import std.string : format, strip;
 
 /** 心跳节拍：循环等消息的超时。等到了就处理消息，等不到就用来看计时器。 */
 private enum tick = 1.seconds;
@@ -72,8 +74,11 @@ private enum silentTimeout = 90.seconds;
 /** 断线后的重连间隔：固定值，不做指数退避——少一个要调的参数。 */
 private enum reconnectDelay = 10.seconds;
 
+/** 一条 WebSocket 消息的上限；日志窗口与上报都远小于这个值。 */
+private enum size_t maxChannelPayloadBytes = 256 * 1024;
+
 /** 最近若干个请求的结果：重复的 `id` 只回放，不重复执行（尤其不能让 restart 做两遍）。 */
-private enum int recentResultLimit = 32;
+private enum int recentResultLimit = 128;
 
 /**
  * 拨号的连接与读取超时。
@@ -82,6 +87,14 @@ private enum int recentResultLimit = 32;
  * `Duration.max`，真按它等下去，一次 `report` 能让人等上好几分钟。
  */
 private enum connectTimeout = 20.seconds;
+
+/** 常见发行版的系统 CA 包；CentOS 7 使用 pki 路径。 */
+private immutable string[] caBundlePaths = [
+  "/etc/ssl/certs/ca-certificates.crt",
+  "/etc/pki/tls/certs/ca-bundle.crt",
+  "/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem",
+  "/etc/ssl/ca-bundle.pem"
+];
 
 /** 一次会话需要的全部输入。地址与 token 都来自同目录 `conf/basctl.conf`，没有第二处来源。 */
 struct AgentContext {
@@ -213,6 +226,29 @@ private void connectOnce(ref AgentContext ctx) {
   // WebSocket 复用底层 TCP 的 readTimeout。若这里仍用 20s，而 hub 的 ping 是 30s，
   // 空闲连接会在第一轮心跳前就被客户端自己掐断，表现为每 30s 重连一次。
   settings.readTimeout = silentTimeout;
+  settings.webSocketPayloadMaxLength = maxChannelPayloadBytes;
+
+  // vibe-http 新客户端的默认值是 none；不覆盖就等于接受任意自签证书。
+  // 这里恢复完整校验，并从系统 CA 包加载信任根。找不到 CA 时保持 trustedCert，
+  // 让握手失败而不是静默降级。
+  immutable caBundle = findCaBundle();
+  if (!caBundle.length)
+    logWarn("channel: no system CA bundle found; TLS certificate validation will fail closed");
+  settings.tlsContextSetup = (TLSContext tls) @safe nothrow {
+    try
+      tls.peerValidationMode = TLSPeerValidationMode.trustedCert;
+    catch (Exception) {
+      // 这个 setter 当前不会抛；真抛了就终止进程，绝不带着 none 继续连接。
+      abort();
+    }
+    if (caBundle.length) {
+      try
+        tls.useTrustedCertificateFile(caBundle);
+      catch (Exception) {
+        // 保持 trustedCert；加载失败时握手会失败，不能退回 none。
+      }
+    }
+  };
   auto ws = connectWebSocketEx(URL(ctx.endpoint),
       (scope HTTPClientRequest req) @safe {
         req.headers["Authorization"] = "Bearer " ~ ctx.credential;
@@ -222,6 +258,30 @@ private void connectOnce(ref AgentContext ctx) {
       ws.close();
   }
   serve(ctx, ws);
+}
+
+/** 优先使用显式环境变量，其次按发行版常见路径查找系统 CA 包。 */
+private string findCaBundle() {
+  foreach (name; ["SSL_CERT_FILE", "CURL_CA_BUNDLE"]) {
+    auto value = environment.get(name, "").strip;
+    if (value.length) {
+      try {
+        if (exists(value))
+          return value;
+      } catch (Exception) {
+        // 坏的环境变量不阻止继续找系统路径。
+      }
+    }
+  }
+  foreach (path; caBundlePaths) {
+    try {
+      if (exists(path))
+        return path;
+    } catch (Exception) {
+      // 没权限或路径异常时继续试下一个。
+    }
+  }
+  return "";
 }
 
 /** 执行一段可能抛异常的动作，把异常压成一行日志——循环里的每一步都不许把 agent 弄死。 */
@@ -346,6 +406,12 @@ private void handle(ref AgentContext ctx, scope WebSocket ws, string text) {
       logWarn("channel: ignore %s without id", msg.type);
       break;
     }
+    if (!requestTimestampFresh(msg.at)) {
+      auto reply = resultMessage(msg.id, false, JSONValue(null), "bad-request: stale or missing timestamp");
+      rememberResult(ctx, msg.id, reply);
+      ws.send(reply);
+      break;
+    }
     auto action = msg.type["service:".length .. $];
     if ((action == "start" || action == "restart") && !refreshBeforeService(ctx)) {
       auto reply = resultMessage(msg.id, false, JSONValue(null), "pull-failed");
@@ -431,10 +497,12 @@ private string logWindowResult(string path, string id, ref JSONValue body) {
 
   long total;
   string[] lines;
+  bool truncated;
   try {
     auto window = readLogWindow(path, from, to);
     total = window.total;
     lines = window.lines;
+    truncated = window.truncated;
   } catch (Exception e) {
     return resultMessage(id, false, JSONValue(null), "read-failed: " ~ e.msg);
   }
@@ -446,7 +514,8 @@ private string logWindowResult(string path, string id, ref JSONValue body) {
     "total": JSONValue(total),
     "from": JSONValue(from),
     "to": JSONValue(from + lines.length - 1),
-    "lines": JSONValue(items)
+    "lines": JSONValue(items),
+    "truncated": JSONValue(truncated)
   ];
   return resultMessage(id, true, data, "");
 }

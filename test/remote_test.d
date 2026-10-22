@@ -18,7 +18,7 @@
 module test.remote_test;
 
 import bas.remote : RemoteConfig, agentChannelUrl, bearerCredential, parseRemoteConf, serverConfigUrl,
-  validateRemoteConf;
+  isAllowedRemoteUrl, validateRemoteConf;
 
 import std.exception : assertThrown;
 
@@ -57,9 +57,21 @@ token = "secret"
   assert(!conf.complete);
 }
 
-@("remote validation rejects incomplete values and non-http URLs") unittest {
+@("remote validation rejects incomplete values and insecure URLs") unittest {
   assertThrown!Exception(validateRemoteConf(RemoteConfig.init, "basctl.conf"));
   assertThrown!Exception(validateRemoteConf(RemoteConfig("ftp://host", "a.b", "k"), "basctl.conf"));
+  assertThrown!Exception(validateRemoteConf(RemoteConfig("http://hub.example.com", "a.b", "k"), "basctl.conf"));
+  assertThrown!Exception(validateRemoteConf(RemoteConfig("http://127.0.0.1.evil.com", "a.b", "k"), "basctl.conf"));
   assertThrown!Exception(validateRemoteConf(RemoteConfig("https://host", "prod", "k"), "basctl.conf"));
   assertThrown!Exception(validateRemoteConf(RemoteConfig("https://host", "openurp.prod", ""), "basctl.conf"));
+}
+
+@("plain HTTP is only accepted for an exact loopback host") unittest {
+  assert(isAllowedRemoteUrl("https://hub.example.com/bashub"));
+  assert(isAllowedRemoteUrl("http://127.0.0.1:8080"));
+  assert(isAllowedRemoteUrl("http://localhost:8080"));
+  assert(isAllowedRemoteUrl("http://[::1]:8080"));
+  assert(!isAllowedRemoteUrl("http://hub.example.com"));
+  assert(!isAllowedRemoteUrl("http://127.0.0.1.evil.com"));
+  assert(!isAllowedRemoteUrl("https://user:pass@hub.example.com"));
 }

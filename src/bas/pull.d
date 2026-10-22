@@ -91,7 +91,8 @@ int runPull(string[] args) {
   auto confDir = buildPath(workdir, "conf");
   mkdirRecurse(confDir);
   auto newer = buildPath(confDir, "server_newer.xml");
-  if (!curlDownload(url, newer, ["Authorization: Bearer " ~ bearerCredential(remote)])) {
+  if (!curlDownload(url, newer, ["Authorization: Bearer " ~ bearerCredential(remote)],
+      true, 4 * 1024 * 1024)) {
     writeln(" failed");
     return 1;
   }

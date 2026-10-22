@@ -15,7 +15,7 @@ basagent 与 bashub 之间那条 WebSocket 连接上说什么、怎么说。**�
 | 项 | 取值 |
 |---|---|
 | 路径 | `{remote.url}/api/bashub/monitor/agents/{profile}/channel` |
-| `{remote.url}` | `conf/basctl.conf` 的 `[remote] url`，如 `https://hub.example.com` 或 `https://hub.example.com/bas/hub`；连接时把 `http` / `https` 换成 `ws` / `wss` |
+| `{remote.url}` | `conf/basctl.conf` 的 `[remote] url`，如 `https://hub.example.com` 或 `https://hub.example.com/bas/hub`；生产必须 HTTPS，连接时换成 `wss`。`http://` 只允许精确的本机回环地址 |
 | 凭证 | `Authorization: Bearer <profile>:<[remote] token>`（握手头），token 取值是 bashub 的 `Profile.key` |
 
 - **谁拨号**：basagent 主动出站。生产机多在 NAT 后面，开入站口要申请、要另配一套鉴权；出站只要
@@ -24,6 +24,8 @@ basagent 与 bashub 之间那条 WebSocket 连接上说什么、怎么说。**�
 - **鉴权在握手，不在首帧**：凭证随 `pull` 通道下发，换掉即吊销；未通过鉴权的连接在握手阶段就被
   关掉，连一个字节的协议都拿不到。`Profile.key` 由 bashub 新建时随机生成，可重置（重置即吊销）。
   `pull` 本身也用同一个 `<profile>:<Profile.key>` 做 Bearer 鉴权，不再依赖可伪造的 `ip:` 头。
+- **传输完整性**：客户端恢复 `trustedCert` 校验并加载系统 CA；自签书或主机名不匹配必须握手失败。
+  控制面和配置下载都不接受非回环地址上的明文 HTTP/WS。
 - **一条连接一个 profile**：同一 profile 再次登录时服务端踢掉旧连接——agent 断线重连常常是「旧的
   还没超时、新的已经进来」，留着旧的会让 hub 往一条死连接发指令。所以路径里不带连接 id。
 - **保活**：hub 按期发 `ping`，agent 回 `pong`；agent 那边沉默超时（90s）就重连。不用 WebSocket
@@ -38,8 +40,8 @@ basagent 与 bashub 之间那条 WebSocket 连接上说什么、怎么说。**�
 | 字段 | 必填 | 说明 |
 |---|---|---|
 | `type` | 是 | 原语名，`动作:对象` 形状（`report:os`、`service:start`），取本文的名单 |
-| `id` | 否 | 请求号。**有 = 需要应答**（收到方必须回一条 `result`），无 = 通知，不等回执 |
-| `at` | 是 | 产生时刻，`yyyy-MM-ddTHH:mm:ss±HH:MM`（本机时区，与 `server.info` 的 `started` 同格式） |
+| `id` | 否 | 请求号。**有 = 需要应答**（收到方必须回一条 `result`），无 = 通知，不等回执；最多 64 字符，只允许字母、数字和 `-_.:` |
+| `at` | 是 | 产生时刻，`yyyy-MM-ddTHH:mm:ss±HH:MM`（本机时区，与 `server.info` 的 `started` 同格式）；`service:*` 只接受前后 10 分钟内的时刻 |
 | `body` | 是 | 该原语的负载；没有负载就是 `{}` |
 
 `id` 与 `at` 由**发起方**填。应答一律是 `result`，靠 `id` 配对。
@@ -79,8 +81,9 @@ basagent 与 bashub 之间那条 WebSocket 连接上说什么、怎么说。**�
 
 - 动作用**三个原语**而不是一个 `service:control{action}`：白名单落在 `type` 上，信封层就能拒掉不认的
   动作，不必解析 body；将来加动作 = 加一个原语，审计时也一眼看得出干了什么。
-- `log:read` 的应答：`result.data = {total, from, to, lines:[...]}`。`total` 是文件总行数，控制台据此
-  翻页，不必再要一个「问行数」的原语。区间读，**不流式**（要实时看日志就登录机器）。
+- `log:read` 的应答：`result.data = {total, from, to, lines:[...], truncated?}`。`total` 是文件总行数，
+  控制台据此翻页，不必再要一个「问行数」的原语。区间读，**不流式**（要实时看日志就登录机器）。
+  单行最多 4 KiB、整个窗口最多约 200 KiB；超限时截断并置 `truncated=true`。
 - `agent:log` 的应答与 `log:read` 同形。它只读标准安装的 `/var/log/bas/agent/console.out`
   （未安装时对应 `$BAS_HOME/logs/agent/console.out`），不接受实例名。
 - `tail` 只影响首次窗口定位，不改变后续增量读：控制台取尾部后，用 `from = 上次 to + 1` 再读，
@@ -92,6 +95,8 @@ basagent 与 bashub 之间那条 WebSocket 连接上说什么、怎么说。**�
 - `service:*` 的实例名只能是 `server.xml` 里本机声明的 `farm.server`；动作走 basctl 内部的
   start / stop 分支，不拼 shell 命令。动作完成后 agent 还会重发一次 `report:bas`，控制台不必等
   下一轮周期上报才看到新状态。
+- `service:*` 必须带合法 `id` 与新鲜的 `at`；同一 `id` 只回放上次结果，不重复执行。WebSocket
+  单帧上限为 256 KiB，超过的消息由连接层拒绝。
 - `service:start` / `service:restart` 执行前，agent 先按 `[remote]` 拉取一次 `server.xml`；拉取或
   新配置解析失败时返回 `result{ok:false, error:"pull-failed"}`，不执行动作。`service:stop` 不拉取，
   始终按当前运行信息停机。

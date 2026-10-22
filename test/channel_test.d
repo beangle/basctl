@@ -69,6 +69,22 @@ import std.json : JSONType, parseJSON;
   assert(!knownPrimitive(""));
 }
 
+@("request ids are bounded and timestamp freshness is enforced") unittest {
+  assert(validRequestId("550e8400-e29b-41d4-a716-446655440000"));
+  assert(validRequestId("report:now-1"));
+  assert(!validRequestId(""));
+  assert(!validRequestId("line\nbreak"));
+  string tooLong;
+  foreach (i; 0 .. maxRequestIdLength + 1)
+    tooLong ~= 'x';
+  assert(!validRequestId(tooLong));
+
+  assert(requestTimestampFresh(nowStamp()));
+  assert(!requestTimestampFresh(""));
+  assert(!requestTimestampFresh("not-a-time"));
+  assertThrown(parseEnvelope(`{"type":"service:restart","id":"bad id","at":"2026-10-16T10:00:00+08:00"}`));
+}
+
 @("result carries data on success and error on failure") unittest {
   auto ok = parseEnvelope(resultMessage("r1", true, parseJSON(`{"total":42}`), ""));
   assert(ok.type == "result");

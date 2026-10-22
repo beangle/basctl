@@ -24,10 +24,11 @@ module test.logs_test;
 
 import bas.logs;
 
-import std.array : join;
+import std.array : array, join;
 import std.conv : to;
 import std.file : mkdirRecurse, tempDir, write;
 import std.path : buildPath;
+import std.range : repeat;
 import std.stdio : File;
 
 /** 往文件末尾追加（`std.file.append` 对字符串不友好，直接用追加模式打开）。 */
@@ -100,6 +101,24 @@ private bool rejects(string[] args) {
   assert(readTail(path, 1).lines.join(",") == "five");
   // 文件不存在（实例还没起过）是一个空窗口，不是异常
   assert(readTail(buildPath(dir, "nothing.out"), 5).lines.length == 0);
+}
+
+@("readLogWindow stops at the payload cap without leaving holes") unittest {
+  auto dir = buildPath(tempDir(), "basctl-logs-cap");
+  mkdirRecurse(dir);
+  auto path = buildPath(dir, "console.out");
+  auto line = "a".repeat(4096).join;
+  string text;
+  foreach (i; 0 .. 50)
+    text ~= line ~ "\n";
+  text ~= "tail\n";
+  write(path, text);
+
+  auto window = readLogWindow(path, 1, 100);
+  assert(window.truncated, "超过总字节上限必须标记 truncated");
+  assert(window.total == 51, window.total.to!string);
+  assert(window.lines.length == 49, window.lines.length.to!string);
+  assert(window.lines[$ - 1] != "tail", "达到上限后不能跳过中间行再接收后面的短行");
 }
 
 @("readNewLines keeps only complete lines, and starts over after a roll") unittest {

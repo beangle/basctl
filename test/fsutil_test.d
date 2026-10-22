@@ -17,7 +17,7 @@
 /** Unit tests for bas.fsutil. */
 module test.fsutil_test;
 
-import bas.fsutil : isLink, linkIfMissing, mkdirPrivate, pathExists, removeTree;
+import bas.fsutil : createPrivateFile, isLink, linkIfMissing, mkdirPrivate, pathExists, removeTree;
 
 import std.file : exists, mkdir, mkdirRecurse, readText, tempDir, write;
 import std.path : buildPath;
@@ -50,6 +50,26 @@ import std.uuid : randomUUID;
 }
 
 version (Posix) {
+  @("createPrivateFile creates 0600 despite a permissive umask") unittest {
+    import core.sys.posix.sys.stat : lstat, stat_t, umask;
+    import std.conv : octal;
+    import std.string : toStringz;
+
+    auto root = buildPath(tempDir(), "basctl-fs-private-" ~ randomUUID().toString());
+    mkdirRecurse(root);
+    auto file = buildPath(root, "curl.conf");
+    auto saved = umask(0);
+    scope (exit) {
+      umask(saved);
+      removeTree(root);
+    }
+
+    createPrivateFile(file);
+    stat_t st;
+    assert(lstat(file.toStringz, &st) == 0);
+    assert((st.st_mode & octal!777) == octal!600, "临时文件必须从创建时就是 0600");
+  }
+
   @("mkdirPrivate tightens a fresh directory to 0700 despite a permissive umask") unittest {
     import core.sys.posix.sys.stat : chmod, lstat, stat_t, umask;
     import std.conv : octal;

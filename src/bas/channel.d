@@ -32,7 +32,8 @@ module bas.channel;
 
 import bas.serverinfo : localIsoTimestamp;
 
-import std.datetime : Clock;
+import core.time : seconds;
+import std.datetime : Clock, SysTime;
 import std.json : JSONType, JSONValue, parseJSON;
 import std.string : strip;
 
@@ -57,6 +58,12 @@ immutable string[] supportedPrimitives = [
   "hello", "report:os", "report:bas", "result", "pong", "ping", "report:now", "log:read",
   "agent:log", "service:start", "service:stop", "service:restart"
 ];
+
+/** 请求号上限；hub 目前发 UUID。 */
+enum maxRequestIdLength = 64;
+
+/** 请求时刻允许的最大时钟偏差。 */
+private enum requestClockSkew = 10.seconds;
 
 /** 信封：`type` / `id` / `at` / `body`，所有消息共用。 */
 struct Envelope {
@@ -112,7 +119,41 @@ Envelope parseEnvelope(string text) {
   auto type = textField(root, "type");
   if (!type.length)
     throw new Exception("message has no type");
-  return Envelope(type, textField(root, "id"), textField(root, "at"), bodyOf(root));
+  auto id = textField(root, "id");
+  if (id.length && !validRequestId(id))
+    throw new Exception("invalid request id");
+  return Envelope(type, id, textField(root, "at"), bodyOf(root));
+}
+
+/** 请求号只允许有限字符与长度，挡住日志注入和超长缓存键。 */
+bool validRequestId(string id) @safe pure nothrow {
+  if (!id.length || id.length > maxRequestIdLength)
+    return false;
+  foreach (ch; id) {
+    if ((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9')
+        || ch == '-' || ch == '_' || ch == '.' || ch == ':')
+      continue;
+    return false;
+  }
+  return true;
+}
+
+/** 破坏性请求必须带一个足够新的时间戳，降低抓包后长期重放的价值。 */
+bool requestTimestampFresh(string at) {
+  return requestTimestampFresh(at, Clock.currTime());
+}
+
+/// ditto
+bool requestTimestampFresh(string at, SysTime now) {
+  if (!at.length)
+    return false;
+  try {
+    auto issued = SysTime.fromISOExtString(at);
+    auto age = now - issued;
+    return age >= -requestClockSkew && age <= requestClockSkew;
+  } catch (Exception) {
+    return false;
+  }
 }
 
 /** 渲染一条消息：`id` 非空即请求，`at` 由这里补上（发起方时刻）。 */

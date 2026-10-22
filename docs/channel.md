@@ -21,8 +21,12 @@ token = 9f8e7d6c5b4a39281706f5e4d3c2b1a0
 ```
 
 - `[remote] url` / `profile` / `token` 三项齐全才启用；`basagent` 拼出
-  `https://hub.example.com/api/bashub/monitor/agents/<profile>/channel` 拨号，`http(s)` 自动
-  换成 `ws(s)`。
+  `https://hub.example.com/api/bashub/monitor/agents/<profile>/channel` 拨号，并把 `https`
+  换成 `wss`。生产地址必须是 `https://`；`http://` 只允许精确的本机回环地址
+  （`localhost` / `127.0.0.1` / `[::1]`）用于本地调试。
+- TLS 会按系统 CA 校验证书（优先 `SSL_CERT_FILE` / `CURL_CA_BUNDLE`，其次
+  `/etc/ssl/certs/ca-certificates.crt`、`/etc/pki/tls/certs/ca-bundle.crt` 等）。
+  自签证书或主机名不匹配会直接握手失败，不会降级为不校验。
 - `token` 同时用于 `pull` 和通道握手，取值是 bashub 的 `Profile.key`。在 bashub 的配置详情里可以查看，
   发送时拼成 `<profile>:<Profile.key>`；`POST /api/bashub/config/profiles/{id}/reset-key` 可以
   重置（重置后旧的拉取与通道连接一起失效）。
@@ -60,6 +64,7 @@ token = 9f8e7d6c5b4a39281706f5e4d3c2b1a0
 |---|---|---|
 | `warning: remote is not configured` | `basctl.conf` 缺字段或文件不在 `server.xml` 同目录；`basagent` / `pull` 视为未启用，正常退出 | 需要通道时补全 `[remote]` 三项，见上面的样例 |
 | `no snapshot published: wss://…` | 地址不对 / 控制台不可达 / 网络不通 | 先确认 `bin/bas.sh pull` 能通；地址看 `conf/basctl.conf` |
+| `certificate verify failed` / `no system CA bundle` | 系统没有 CA 包，或服务端证书不被信任 | 安装发行版的 CA 包；不要通过改成 `ws://` 绕过 |
 | 常驻 agent 反复重连 | 同上，或 token 被重置过 | 更新 `basctl.conf` 的 token 后重启 agent |
 | 控制台看不到这台机器 | 通道没连上，或 profile 名不对 | 看 `/var/log/bas/agent/console.out` 的 `channel:` 行；确认路径里的 profile 与 bashub 的配置名一致 |
 | `service:*` 返回 `start-failed` / `prepare-failed` | 实例启动或依赖解析失败 | 控制台先看结果里的 `detail` / `logTail`；完整内容用 `log:read` 或 `basctl logs` |

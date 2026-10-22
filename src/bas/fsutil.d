@@ -114,6 +114,30 @@ void setPrivateFile(string path) {
 }
 
 /**
+ * 创建（或截断）一个只允许所有者读写的文件。
+ *
+ * POSIX 下用 `open(..., 0600)` 创建，避免 `write` 先按 umask 落盘、再 `chmod` 之间的窗口；
+ * 这个窗口里 curl 的 Bearer 配置文件可能被同机其他用户读到。
+ */
+void createPrivateFile(string path) {
+  version (Posix) {
+    import core.sys.posix.fcntl : O_CREAT, O_TRUNC, O_WRONLY, open;
+    import core.sys.posix.sys.stat : S_IRUSR, S_IWUSR;
+    import core.sys.posix.unistd : close;
+
+    auto fd = open(path.toStringz, O_CREAT | O_TRUNC | O_WRONLY, S_IRUSR | S_IWUSR);
+    if (fd < 0)
+      throw new Exception("Cannot create private file " ~ path);
+    close(fd);
+  } else {
+    import std.file : write;
+
+    write(path, "");
+    setPrivateFile(path);
+  }
+}
+
+/**
  * Creates `path` (and its parents) and forces 0700 on `path` itself（POSIX）.
  *
  * `mkdirRecurse` 按调用者 umask 建目录（`umask 002` 会得到 0775），随后 jstart 接管

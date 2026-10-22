@@ -35,3 +35,13 @@ import std.exception : assertThrown;
   assertThrown(agentUrl("ftp://sas.openurp.net/api/bashub/monitor/agents/demo.prod/channel"));
   assertThrown(agentUrl("sas.openurp.net/api/bashub/monitor/agents/demo.prod/channel"));
 }
+
+@("remote plaintext WebSocket is rejected, loopback is kept for local debugging") unittest {
+  assertThrown(agentUrl("http://hub.example.com/api/bashub/monitor/agents/demo.prod/channel"));
+  assertThrown(agentUrl("ws://hub.example.com/api/bashub/monitor/agents/demo.prod/channel"));
+  assertThrown(agentUrl("ws://127.0.0.1.evil.com/api/bashub/monitor/agents/demo.prod/channel"));
+  assert(agentUrl("http://127.0.0.1:8080/api/bashub/monitor/agents/demo.prod/channel")
+      == "ws://127.0.0.1:8080/api/bashub/monitor/agents/demo.prod/channel");
+  assert(agentUrl("wss://sas.openurp.net/api/bashub/monitor/agents/demo.prod/channel")
+      == "wss://sas.openurp.net/api/bashub/monitor/agents/demo.prod/channel");
+}

@@ -22,6 +22,8 @@
  */
 module bas.hub;
 
+import bas.remote : isAllowedWebSocketUrl;
+
 import std.algorithm : startsWith;
 import std.string : strip;
 
@@ -40,5 +42,8 @@ string agentUrl(string channelUrl) {
     url = base;
   else
     throw new Exception("Invalid control url (expect http/https): " ~ base);
+  if (!isAllowedWebSocketUrl(url))
+    throw new Exception(
+        "Unsafe control url: use wss:// (ws:// is only allowed for localhost): " ~ base);
   return url;
 }

@@ -163,7 +163,7 @@ basctl init --dry-run /opt/bas # 只打印将会写入的文件
 
 | 字段 | 必填 | 说明 |
 |---|---|---|
-| `url` | 是 | bashub 根地址（有反向代理前缀就连前缀一起写，不要带 `/api/bashub`），必须以 `http://` 或 `https://` 开头 |
+| `url` | 是 | bashub 根地址（有反向代理前缀就连前缀一起写，不要带 `/api/bashub`），生产必须使用 `https://`；`http://` 只允许 `localhost` / `127.0.0.1` / `[::1]` |
 | `profile` | 是 | bashub 里的配置名，必须是 `org.name` |
 | `token` | 是 | 该 Profile 的 `key`（bashub 配置详情里可查看/重置） |
 
@@ -171,7 +171,8 @@ basctl init --dry-run /opt/bas # 只打印将会写入的文件
   `Authorization: Bearer <profile>:<token>`。token 不对返回 401，Profile 不存在返回 404。
 - `basagent report` / 常驻 agent 使用同一组地址与 token：拼出
   `<url>/api/bashub/monitor/agents/<profile>/channel`，再把 `http(s)` 换成 `ws(s)` 建立出站
-  WebSocket。
+  WebSocket。只有 `https` 才能换成 `wss`，`http` 只保留给回环调试；TLS 使用系统 CA 校验证书，
+  自签或主机名不匹配会直接失败。
 - `start.sh` / `restart.sh` **不会**隐式拉取，只读当前 `conf/server.xml`。需要远端更新时显式执行
   `bin/bas.sh pull`；远程 `service:start` / `service:restart` 由 agent 在动作前拉取一次，拉取失败
   则动作失败；`service:stop` 始终按当前运行信息停机，不会被拉取挡住。

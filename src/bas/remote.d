@@ -33,10 +33,9 @@
  */
 module bas.remote;
 
-import std.algorithm : startsWith;
 import std.file : exists, readText;
 import std.path : buildPath, dirName;
-import std.string : indexOf, splitLines, strip;
+import std.string : indexOf, lastIndexOf, splitLines, strip, toLower;
 
 /** 配置文件相对 `BAS_HOME/conf` 的文件名。 */
 enum remoteConfFileName = "basctl.conf";
@@ -126,8 +125,9 @@ RemoteConfig parseRemoteConf(string text) {
 void validateRemoteConf(const RemoteConfig conf, string path) {
   if (!conf.url.length)
     throw new RemoteConfigException("No remote.url in " ~ path);
-  if (!conf.url.startsWith("http://") && !conf.url.startsWith("https://"))
-    throw new RemoteConfigException("remote.url must start with http:// or https:// in " ~ path);
+  if (!isAllowedRemoteUrl(conf.url))
+    throw new RemoteConfigException(
+        "remote.url must use https:// (http:// is only allowed for localhost) in " ~ path);
   if (!conf.profile.length)
     throw new RemoteConfigException("No remote.profile in " ~ path);
   if (!validProfileName(conf.profile))
@@ -159,6 +159,87 @@ string agentChannelUrl(const RemoteConfig conf) {
 /** `pull` 与通道握手共用的 Bearer 凭证；bashub 会同时校验 Profile 与 key。 */
 string bearerCredential(const RemoteConfig conf) {
   return conf.profile ~ ":" ~ conf.token;
+}
+
+/** 解析绝对 URL 的 scheme 与 host；只接受带 authority 的 http(s)/ws(s)。 */
+private bool parseControlUrl(string url, out string scheme, out string host) {
+  auto text = strip(url);
+  if (!text.length)
+    return false;
+  foreach (ch; text) {
+    if (ch <= ' ' || ch == '\0')
+      return false;
+  }
+
+  auto schemeEnd = text.indexOf("://");
+  if (schemeEnd <= 0)
+    return false;
+  auto parsedScheme = text[0 .. schemeEnd].toLower;
+  if (parsedScheme != "http" && parsedScheme != "https"
+      && parsedScheme != "ws" && parsedScheme != "wss")
+    return false;
+
+  auto rest = text[schemeEnd + 3 .. $];
+  auto authorityEnd = rest.length;
+  foreach (i, ch; rest) {
+    if (ch == '/' || ch == '?' || ch == '#') {
+      authorityEnd = i;
+      break;
+    }
+  }
+  auto authority = rest[0 .. authorityEnd];
+  if (!authority.length || authority.indexOf('@') >= 0)
+    return false;
+
+  string parsedHost;
+  if (authority[0] == '[') {
+    auto close = authority.indexOf(']');
+    if (close <= 1)
+      return false;
+    parsedHost = authority[1 .. close];
+    auto tail = authority[close + 1 .. $];
+    if (tail.length && (tail[0] != ':' || tail[1 .. $].length == 0))
+      return false;
+  } else {
+    auto colon = authority.lastIndexOf(':');
+    if (colon >= 0) {
+      auto beforePort = authority[0 .. colon];
+      if (beforePort.indexOf(':') >= 0 || colon + 1 >= authority.length)
+        return false;
+      parsedHost = beforePort;
+    } else {
+      parsedHost = authority;
+    }
+  }
+  parsedHost = parsedHost.strip.toLower;
+  if (!parsedHost.length)
+    return false;
+  scheme = parsedScheme;
+  host = parsedHost;
+  return true;
+}
+
+/** 是否精确指向本机回环地址；`127.0.0.1.evil` 之类不算。 */
+private bool isLoopbackHost(string host) {
+  return host == "localhost" || host == "127.0.0.1" || host == "::1";
+}
+
+/** `remote.url` 只允许 HTTPS；明文 HTTP 仅保留给精确的本机回环调试。 */
+bool isAllowedRemoteUrl(string url) {
+  string scheme;
+  string host;
+  if (!parseControlUrl(url, scheme, host))
+    return false;
+  return scheme == "https" || (scheme == "http" && isLoopbackHost(host));
+}
+
+/** WebSocket 地址只允许 WSS；明文 WS 仅保留给精确的本机回环调试。 */
+bool isAllowedWebSocketUrl(string url) {
+  string scheme;
+  string host;
+  if (!parseControlUrl(url, scheme, host))
+    return false;
+  return scheme == "wss" || (scheme == "ws" && isLoopbackHost(host));
 }
 
 /** 去掉尾斜杠，但不破坏 `https://` 这类只有 scheme 的写法。 */

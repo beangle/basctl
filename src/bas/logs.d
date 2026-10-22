@@ -50,6 +50,12 @@ enum defaultTailLines = 50;
 /** 一次最多读多少行：`-n` 与通道的 `log:read` 共用同一个上限，别让一条命令把内存撑爆。 */
 enum maxLogLines = 2000;
 
+/** 单行最多保留的字节数；超长行截断，避免一条异常日志把整帧撑爆。 */
+enum maxLogLineBytes = 4096;
+
+/** 一次读窗口最多保留的内容字节数；为 JSON 封装留出余量。 */
+enum maxLogPayloadBytes = 200 * 1024;
+
 /** 跟随的轮询间隔：本地文件，半秒一次足够快，也不至于空转烧 CPU。 */
 private enum followInterval = 500.msecs;
 
@@ -88,6 +94,7 @@ bool plainName(string name) @safe pure nothrow {
 struct LogWindow {
   long total;
   string[] lines;
+  bool truncated;
 }
 
 /** 数文件有多少行；读不到（不存在、没权限）返回 0——日志读不动不该让调用方炸掉。 */
@@ -111,14 +118,40 @@ LogWindow readLogWindow(string path, long from, long to) {
   LogWindow window;
   if (!exists(path))
     return window;
+  size_t usedBytes;
+  bool payloadFull;
   auto file = File(path, "r");
   scope (exit) file.close();
   foreach (line; file.byLine) {
     window.total++;
-    if (window.total >= from && window.total <= to)
-      window.lines ~= line.idup;
+    if (window.total < from || window.total > to)
+      continue;
+    // 到达窗口上限后不再接收后面的行：若这里继续挑短行，返回的 lines 会跳行，
+    // 调用方按 from/to 翻页时就会把后面的行误认为前面的行。
+    if (payloadFull) {
+      window.truncated = true;
+      continue;
+    }
+    auto clipped = clipLogLine(cast(string) line, maxLogLineBytes);
+    if (usedBytes + clipped.length + 1 > maxLogPayloadBytes) {
+      window.truncated = true;
+      payloadFull = true;
+      continue;
+    }
+    window.lines ~= clipped.idup;
+    usedBytes += clipped.length + 1;
   }
   return window;
+}
+
+/** 按 UTF-8 边界截断，避免 MAX 字节刚好落在多字节字符中间。 */
+private string clipLogLine(string line, size_t maxBytes) {
+  if (line.length <= maxBytes)
+    return line;
+  auto end = maxBytes;
+  while (end > 0 && ((cast(ubyte) line[end]) & 0xc0) == 0x80)
+    end--;
+  return line[0 .. end];
 }
 
 /** 读最后 `n` 行。`console.out` 每次起实例时滚动，扫两遍没有代价。 */
