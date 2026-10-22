@@ -140,7 +140,7 @@ agent 是常驻进程，**任何一条消息都不许让它退出或断连**（�
 
 | 参数 | 取值 | 在哪 |
 |---|---|---|
-| `report:os` / `report:bas` 周期 | 30s | basagent `bas.agent.reportInterval`；hub 的 `report:now` 可随时插一次 |
+| `report:os` / `report:bas` 周期 | 60s | basagent `bas.agent.reportInterval`；hub 的 `report:now` 可随时插一次 |
 | 保活 `ping` | hub 每 30s | bashub `AgentSocketInitializer.HeartbeatInterval` |
 | agent 沉默超时 | 90s | basagent `bas.agent.silentTimeout`（超了重连） |
 | 断线重连 | 10s | basagent `bas.agent.reconnectDelay` |

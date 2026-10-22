@@ -28,7 +28,7 @@ module bas.spec;
 
 import std.array : appender;
 import std.process : environment;
-import std.string : replace, strip;
+import std.string : endsWith, replace, strip;
 
 /** 一个 `[subapp <id>]` 段：webapp 的本地入口、上下文路径与扩展依赖。 */
 struct SubappSpec {
@@ -133,8 +133,16 @@ string basctlPathFor(string self) @trusted {
   import std.file : exists, isFile;
   import std.path : baseName, buildPath, dirName;
 
+  // 升级 RPM/deb 时旧进程仍在运行，Linux 的 /proc/self/exe 会带上这个后缀。
+  enum deletedSuffix = " (deleted)";
+  bool replaced;
+  if (self.endsWith(deletedSuffix)) {
+    self = self[0 .. $ - deletedSuffix.length];
+    replaced = true;
+  }
+
   if (baseName(self) != agentName)
-    return self;
+    return replaced && !(exists(self) && isFile(self)) ? "basctl" : self;
   auto sibling = buildPath(dirName(self), basctlName);
   return exists(sibling) && isFile(sibling) ? sibling : "basctl";
 }

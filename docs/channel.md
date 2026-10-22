@@ -34,7 +34,7 @@ token = 9f8e7d6c5b4a39281706f5e4d3c2b1a0
 | 命令 | 做什么 | 什么时候用 |
 |---|---|---|
 | `basagent report [server.xml]` | 连一次、发 `hello` + 两份上报、断开；报上去了退出码 0 | 手工对一次账；脚本 / cron |
-| `basagent [server.xml]` | 常驻：连上就报，之后按 30s 周期上报、回保活、执行固定指令（读日志 / 启停实例），断线 10s 后重连；未配置 `[remote]` 时告警并以 0 退出 | 生产机上由 `bin/bas.sh agent-start` 拉起 |
+| `basagent [server.xml]` | 常驻：连上就报，之后按 60s 周期上报、回保活、执行固定指令（读日志 / 启停实例），断线 10s 后重连；未配置 `[remote]` 时告警并以 0 退出 | 生产机上由 `bin/bas.sh agent-start` 拉起 |
 | `bin/bas.sh pull` | 显式拉取一次 `conf/server.xml`（底层调用 `basagent pull`） | 需要从 bashub 更新配置时 |
 
 `basctl start` / `basctl stop` 与 `bin/start.sh` / `bin/restart.sh` 只做本地动作，不拉配置、
@@ -79,6 +79,21 @@ agent，`agent-stop` 只停止 PID 文件里那个 `basagent` 进程。
 agent 只做「上报 + 固定指令」，**不做 supervisor**：实例崩了不会自动重启（这条一直不变），
 也没被超时或坏消息弄退出的风险——它宁可重连也不退出。`service:stop` / `service:restart`
 由控制台显式触发、二次确认，不会因为实例退出而自动补做。
+
+## 升级后重启 agent
+
+升级 RPM/deb 只替换磁盘上的可执行文件，**不会替换正在运行的 agent 进程**。旧进程仍执行旧代码；
+Linux 还会把它的 `/proc/self/exe` 显示成 `/usr/bin/basagent (deleted)`，远程启停因此可能生成
+带 `(deleted)` 的无效 `[engine] init`。升级后按下面的顺序重启一次：
+
+```bash
+export BAS_HOME=/opt/bas
+"$BAS_HOME/bin/bas.sh" agent-stop
+basctl init --force "$BAS_HOME"
+"$BAS_HOME/bin/bas.sh" agent-start
+```
+
+`basctl init --force` 刷新 `bin/*.sh`；`basctl.conf` 与 `server.xml` 不会被覆盖。
 
 ## 与 setline 的分工
 

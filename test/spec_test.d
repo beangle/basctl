@@ -91,9 +91,13 @@ import std.uuid : randomUUID;
   write(basctl, "");
 
   assert(basctlPathFor(agent) == basctl);
+  assert(basctlPathFor(agent ~ " (deleted)") == basctl);
   assert(basctlPathFor(basctl) == basctl);
+  assert(basctlPathFor(basctl ~ " (deleted)") == basctl);
 
   import std.file : remove;
   remove(basctl);
   assert(basctlPathFor(agent) == "basctl");
+  assert(basctlPathFor(agent ~ " (deleted)") == "basctl");
+  assert(basctlPathFor(basctl ~ " (deleted)") == "basctl");
 }

@@ -23,3 +23,6 @@
 运行时用宿主 `curl` 下载，`make` / `start` / `resolve` / `run` 另需宿主 `jstart` 在 `PATH` 上。
 只有 `basagent` 二进制链接 OpenSSL 3.0；因为两者同包，RPM 的自动依赖会把
 `libssl.so.3` / `libcrypto.so.3` 记在整个安装包上，但只运行 `basctl` 时不会加载它们。
+
+升级安装包不会终止已经在跑的 `basagent`；升级后需按
+[../docs/channel.md](../docs/channel.md) 的「升级后重启 agent」重启一次。

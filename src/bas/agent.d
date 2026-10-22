@@ -64,7 +64,7 @@ import std.string : format;
 private enum tick = 1.seconds;
 
 /** 周期上报的间隔（`report:os` / `report:bas` 各按这个节拍报一次）。 */
-private enum reportInterval = 30.seconds;
+private enum reportInterval = 60.seconds;
 
 /** 多久没收到任何消息就认为这条连接已经废了，交给外层重连（中间设备会静默掐断空闲连接）。 */
 private enum silentTimeout = 90.seconds;
