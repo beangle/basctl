@@ -89,6 +89,7 @@ strip --strip-unneeded usr/bin/basagent
 chmod 0755 usr/bin/basctl usr/bin/basagent
 install -m 0644 "$BASCTL_HOME/resources/systemd/basagent.service" usr/lib/systemd/system/basagent.service
 install -m 0644 "$BASCTL_HOME/resources/logrotate/bas" etc/logrotate.d/bas
+basctl_stage_runtime_home "$DESTDIR/$PKGDIR"
 find . -type d -exec chmod 0755 {} +
 
 # 运行时依赖：curl 负责下载（pull / war 直链）；jstart 由 make/start/resolve/run 使用，
@@ -155,7 +156,10 @@ exit 0
 %post
 mkdir -p /var/lib/bas /var/log/bas /var/log/bas/agent
 chown bas:beangle /var/lib/bas /var/log/bas /var/log/bas/agent
-chmod 0750 /var/lib/bas /var/log/bas
+chown -R bas:beangle /var/lib/bas/bin /var/lib/bas/conf
+chmod 0750 /var/lib/bas /var/lib/bas/bin /var/lib/bas/conf /var/log/bas
+chmod 0755 /var/lib/bas/bin/*.sh
+chmod 0600 /var/lib/bas/conf/basctl.conf
 chmod 0700 /var/log/bas/agent
 if [ ! -e /var/lib/bas/logs ]; then
   ln -s /var/log/bas /var/lib/bas/logs
@@ -185,8 +189,10 @@ $(printf '%b' "$changes")
 EOF
 
 # basagent 以专用账号 bas:beangle 由 systemd 常驻；logrotate 单独作为配置文件安装。
-find "$DESTDIR/$PKGDIR" ! -type d | grep -v '/etc/logrotate.d/bas$' | \
+find "$DESTDIR/$PKGDIR" ! -type d | \
+  grep -v -e '/etc/logrotate.d/bas$' -e '/var/lib/bas/conf/basctl.conf$' | \
   sed 's|'"$DESTDIR"'/'"$PKGDIR"'|/|' >> basctl.spec
+echo '%config(noreplace) /var/lib/bas/conf/basctl.conf' >> basctl.spec
 echo '%config(noreplace) /etc/logrotate.d/bas' >> basctl.spec
 
 echo >> basctl.spec

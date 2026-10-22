@@ -57,6 +57,7 @@ strip --strip-unneeded usr/bin/basagent
 chmod 0755 usr/bin/basctl usr/bin/basagent
 install -m 0644 "$BASCTL_HOME/resources/systemd/basagent.service" lib/systemd/system/basagent.service
 install -m 0644 "$BASCTL_HOME/resources/logrotate/bas" etc/logrotate.d/bas
+basctl_stage_runtime_home "$DESTDIR/$PKGDIR"
 
 # DEBIAN 控制文件
 mkdir -p DEBIAN
@@ -83,6 +84,7 @@ EOF
 
 # basagent 以专用账号 bas:beangle 由 systemd 常驻。
 cat > DEBIAN/conffiles << 'EOF'
+/var/lib/bas/conf/basctl.conf
 /etc/logrotate.d/bas
 EOF
 
@@ -102,7 +104,10 @@ set -e
 
 mkdir -p /var/lib/bas /var/log/bas /var/log/bas/agent
 chown bas:beangle /var/lib/bas /var/log/bas /var/log/bas/agent
-chmod 0750 /var/lib/bas /var/log/bas
+chown -R bas:beangle /var/lib/bas/bin /var/lib/bas/conf
+chmod 0750 /var/lib/bas /var/lib/bas/bin /var/lib/bas/conf /var/log/bas
+chmod 0755 /var/lib/bas/bin/*.sh
+chmod 0600 /var/lib/bas/conf/basctl.conf
 chmod 0700 /var/log/bas/agent
 if [ ! -e /var/lib/bas/logs ]; then
   ln -s /var/log/bas /var/lib/bas/logs

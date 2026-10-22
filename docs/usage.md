@@ -1,6 +1,7 @@
 # 使用
 
-从零到一个跑起来的 bas：安装 basctl → `init` → 选择接入 bashub 或本机独立配置 → `doctor` → `start`。
+从零到一个跑起来的 bas：安装 basctl → 准备组件目录（系统包已预置 `/var/lib/bas`）→ 选择接入
+bashub 或本机独立配置 → `doctor` → `start`。
 命令背后的模型与边界见 [features.md](features.md)，各功能的细节在专文里（「命令一览」与各处
 链接）。
 
@@ -20,12 +21,15 @@ docker run -d --name bas -p 8080:8080 -v ~/bas-work:/var/lib/bas basctl:0.0.1
 ```
 
 打包与镜像细节见 [scripts/README.md](../scripts/README.md)、[container.md](container.md)。
-系统包会创建 `bas:beangle` 账号、`/var/lib/bas`、`/var/log/bas`，并启用
-`basagent.service`；basagent 不允许以 root 运行。
+系统包会创建 `bas:beangle` 账号、`/var/lib/bas`、`/var/log/bas`，把控制脚本与
+`conf/basctl.conf` 模板装到 `/var/lib/bas`，并启用 `basagent.service`；basagent 不允许以
+root 运行。
 
 ## 五分钟上手
 
-先选一种运行方式：由 bashub 管配置，或只在本机独立使用。两者都从 `basctl init` 开始。
+先选一种运行方式：由 bashub 管配置，或只在本机独立使用。系统包已经铺好
+`/var/lib/bas/bin` 与 `/var/lib/bas/conf`；从源码安装或使用其它目录时，才需要先执行
+`basctl init`。
 
 ### 方式一：接入 bashub（推荐）
 
@@ -33,10 +37,10 @@ bashub 是配置与实例的远端权威：`bas.sh pull` 从它拉取 `conf/serv
 把本机现状报回去，并接收日志 / 启停指令。先在 bashub 里为这台机器建好 Profile，再填写本地配置：
 
 ```sh
-# 1. 铺控制脚本与 conf/ 目录，并生成 basctl.conf 注释模板
-sudo -u bas -H basctl init /var/lib/bas
+# 1. 系统包已预置控制脚本与 basctl.conf 模板；源码安装或其它目录执行：
+# sudo -u bas -H basctl init /var/lib/bas
 
-# 2. 填写 init 生成的模板（已按 0600 创建、含字段说明）
+# 2. 填写模板（已按 0600 安装、含字段说明）
 sudo -u bas -H "${EDITOR:-vi}" /var/lib/bas/conf/basctl.conf
 ```
 
@@ -140,7 +144,8 @@ setline 与 bashub 通道互不依赖，配置、部署与安全边界统一见 
 
 `basctl init [workdir]` 把控制脚本（`env.sh`、`bas.sh`、`start.sh`、`stop.sh`、`restart.sh`）
 铺到 `<workdir>/bin` 并建好 `conf/`，用于从零搭建一个
-bas 组件目录。常驻 agent 由系统级 systemd 管理，不再生成 `agent/agent.pid` 或
+bas 组件目录。RPM/DEB 安装包已经把同一套文件铺到标准目录 `/var/lib/bas`，不需要额外执行
+`init`。常驻 agent 由系统级 systemd 管理，不再生成 `agent/agent.pid` 或
 `agent/console.out`；标准安装中实例日志位于 `/var/log/bas`，并通过
 `/var/lib/bas/logs` 符号链接保持原有路径。若
 `conf/basctl.conf` 不存在，还会生成一份带注释、`[remote]` 三项留空的模板，权限为 `0600`。
@@ -153,8 +158,9 @@ basctl init --dry-run /opt/bas # 只打印将会写入的文件
 ```
 
 `conf/basctl.conf` 一旦存在就永不覆盖，`--force` 也只作用于脚本；`bin/setenv.sh` 与
-`conf/server.xml` 是用户配置，`init` 不生成。这是脚本唯一的安装/升级途径：升级 `basctl`
-后重跑 `basctl init --force`，不再有单独的发行包 zip（原 `bas.sh update` 已移除）。
+`conf/server.xml` 是用户配置，`init` 不生成。使用系统包时，升级会刷新 `bin/*.sh`，并保留已有
+的 `basctl.conf`；非系统包目录仍可在升级 basctl 后重跑 `basctl init --force`。不再有单独的
+发行包 zip（原 `bas.sh update` 已移除）。
 
 ## 远程配置 `conf/basctl.conf`
 

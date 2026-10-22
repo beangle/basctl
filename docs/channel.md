@@ -11,7 +11,8 @@ basagent 主动拨一条出站 WebSocket 到控制台（bashub），把**这台�
 
 地址、Profile 和凭证都放在与 `server.xml` 同目录的 `conf/basctl.conf`，与 `pull` 完全共用：
 
-> `basctl init` 会生成带注释的模板；把 `[remote]` 的三项填上即可。
+> RPM/DEB 会把带注释的模板装到 `/var/lib/bas/conf/basctl.conf`；源码安装或其它目录由
+> `basctl init` 生成。把 `[remote]` 的三项填上即可。
 
 ```ini
 [remote]
@@ -100,15 +101,16 @@ agent 只做「上报 + 固定指令」，**不做 supervisor**：实例崩了�
 
 ## 升级
 
-RPM/DEB 升级时会执行 `systemctl try-restart basagent.service`，让正在运行的 agent
-切换到新二进制。配置和日志目录不会被安装包覆盖：
+RPM/DEB 升级时会刷新 `/var/lib/bas/bin/*.sh` 并执行 `systemctl try-restart basagent.service`，
+让正在运行的 agent 切换到新二进制。`basctl.conf`、`server.xml` 与日志目录不会被安装包覆盖。
+只有非系统包目录或需要手工刷新脚本时才需要执行：
 
 ```bash
 sudo -u bas -H basctl init --force /var/lib/bas
 sudo systemctl restart basagent.service
 ```
 
-`basctl init --force` 刷新 `bin/*.sh`；`basctl.conf` 与 `server.xml` 不会被覆盖。
+`basctl init --force` 只刷新 `bin/*.sh`；`basctl.conf` 与 `server.xml` 仍不会被覆盖。
 
 从旧版 `bas.sh agent-start` 迁移时，先用旧 `BAS_HOME` 里的 `bin/bas.sh agent-stop`
 （或旧 PID 文件）停掉手工启动的 agent，再启动 systemd 服务；同一个 profile 只允许一条

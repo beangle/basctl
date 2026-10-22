@@ -18,11 +18,14 @@
 `<v>` 取自 `src/bas/versioninfo.d` 的 `enum basctlVersion`——也就是 `basctl version` 输出的那个值，
 包里只有这一处版本声明，包版本与运行时自报版本不会漂移。
 
-`.deb`/`.rpm` 同时安装 `/usr/bin/basctl`、`/usr/bin/basagent`、`basagent.service` 与
-`/etc/logrotate.d/bas`，仍是一个安装包。`basctl` 是本地命令；`basagent` 由 systemd 以专用账号
-`bas:beangle` 常驻，主目录固定为 `/var/lib/bas`，日志写在 `/var/log/bas/agent/console.out`。
+`.deb`/`.rpm` 同时安装 `/usr/bin/basctl`、`/usr/bin/basagent`、`basagent.service`、
+`/etc/logrotate.d/bas`，并在 `/var/lib/bas` 预置 `bin/*.sh` 与 `conf/basctl.conf` 模板，仍是一个
+安装包。`basctl.conf` 登记为配置文件/noreplace，升级时保留已有内容。`basctl` 是本地命令；
+`basagent` 由 systemd 以专用账号 `bas:beangle` 常驻，主目录固定为 `/var/lib/bas`，日志写在
+`/var/log/bas/agent/console.out`。
 运行时用宿主 `curl` 下载，`make` / `start` / `resolve` / `run` 另需宿主 `jstart` 在 `PATH` 上。
 只有 `basagent` 二进制链接 OpenSSL 3.0；因为两者同包，RPM 的自动依赖会把
 `libssl.so.3` / `libcrypto.so.3` 记在整个安装包上，但只运行 `basctl` 时不会加载它们。
 
-升级安装包会 `daemon-reload` 并 `try-restart` 正在运行的 `basagent`；配置和日志目录不会被覆盖。
+升级安装包会刷新标准控制脚本、`daemon-reload` 并 `try-restart` 正在运行的 `basagent`；
+`basctl.conf`、`server.xml` 和日志目录不会被覆盖。
