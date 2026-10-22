@@ -18,7 +18,7 @@
  * `server.xml`（`<bas>`）的配置模型与解析（不含 Proxy）。格式定义见 `resources/bas-1.0.0.xsd`。
  *
  * 解析结果是一个可直接遍历的对象图：`Container` 持有 engines / hosts / farms /
- * webapps / resources 与可选的 `<setline>`，`Farm` 引用 `Engine`，`Server` 引用
+ * webapps / resources 与可选的 setline 配置，`Farm` 引用 `Engine`，`Server` 引用
  * `Farm` 与 `Host`，`Webapp.runAt` 直接引用 `Server` 对象。
  */
 module bas.config;
@@ -60,7 +60,7 @@ enum containerTypeUndertow = "undertow";
 enum containerTypeJetty = "jetty";
 
 /**
- * `<setline hostname>` 的缺省命名空间：`*` 匹配任意 Host，用 IP 或任意域名访问都能命中。
+ * setline 的缺省命名空间：`*` 匹配任意 Host，用 IP 或任意域名访问都能命中。
  * 多份 `BAS_HOME` 共享同一个 setline 时，各自显式写域名分组，避免互相整组覆盖。
  */
 enum defaultSetlineHostname = "*";
@@ -314,6 +314,10 @@ string[] resolveEngineDeps(Container container, Engine engine, string containerT
 class Host {
   string name;
   string ip;
+  /** setline 对外 listen 端口；与 adminPort 同时为空或同时非空。 */
+  Nullable!ushort setlineListenPort;
+  /** setline 管理口（adminListen）端口；basctl 只拨 127.0.0.1。 */
+  Nullable!ushort setlineAdminPort;
 
   this(string name, string ip) {
     this.name = name;
@@ -327,6 +331,11 @@ class Host {
 
   static Host localhost() {
     return new Host("localhost", "127.0.0.1");
+  }
+
+  /** 当前 Host 是否声明了完整的 setline 端点。 */
+  bool setlineConfigured() const {
+    return !setlineListenPort.isNull && !setlineAdminPort.isNull;
   }
 }
 
@@ -585,13 +594,13 @@ private string[] mergeRepos(const(string)[] repos, const(string)[] tokens) {
 class Container {
   string version_;
   /**
-   * `<setline hostname="...">` 的路由命名空间；未声明 `<setline>` 时为 `Nullable.init`（禁用）。
-   * 出现即启用：basctl 据此判断要不要维护 setline 的路由，不再另设开关。
+   * setline 的路由命名空间。新格式来自根元素 `setline-hostname`；旧格式兼容
+   * `<setline hostname="...">`。是否启用由本机 Host 的两个端口决定，不单看该字段。
    */
   Nullable!string setlineHostname;
   /**
-   * `<setline port="...">` 的管理口**端口**（写法 `10080`）。`<setline>` 出现时它必填（缺了是配置
-   * 错误），没有 `<setline>` 时是 `Nullable.init`。
+   * 旧格式 `<setline port="...">` 的管理口端口。保留用于兼容；新格式把管理口写在
+   * `<host setline-admin-port="...">` 上，本字段为空。
    *
    * 这是 setline 的**管理口**（`adminListen`）：basctl 拨 `127.0.0.1:<port>` 推路由、读路由表，
    * 它不是 setline 对外接业务的那个 `listen`（那由 setline 自己那份配置决定）。管理口只认回环来
@@ -610,6 +619,22 @@ class Container {
   /** `<setline port>` 的原始写法（没写返回空串），供 {@link bas.endpoint} 解析。 */
   string setlinePortText() const {
     return setlinePort.isNull ? "" : strip(setlinePort.get);
+  }
+
+  /** 路由命名空间；没有显式配置时返回 `*`。 */
+  string setlineHostnameText() const {
+    if (setlineHostname.isNull)
+      return defaultSetlineHostname;
+    auto value = strip(setlineHostname.get);
+    return value.length ? value : defaultSetlineHostname;
+  }
+
+  /** 是否至少有一个 Host 声明了完整的 setline 端点。 */
+  bool hasHostSetline() const {
+    foreach (host; hosts)
+      if (host.setlineConfigured())
+        return true;
+    return false;
   }
 
   /** Finds an engine by name, or null. */
@@ -712,6 +737,9 @@ Container parseServerXml(string xmlText, RemoteConfig remote = RemoteConfig.init
 
   auto conf = new Container;
   conf.version_ = requireAttr(basElem, "version", "<bas>");
+  auto rootSetlineHostname = optAttr(basElem, "setline-hostname");
+  if (!rootSetlineHostname.isNull)
+    conf.setlineHostname = nullable(parseSetlineHostnameText(rootSetlineHostname.get));
 
   // 1. repositories
   conf.repository = new Repository;
@@ -760,8 +788,17 @@ Container parseServerXml(string xmlText, RemoteConfig remote = RemoteConfig.init
       }
       break;
     case "setline":
-      conf.setlineHostname = nullable(parseSetlineHostname(section));
-      conf.setlinePort = nullable(parseSetlinePortAttr(section));
+      auto hostname = optAttr(section, "hostname");
+      auto port = parseSetlinePortAttr(section);
+      if (hostname.isNull && port.length == 0)
+        throw new ServerXmlException("<setline> must declare hostname, port, or both");
+      if (!hostname.isNull) {
+        auto parsed = parseSetlineHostnameText(hostname.get);
+        if (!conf.setlineHostname.isNull && conf.setlineHostname.get != parsed)
+          throw new ServerXmlException("setline-hostname conflicts with <setline hostname>");
+        conf.setlineHostname = nullable(parsed);
+      }
+      conf.setlinePort = port.length ? nullable(port) : Nullable!string.init;
       break;
     default:
       break;
@@ -771,6 +808,15 @@ Container parseServerXml(string xmlText, RemoteConfig remote = RemoteConfig.init
   if (!conf.hosts.length)
     conf.hosts ~= Host.localhost();
 
+  if (!conf.setlinePort.isNull && conf.hasHostSetline())
+    throw new ServerXmlException("legacy <setline port> cannot be combined with host setline ports");
+  if (conf.hasHostSetline())
+    conf.setlineHostname = nullable(conf.setlineHostnameText());
+  else if (!conf.setlinePort.isNull)
+    conf.setlineHostname = nullable(conf.setlineHostnameText());
+  else if (!conf.setlineHostname.isNull)
+    throw new ServerXmlException("setline-hostname requires host setline ports or a legacy <setline port>");
+
   return conf;
 }
 
@@ -779,6 +825,45 @@ Container parseServerXmlFile(string path) {
   import std.file : readText;
 
   return parseServerXml(readText(path), remoteConfForServerXml(path));
+}
+
+/** 本机 setline 的实际入口；`enabled=false` 表示本机不参与 setline。 */
+struct LocalSetline {
+  bool enabled;
+  ushort adminPort;
+  string hostname;
+  string source;
+}
+
+/**
+ * 按本机地址选择 Host 的 setline 配置。
+ *
+ * 新格式下端口是机器级事实：一台机器可能匹配多个 Host，但其中最多只能有一个启用了 setline；
+ * 没有匹配到启用项就是“本机不启用”，不是配置错误。旧格式没有 Host 端口时继续读取根级
+ * `<setline port>`，避免旧配置在升级 basctl 后立即失效。
+ */
+LocalSetline localSetlineConfig(const Container container, const(string)[] localIps) {
+  if (container.hasHostSetline()) {
+    size_t matchedCount;
+    string selectedName;
+    ushort selectedPort;
+    foreach (host; container.hosts) {
+      if (host.setlineConfigured() && localIps.canFind(host.ip)) {
+        matchedCount++;
+        selectedName = host.name;
+        selectedPort = host.setlineAdminPort.get;
+      }
+    }
+    if (matchedCount > 1)
+      throw new ServerXmlException("multiple local hosts enable setline");
+    if (matchedCount == 0)
+      return LocalSetline(false, 0, container.setlineHostnameText(), "local host does not enable setline");
+    return LocalSetline(true, selectedPort, container.setlineHostnameText(), "host " ~ selectedName);
+  }
+  if (!container.setlinePort.isNull)
+    return LocalSetline(true, parseSetlinePort(container.setlinePortText()),
+        container.setlineHostnameText(), "legacy <setline port>");
+  return LocalSetline(false, 0, container.setlineHostnameText(), "setline is not configured");
 }
 
 private:
@@ -826,37 +911,34 @@ string requireAttr(XmlElem elem, string name, string where) {
 }
 
 /**
- * `<setline hostname>`：路由命名空间。缺省 {@link defaultSetlineHostname}，`*` 表示匹配任意
- * Host；其余只接受域名允许的字符（小写字母、数字、`-`、`.`）。写坏了直接报错，不悄悄替换成
- * 别的名字——路由写进谁家的命名空间必须看得见。
+ * setline 路由命名空间：缺省 {@link defaultSetlineHostname}，`*` 表示匹配任意 Host；其余只接受
+ * 域名允许的字符（小写字母、数字、`-`、`.`）。写坏了直接报错，不悄悄替换成别的名字。
  */
-private string parseSetlineHostname(XmlElem elem) {
-  auto value = optAttr(elem, "hostname");
-  if (value.isNull || strip(value.get).empty)
+private string parseSetlineHostnameText(string value) {
+  auto text = toLower(strip(value));
+  if (text.empty)
     return defaultSetlineHostname;
-  auto text = toLower(strip(value.get));
   if (text == "*")
     return text;
   foreach (ch; text) {
     if ((ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') || ch == '.' || ch == '-')
       continue;
-    throw new ServerXmlException("Invalid <setline hostname=\"" ~ value.get
-        ~ "\">: use a hostname (letters, digits, '.' and '-'), \"*\" for any Host,"
+    throw new ServerXmlException("Invalid setline hostname \"" ~ value
+        ~ "\": use a hostname (letters, digits, '.' and '-'), \"*\" for any Host,"
         ~ " or drop the attribute");
   }
   return text;
 }
 
 /**
- * `<setline port>`：本 `BAS_HOME` 往外拨的 setline **管理口**端口（setline 配置里的 `adminListen`）。
- * `<setline>` 出现它就**必须**写（`hostname` 可以省）——管理口是这台机器上的事实，没有缺省可猜；
- * 只写端口，因为管理口只认回环来的写，host 没有可配的余地（见 {@link bas.endpoint}）。非法当场
- * 报错，别等到 `status` / `doctor` 才说"连不上"。
- *
- * 反过来，**没有 `<setline>` 就没有任何约束**：不启用 setline，也就不需要端口。
+ * 旧格式 `<setline port>`：兼容早期配置文件；新格式把端口写在 Host 上。
+ * 没写 port 时返回空串，最终由“必须存在 Host 端口”这一约束校验。
  */
 private string parseSetlinePortAttr(XmlElem elem) {
-  auto attr = requireAttr(elem, "port", "<setline>");
+  auto value = optAttr(elem, "port");
+  if (value.isNull || strip(value.get).empty)
+    return "";
+  auto attr = value.get;
   auto text = strip(attr);
   try
     parseSetlinePort(text);
@@ -965,7 +1047,22 @@ Engine parseEngine(XmlElem elem) {
 
 /** 解析 `<host>`（名称 + 绑定 IP）。 */
 Host parseHost(XmlElem elem) {
-  return new Host(requireAttr(elem, "name", "<host>"), requireAttr(elem, "ip", "<host>"));
+  auto host = new Host(requireAttr(elem, "name", "<host>"), requireAttr(elem, "ip", "<host>"));
+  auto listen = nonBlankAttr(elem, "setline-listen-port");
+  auto admin = nonBlankAttr(elem, "setline-admin-port");
+  if (listen.isNull != admin.isNull)
+    throw new ServerXmlException("host " ~ host.name
+        ~ " must set both setline-listen-port and setline-admin-port");
+  if (!listen.isNull) {
+    try {
+      host.setlineListenPort = nullable(parseSetlinePort(listen.get));
+      host.setlineAdminPort = nullable(parseSetlinePort(admin.get));
+    } catch (Exception) {
+      throw new ServerXmlException("host " ~ host.name
+          ~ " has an invalid setline port (expected 1-65535)");
+    }
+  }
+  return host;
 }
 
 /** 解析 `<resource>`：`name` 单独取出，其余属性原样透传给 Tomcat。 */

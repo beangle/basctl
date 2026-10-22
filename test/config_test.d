@@ -170,10 +170,10 @@ import std.format : format;
       .setlinePortText() == "9100");
 }
 
-@("setline port is required by the element and rejects anything that is not a port") unittest {
+@("legacy setline entry without a port requires host-level ports") unittest {
   import std.exception : assertThrown;
 
-  // 有 <setline> 就必须给端口（hostname 可以省）
+  // 旧元素既没有 port，也没有 Host 端口：无法确定管理口。
   assertThrown!ServerXmlException(parseServerXml(
       `<bas version="1"><setline hostname="localhost"/><engines/></bas>`));
   assertThrown!ServerXmlException(parseServerXml(`<bas version="1"><setline/><engines/></bas>`));
@@ -189,6 +189,38 @@ import std.format : format;
   // 地址写法不再接受：管理口只认回环，host 没有可配的余地
   assertThrown!ServerXmlException(parseServerXml(
       `<bas version="1"><setline port="127.0.0.1:10080"/><engines/></bas>`));
+}
+
+@("host setline ports select the local admin endpoint") unittest {
+  import std.exception : assertThrown;
+
+  auto cfg = parseServerXml(`<bas version="1" setline-hostname="Alice.LOCALHOST">
+    <hosts>
+      <host name="local" ip="127.0.0.1" setline-listen-port="8080" setline-admin-port="10080"/>
+      <host name="remote" ip="10.0.0.12"/>
+    </hosts>
+  </bas>`);
+  assert(cfg.setlineHostnameText() == "alice.localhost");
+  assert(cfg.hosts[0].setlineConfigured());
+  assert(cfg.hosts[0].setlineListenPort.get == 8080);
+  assert(cfg.hosts[0].setlineAdminPort.get == 10080);
+  assert(!cfg.hosts[1].setlineConfigured());
+  auto local = localSetlineConfig(cfg, ["127.0.0.1"]);
+  assert(local.enabled);
+  assert(local.adminPort == 10080);
+  assert(local.hostname == "alice.localhost");
+  assert(!localSetlineConfig(cfg, ["10.0.0.99"]).enabled);
+
+  assertThrown!ServerXmlException(parseServerXml(`<bas version="1">
+    <hosts><host name="local" ip="127.0.0.1" setline-admin-port="10080"/></hosts>
+  </bas>`));
+  assertThrown!ServerXmlException(parseServerXml(`<bas version="1" setline-hostname="a.local">
+    <hosts><host name="local" ip="127.0.0.1"/></hosts>
+  </bas>`));
+  assertThrown!ServerXmlException(parseServerXml(`<bas version="1">
+    <setline port="10080"/>
+    <hosts><host name="local" ip="127.0.0.1" setline-listen-port="8080" setline-admin-port="10080"/></hosts>
+  </bas>`));
 }
 
 @("setline hostname rejects anything that is not a hostname") unittest {

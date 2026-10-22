@@ -67,6 +67,14 @@
             容器版本在 &lt;engine version&gt; 上声明，二者互相独立。</xs:documentation>
         </xs:annotation>
       </xs:attribute>
+      <xs:attribute name="setline-hostname" type="xs:string" use="optional">
+        <xs:annotation>
+          <xs:documentation>setline 路由命名空间。bashub 仅在 Profile.proxyByHostname
+            为 true 时输出 Profile.hostname；否则省略该属性，由 basctl 使用 * 默认组。
+            是否启用由本机 &lt;host&gt; 是否同时配置 setline-listen-port 与
+            setline-admin-port 决定。</xs:documentation>
+        </xs:annotation>
+      </xs:attribute>
     </xs:complexType>
   </xs:element>
 
@@ -186,6 +194,18 @@
   <xs:complexType name="hostType">
     <xs:attribute name="name" type="xs:string" use="required"/>
     <xs:attribute name="ip" type="xs:string" use="required"/>
+    <xs:attribute name="setline-listen-port" type="xs:string" use="optional">
+      <xs:annotation>
+        <xs:documentation>setline 数据面 listen 端口（1-65535）。与 setline-admin-port
+          必须同时出现或同时省略；省略表示该主机不部署 setline。</xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+    <xs:attribute name="setline-admin-port" type="xs:string" use="optional">
+      <xs:annotation>
+        <xs:documentation>setline 管理口（adminListen）端口（1-65535）。basctl 只拨
+          127.0.0.1:端口，并在本机 Host 命中时使用。</xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
   </xs:complexType>
 
   <!-- ================= 资源 ================= -->
@@ -361,10 +381,9 @@ accept-count/connection-timeout；Undertow 只用 accept-count/connection-timeou
 
   <xs:complexType name="setlineType">
     <xs:annotation>
-      <xs:documentation>本机 setline（HTTP 路径路由器）。元素出现即启用：basctl 起停实例时把运行
-        中实例的路由同步成 hostname 命名空间下的那一格；不出现即禁用。setline 是独立的机器级服务
-        （systemd / 容器入口 / 手工拉起），自己那份配置（listen / adminListen / 调参）不归 basctl
-        生成；basctl 只推路由，既不拉起也不停止它。</xs:documentation>
+      <xs:documentation>旧格式的 setline 配置，保留兼容。新格式把 listen/admin 端口写在
+        &lt;host&gt; 上，把命名空间写在根元素 setline-hostname 上，不再生成该元素。
+        setline 是独立的机器级服务，basctl 只推路由，既不拉起也不停止它。</xs:documentation>
     </xs:annotation>
     <xs:attribute name="hostname" type="xs:string" use="optional" default="*">
       <xs:annotation>
@@ -373,19 +392,11 @@ accept-count/connection-timeout；Undertow 只用 accept-count/connection-timeou
           setline 的多份 BAS_HOME 应各写自己的域名分组，互不覆盖。</xs:documentation>
       </xs:annotation>
     </xs:attribute>
-    <xs:attribute name="port" type="xs:string" use="required">
+    <xs:attribute name="port" type="xs:string" use="optional">
       <xs:annotation>
-        <xs:documentation>本 BAS_HOME 要推路由的 setline 管理口端口（setline 配置里的 adminListen，
-          缺省 127.0.0.1:10080）：路由的写接口只在管理口上，读接口也从这里拨一次。这里只写端口
-          （如 10080），因为管理口只认回环来的连接——basctl 拨的就是 127.0.0.1:port，地址没有可
-          配的余地。元素出现它就必填——没有缺省可猜，也没有命令行覆盖（端口只有这一处来源：写在
-          这里，改的时候看得见）。
-
-          注意它不是 setline 对外接业务的 listen（那是浏览器与 peer 走的口，在 setline 自己的配置
-          文件里），basctl 不生成那份配置、也不碰它的端口。
-
-          一台机器上共享同一个 setline 的多份 BAS_HOME 各写各的 hostname（那一格归属），port 填
-          同一个端口。</xs:documentation>
+        <xs:documentation>旧格式的 setline 管理口端口。新配置请改用本机
+          &lt;host setline-admin-port&gt;；该属性仅用于兼容旧版 server.xml。
+          如果同时出现 Host 端口，解析会报冲突。</xs:documentation>
       </xs:annotation>
     </xs:attribute>
   </xs:complexType>

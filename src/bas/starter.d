@@ -57,7 +57,6 @@ import bas.serverinfo : ServerInfo, WebappInfo, instancePid, liveInstancePid, li
   localIsoTimestamp, readInstanceInfo, removeInstanceInfo, writeInstanceInfo;
 import bas.serverstatus : pidLooksLikeInstance, processRunning, rollLog, signalProcess;
 import bas.setline : SetlineConflict, conflictLines, runningPlan, setlinePlan;
-import bas.endpoint : resolveSetlinePort;
 import bas.setlineproc : syncRoutesToSetline;
 import bas.spec : SubappSpec, engineInitCommand, renderLaunchSpec, shellQuote;
 
@@ -91,9 +90,9 @@ enum defaultStopTimeoutSec = 15;
  *
  * 任一实例准备失败只跳过该实例（写 `servers/<name>/error`，并撤销它的端口预留），其余照常启动。
  */
-/** `<setline>` 出现即启用（配置就是开关，见 docs/setline.md）。 */
+/** 本机 Host 是否启用了 setline。 */
 private bool setlineEnabled(const Container container) {
-  return !container.setlineHostname.isNull && strip(container.setlineHostname.get).length > 0;
+  return localSetlineConfig(container, localAddresses()).enabled;
 }
 
 /** 打印路由冲突与修法。 */
@@ -110,7 +109,16 @@ private void printRouteConflicts(const(SetlineConflict)[] conflicts) {
  * 不改启停的退出码：setline 挂了不该挡住应用启停，下一次启停（或手工 `basctl setline`）会补上。
  */
 private void reconcileRoutes(const Container container, string basHome, bool noSetline) {
-  if (noSetline || !setlineEnabled(container))
+  if (noSetline)
+    return;
+  LocalSetline setline;
+  try
+    setline = localSetlineConfig(container, localAddresses());
+  catch (Exception e) {
+    stderr.writeln(e.msg);
+    return;
+  }
+  if (!setline.enabled)
     return;
   auto plan = runningPlan(liveInstances(basHome));
   if (plan.conflicts.length) {
@@ -118,15 +126,7 @@ private void reconcileRoutes(const Container container, string basHome, bool noS
     stderr.writeln("Routes not updated; fix the conflict and run `basctl setline --sync`.");
     return;
   }
-  ushort port;
-  try
-    port = resolveSetlinePort(container.setlinePortText());
-  catch (Exception e) {
-    stderr.writeln(e.msg);
-    return;
-  }
-  auto hostname = strip(container.setlineHostname.get);
-  if (syncRoutesToSetline(plan.routes, port, hostname, true) != 0)
+  if (syncRoutesToSetline(plan.routes, setline.adminPort, setline.hostname, true) != 0)
     stderr.writeln("setline routes were not fully reconciled; the instances themselves are fine"
         ~ " (the next start/stop retries).");
 }

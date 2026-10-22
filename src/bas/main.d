@@ -30,7 +30,7 @@ import bas.cli : resolveBasHome, takeConfigFile;
 import bas.config;
 import bas.doctor : runDoctor;
 import bas.embed : defaultBasVersion, runEmbedded;
-import bas.endpoint : adminAddress, portFree, resolveSetlinePort;
+import bas.endpoint : adminAddress, portFree;
 import bas.enginecreator;
 import bas.firewall;
 import bas.init;
@@ -311,19 +311,16 @@ int cmdSetline(string[] args) {
   }
 
   auto container = parseServerXmlFile(confFile);
-  if (container.setlineHostname.isNull) {
-    // 没声明 <setline> 就是这份配置不启用 setline：没有命名空间，也没有管理口端口。
-    stderr.writeln("No <setline> in " ~ confFile ~ ": this BAS_HOME does not use setline,"
-        ~ " so there is nothing to push. Add <setline port=\"10080\"/> to enable.");
-    return 1;
-  }
-  auto hostname = strip(container.setlineHostname.get);
-
-  ushort port;
+  LocalSetline setline;
   try
-    port = resolveSetlinePort(container.setlinePortText());
+    setline = localSetlineConfig(container, localAddresses());
   catch (Exception e) {
     stderr.writeln(e.msg);
+    return 1;
+  }
+  if (!setline.enabled) {
+    stderr.writeln("No setline for this host in " ~ confFile
+        ~ ": set both setline-listen-port and setline-admin-port on the local <host>.");
     return 1;
   }
 
@@ -334,7 +331,7 @@ int cmdSetline(string[] args) {
     printConflicts(running.conflicts);
     return 1;
   }
-  return syncRoutesToSetline(running.routes, port, hostname);
+  return syncRoutesToSetline(running.routes, setline.adminPort, setline.hostname);
 }
 
 /** 打印路由冲突并给出修法。 */
@@ -381,14 +378,15 @@ private void setlineUsage() {
  * （`Container` 是公开类型）也能拿到一句说得清的话。
  */
 public string[] setlineStatusLines(const Container container, const(ServerInfo)[] live) {
-  if (container.setlineHostname.isNull)
-    return [];
-  auto hostname = strip(container.setlineHostname.get);
-  ushort port;
+  LocalSetline setline;
   try
-    port = resolveSetlinePort(container.setlinePortText());
+    setline = localSetlineConfig(container, localAddresses());
   catch (Exception e)
-    return [format!"host=%s (%s)"(hostname, e.msg)];
+    return [format!"host=%s (%s)"(container.setlineHostnameText(), e.msg)];
+  if (!setline.enabled)
+    return [];
+  auto hostname = setline.hostname;
+  auto port = setline.adminPort;
 
   // 没人听就不拨号：`(down)` 已经说完了，再补一句"连不上"只是重复
   if (portFree(port))

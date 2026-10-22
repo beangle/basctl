@@ -17,7 +17,7 @@
 /** Unit tests for bas.main status rendering (setline config helpers live in setlineproc_test). */
 module test.main_test;
 
-import bas.config : Container, parseServerXml;
+import bas.config : Container, Host, parseServerXml;
 import bas.main : setlineStatusLines, staleStatusLine, statusLines;
 import bas.serverinfo : ServerInfo, WebappInfo;
 
@@ -123,20 +123,26 @@ import std.typecons : nullable;
       == ["host=* port=" ~ port ~ " (down)"]);
 }
 
-@("setlineStatusLines reports a missing port instead of throwing") unittest {
-  // 配置校验已经保证"有 <setline> 就有 port"；这条守的是手工构造的容器（公开 API），
-  // 缺端口时也要有个说得清的结果，而不是抛异常。
+@("setlineStatusLines reports ambiguous local setline hosts instead of throwing") unittest {
   auto container = new Container();
   container.setlineHostname = nullable("localhost");
+  auto first = new Host("one", "127.0.0.1");
+  first.setlineListenPort = nullable(cast(ushort) 8080);
+  first.setlineAdminPort = nullable(cast(ushort) 10080);
+  auto second = new Host("two", "127.0.0.1");
+  second.setlineListenPort = nullable(cast(ushort) 8081);
+  second.setlineAdminPort = nullable(cast(ushort) 10081);
+  container.hosts = [first, second];
   auto lines = setlineStatusLines(container, []);
   assert(lines.length == 1 && lines[0].canFind("host=localhost")
-      && lines[0].canFind("No setline admin port"), lines.to!string);
+      && lines[0].canFind("multiple local hosts enable setline"), lines.to!string);
 }
 
-/** 一份带 `<setline>`（有 `<setline>` 就得有 `port`）的最小可解析配置。 */
+/** 一份带本机 Host setline 端口的最小可解析配置。 */
 private auto setlineContainer(string hostname, string port) {
-  return parseServerXml(`<bas version="1">
-    <setline hostname="` ~ hostname ~ `" port="` ~ port ~ `"/>
+  return parseServerXml(`<bas version="1" setline-hostname="` ~ hostname ~ `">
+    <hosts><host name="local" ip="127.0.0.1" setline-listen-port="8080"
+      setline-admin-port="` ~ port ~ `"/></hosts>
     <engines><engine name="t" type="tomcat" version="11"/></engines>
     <farms><farm name="f" engine="t"><server name="s1" http="0"/></farm></farms>
   </bas>`);

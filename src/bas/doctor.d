@@ -38,9 +38,10 @@
  */
 module bas.doctor;
 
-import bas.config : parseServerXmlFile;
+import bas.config : localSetlineConfig, parseServerXmlFile;
 import bas.jstart : jstartEnvVar;
-import bas.endpoint : adminAddress, portFree, resolveSetlinePort;
+import bas.endpoint : adminAddress, portFree;
+import bas.net : localAddresses;
 
 import std.array : join, split;
 import std.conv : to;
@@ -128,25 +129,26 @@ ToolCheck[] checkTools(string confFile, in ToolEnv env) {
 /** `<setline>` 的启用状态、配置里写的管理口端口（可能为空）与展示用说明。 */
 private struct SetlineConfigState {
   bool enabled;
-  string port;
+  ushort port;
   string note;
 }
 
 /**
- * `server.xml` 是否启用了 setline：只有 `<setline>` 出现才算（与 config.d 的“出现即启用”一致）。
- * 文件不存在或解析失败时按未启用处理，说明写进 `note`。
+ * `server.xml` 是否启用了 setline：按本机 Host 的两个端口判断；旧格式的 `<setline port>`
+ * 继续兼容。文件不存在或解析失败时按未启用处理，说明写进 `note`。
  */
 private SetlineConfigState setlineConfigState(string confFile) {
   if (!exists(confFile))
-    return SetlineConfigState(false, "", "no config file " ~ confFile);
+    return SetlineConfigState(false, 0, "no config file " ~ confFile);
   try {
     auto conf = parseServerXmlFile(confFile);
-    if (conf.setlineHostname.isNull)
-    return SetlineConfigState(false, "", "no <setline> in " ~ confFile);
-    return SetlineConfigState(true, conf.setlinePortText(), "<setline hostname=\""
-        ~ strip(conf.setlineHostname.get) ~ "\">");
+    auto setline = localSetlineConfig(conf, localAddresses());
+    if (!setline.enabled)
+      return SetlineConfigState(false, 0, setline.source);
+    return SetlineConfigState(true, setline.adminPort,
+        setline.source ~ " hostname=" ~ setline.hostname);
   } catch (Exception e) {
-    return SetlineConfigState(false, "", "cannot parse " ~ confFile);
+    return SetlineConfigState(false, 0, "cannot parse " ~ confFile);
   }
 }
 
@@ -193,17 +195,11 @@ private ToolCheck checkSetline(SetlineConfigState setline) {
   if (!setline.enabled)
     return ToolCheck("setline", CheckState.skipped, "", "", "not required: " ~ setline.note);
   auto configNote = setline.note;
-  if (setline.port.length)
-    configNote ~= " port=" ~ setline.port;
-
-  ushort port;
-  try
-    port = resolveSetlinePort(setline.port);
-  catch (Exception e)
-    return unavailable("setline", e.msg ~ " (" ~ configNote ~ ")");
+  auto port = setline.port;
+  configNote ~= " port=" ~ port.to!string;
   if (portFree(port))
     return unavailable("setline", "nothing listens on " ~ adminAddress(port)
-        ~ "; start the setline service, or point <setline port=\"...\"> at it ("
+        ~ "; start the setline service, or fix the local <host> setline-admin-port ("
         ~ configNote ~ ")");
   return ToolCheck("setline", CheckState.ok, adminAddress(port), "server.xml", "");
 }
