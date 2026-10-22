@@ -21,15 +21,17 @@ import bas.fsutil : setExecutable;
 import bas.init : installScripts, runInit;
 import bas.remote : parseRemoteConf;
 
-import std.algorithm : canFind, startsWith;
+import std.algorithm : canFind;
 import std.file : exists, readText, rmdirRecurse, tempDir, write;
 import std.path : buildPath;
 import std.process : execute;
-import std.string : splitLines, strip;
+import std.string : strip;
 import std.uuid : randomUUID;
 
 private immutable string[] names =
-  ["env.sh", "bas.sh", "start.sh", "stop.sh", "restart.sh", "start-agent.sh", "stop-agent.sh"];
+  ["env.sh", "bas.sh", "start.sh", "stop.sh", "restart.sh"];
+
+private enum scriptCount = 5;
 
 private string newRoot(string tag) {
   return buildPath(tempDir, "basctl-init-" ~ tag ~ "-" ~ randomUUID().toString());
@@ -39,13 +41,19 @@ private string fakeBasctl(string root) {
   auto path = buildPath(root, "fake-basctl.sh");
   write(path, "#!/bin/bash\n"
       ~ "printf '%s\\n' \"$*\" >> \"$BAS_HOME/fake-calls\"\n"
-      ~ "if [ \"$1\" = pull ]; then exit \"${FAKE_PULL_STATUS:-0}\"; fi\n"
-      ~ "if [ \"$1\" = agent ]; then\n"
-      ~ "  echo 'fake agent started'\n"
-      ~ "  trap 'exit 0' TERM\n"
-      ~ "  while :; do sleep 1; done\n"
-      ~ "fi\n"
       ~ "exit 0\n");
+  setExecutable(path);
+  return path;
+}
+
+private string fakeBasagent(string root) {
+  auto path = buildPath(root, "fake-basagent.sh");
+  write(path, "#!/bin/bash\n"
+      ~ "printf '%s\\n' \"$*\" >> \"$BAS_HOME/fake-agent-calls\"\n"
+      ~ "if [ \"$1\" = pull ]; then exit \"${FAKE_AGENT_PULL_STATUS:-0}\"; fi\n"
+      ~ "echo 'fake basagent started'\n"
+      ~ "trap 'exit 0' TERM\n"
+      ~ "while :; do sleep 1; done\n");
   setExecutable(path);
   return path;
 }
@@ -55,7 +63,7 @@ private string fakeBasctl(string root) {
   scope (exit) if (exists(root)) rmdirRecurse(root);
 
   auto result = installScripts(root, false, false);
-  assert(result.written == 7);
+  assert(result.written == scriptCount);
   assert(result.kept == 0);
   assert(result.confWritten);
   assert(!result.confKept);
@@ -66,6 +74,7 @@ private string fakeBasctl(string root) {
     assert(readText(path).length > 0);
   }
   assert(readText(buildPath(root, "bin", "env.sh")).canFind("basctl_cmd"));
+  assert(readText(buildPath(root, "bin", "env.sh")).canFind("basagent_cmd"));
 }
 
 @("installScripts keeps existing scripts unless forced") unittest {
@@ -77,12 +86,12 @@ private string fakeBasctl(string root) {
   write(bas, "CUSTOM");
 
   auto kept = installScripts(root, false, false);
-  assert(kept.written == 0 && kept.kept == 7);
+  assert(kept.written == 0 && kept.kept == scriptCount);
   assert(!kept.confWritten && kept.confKept);
   assert(readText(bas) == "CUSTOM");
 
   auto forced = installScripts(root, true, false);
-  assert(forced.written == 7 && forced.kept == 0);
+  assert(forced.written == scriptCount && forced.kept == 0);
   assert(!forced.confWritten && forced.confKept);
   assert(readText(bas).canFind("basctl_cmd"));
 }
@@ -122,7 +131,7 @@ private string fakeBasctl(string root) {
   scope (exit) if (exists(root)) rmdirRecurse(root);
 
   auto result = installScripts(root, false, true);
-  assert(result.written == 7);
+  assert(result.written == scriptCount);
   assert(result.confWritten);
   assert(!exists(root));
 }
@@ -143,63 +152,66 @@ private string fakeBasctl(string root) {
   assert(runInit(["--nope"]) == 1);
 }
 
-@("start.sh warns and starts with the local server.xml when pull fails") unittest {
-  auto root = newRoot("start-pull");
+@("start.sh starts from the local server.xml without pulling") unittest {
+  auto root = newRoot("start-local");
   scope (exit) if (exists(root)) rmdirRecurse(root);
 
   installScripts(root, false, false);
-  write(buildPath(root, "conf", "basctl.conf"), "[remote]\nurl = http://127.0.0.1:1\n");
   auto fake = fakeBasctl(root);
   auto result = execute(["bash", buildPath(root, "bin", "start.sh"), "tools"],
-      ["beangle_basctl": fake, "FAKE_PULL_STATUS": "1"]);
+      ["beangle_basctl": fake]);
 
   assert(result.status == 0, result.output);
-  assert(result.output.canFind("warning: cannot refresh conf/server.xml"), result.output);
   auto calls = readText(buildPath(root, "fake-calls"));
-  assert(calls.canFind("pull --if-configured " ~ root), calls);
   assert(calls.canFind("start " ~ buildPath(root, "conf", "server.xml") ~ " tools"), calls);
+  assert(!calls.canFind("pull "), calls);
 }
 
-@("restart.sh warns on pull failure, resolves, stops and starts once") unittest {
-  auto root = newRoot("restart-pull");
+@("restart.sh resolves, stops and starts once without pulling") unittest {
+  auto root = newRoot("restart-local");
   scope (exit) if (exists(root)) rmdirRecurse(root);
 
   installScripts(root, false, false);
-  write(buildPath(root, "conf", "basctl.conf"), "[remote]\nurl = http://127.0.0.1:1\n");
   auto fake = fakeBasctl(root);
   auto result = execute(["bash", buildPath(root, "bin", "restart.sh"), "tools"],
-      ["beangle_basctl": fake, "FAKE_PULL_STATUS": "1"]);
+      ["beangle_basctl": fake]);
 
   assert(result.status == 0, result.output);
-  assert(result.output.canFind("warning: cannot refresh conf/server.xml"), result.output);
   auto calls = readText(buildPath(root, "fake-calls"));
   assert(calls.canFind("resolve " ~ buildPath(root, "conf", "server.xml") ~ " tools"), calls);
   assert(calls.canFind("stop " ~ buildPath(root, "conf", "server.xml") ~ " tools"), calls);
   assert(calls.canFind("start " ~ buildPath(root, "conf", "server.xml") ~ " tools"), calls);
-  // restart 在停机前已经尝试过 pull，start.sh 不应再拉一次
-  assert(calls.canFind("pull --if-configured " ~ root), calls);
-  size_t pulls;
-  foreach (line; calls.splitLines())
-    if (line.startsWith("pull "))
-      pulls++;
-  assert(pulls == 1, calls);
+  assert(!calls.canFind("pull "), calls);
 }
 
-@("start-agent.sh keeps its pid and log under agent/") unittest {
+@("bas.sh pull delegates to basagent") unittest {
+  auto root = newRoot("pull");
+  scope (exit) if (exists(root)) rmdirRecurse(root);
+
+  installScripts(root, false, false);
+  auto fake = fakeBasagent(root);
+  auto result = execute(["bash", buildPath(root, "bin", "bas.sh"), "pull"],
+      ["beangle_basagent": fake]);
+
+  assert(result.status == 0, result.output);
+  assert(readText(buildPath(root, "fake-agent-calls")) == "pull " ~ root ~ "\n");
+}
+
+@("bas.sh agent-start keeps pid and log under agent/") unittest {
   auto root = newRoot("agent");
+  auto bas = buildPath(root, "bin", "bas.sh");
   auto pidFile = buildPath(root, "agent", "agent.pid");
   auto logFile = buildPath(root, "agent", "console.out");
   scope (exit) {
     if (exists(pidFile))
-      execute(["bash", buildPath(root, "bin", "stop-agent.sh")]);
+      execute(["bash", bas, "agent-stop"]);
     if (exists(root)) rmdirRecurse(root);
   }
 
   installScripts(root, false, false);
   write(buildPath(root, "conf", "server.xml"), "<bas version=\"0.14.0\"/>\n");
-  auto fake = fakeBasctl(root);
-  auto started = execute(["bash", buildPath(root, "bin", "start-agent.sh")],
-      ["beangle_basctl": fake]);
+  auto fake = fakeBasagent(root);
+  auto started = execute(["bash", bas, "agent-start"], ["beangle_basagent": fake]);
   assert(started.status == 0, started.output);
   assert(started.output.canFind("log: " ~ logFile), started.output);
 
@@ -209,13 +221,19 @@ private string fakeBasctl(string root) {
   auto pid = strip(readText(pidFile));
   assert(pid.length);
   assert(execute(["kill", "-0", pid]).status == 0);
-  assert(readText(logFile).canFind("fake agent started"));
+  assert(readText(logFile).canFind("fake basagent started"));
 
-  auto calls = readText(buildPath(root, "fake-calls"));
-  assert(calls.canFind("pull --if-configured " ~ root), calls);
-  assert(calls.canFind("agent " ~ buildPath(root, "conf", "server.xml")), calls);
+  auto callsFile = buildPath(root, "fake-agent-calls");
+  auto calls = readText(callsFile);
+  assert(calls == buildPath(root, "conf", "server.xml") ~ "\n", calls);
 
-  auto stopped = execute(["bash", buildPath(root, "bin", "stop-agent.sh")]);
+  auto again = execute(["bash", bas, "agent-start"], ["beangle_basagent": fake]);
+  assert(again.status == 0, again.output);
+  assert(again.output.canFind("agent already running (pid=" ~ pid ~ ")"), again.output);
+  assert(readText(pidFile) == pid ~ "\n");
+  assert(readText(callsFile) == calls, "a second agent must not be started");
+
+  auto stopped = execute(["bash", bas, "agent-stop"]);
   assert(stopped.status == 0, stopped.output);
   assert(!exists(pidFile));
 }

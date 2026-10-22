@@ -45,13 +45,11 @@
  */
 module bas.starter;
 
-import bas.agent : publishSnapshot;
 import bas.artifact : isMavenCoord, parseArtifact;
 import bas.config;
 import bas.fsutil : linkIfMissing, mkdirPrivate;
 import bas.jstart : jstartCommand;
 import bas.logs : consoleLog, plainName, readTail;
-import bas.main : basctlVersion;
 import bas.net : localAddresses;
 import bas.portalloc : PortRange, defaultPortRange, defaultPortRangeText, parsePortRange, reservePort;
 import bas.resolver : resolveArtifact, resolveWebapps;
@@ -150,18 +148,14 @@ int runStart(string configFile, string[] rest) {
     stderr.writeln("No local server matches " ~ pattern.get);
     return 1;
   }
-  return startServers(container, configFile, basHome, servers, range, noSetline, true);
+  return startServers(container, basHome, servers, range, noSetline);
 }
 
 /**
  * 启动一组已经选好的本机实例；命令行与通道的 `service:start` 共用这一段。
- *
- * `publish` 为 false 时不在本函数末尾推快照：常驻 agent 还要回 `result`，直接调用
- * {@link bas.agent.publishSnapshot} 会再跑一次事件循环；agent 会在动作完成后自己发
- * `report:bas`。
  */
-private int startServers(Container container, string configFile, string basHome, Server[] servers,
-    PortRange range, bool noSetline, bool publish) {
+private int startServers(Container container, string basHome, Server[] servers,
+    PortRange range, bool noSetline) {
   applyEngineDefaults(container, servers);
   auto startedAt = localIsoTimestamp(Clock.currTime());
 
@@ -234,8 +228,6 @@ private int startServers(Container container, string configFile, string basHome,
   }
   writeln(started, " servers started.");
   reconcileRoutes(container, basHome, noSetline);
-  if (publish)
-    publishSnapshot(container, configFile, basctlVersion);
   return started == prepared.length && !failed ? 0 : 1;
 }
 
@@ -386,7 +378,6 @@ int runStop(string configFile, string[] rest) {
   writeln(stopped, " servers stopped.",
       skipped ? format!"(%s skipped)"(skipped) : "");
   reconcileRoutes(container, basHome, noSetline);
-  publishSnapshot(container, configFile, basctlVersion);
   return skipped ? 1 : 0;
 }
 
@@ -522,7 +513,7 @@ ServiceResult serviceAction(string configFile, string action, string instance) {
       return ServiceResult(true, "stopped", 0, "");
   }
 
-  if (startServers(container, configFile, basHome, [target], defaultPortRange, false, false) != 0)
+  if (startServers(container, basHome, [target], defaultPortRange, false) != 0)
     return ServiceResult(false, "", 0, "start-failed");
   auto info = readInstanceInfo(basHome, instance);
   if (info.isNull || info.get.pid <= 0 || !processRunning(info.get.pid))

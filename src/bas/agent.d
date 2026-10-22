@@ -19,8 +19,8 @@
  *
  * 两个命令共用一个循环，只是跑几轮不同：
  *
- * - `basctl report`：连上、发 `hello` + 两份上报、断开（一次性，`start` / `stop` 之后也走它）；
- * - `basctl agent`：常驻，断线按 {@link reconnectDelay} 重连，周期上报并随时接指令。
+ * - `basagent report`：连上、发 `hello` + 两份上报、断开；
+ * - `basagent`：常驻，断线按 {@link reconnectDelay} 重连，周期上报并随时接指令。
  *
  * 三条不变量（见 `docs/channel-protocol.md`）：
  *
@@ -38,6 +38,7 @@ import bas.config : Container, parseServerXmlFile;
 import bas.hub : agentUrl;
 import bas.logs : consoleLog, countLines, maxLogLines, plainName, readLogWindow;
 import bas.net : hostName;
+import bas.pull : runPull;
 import bas.remote : RemoteConfig, agentChannelUrl, bearerCredential, loadRemoteConf, remoteConfFileName,
   validateRemoteConf;
 import bas.report : basReport, osReport;
@@ -78,7 +79,7 @@ private enum int recentResultLimit = 32;
  * 拨号的连接与读取超时。
  *
  * 控制台多数在机房里、也可能暂时不可达，所以「连不上」要有确定的上界：缺省值是
- * `Duration.max`，真按它等下去，`start` / `stop` 之后的那次顺带上报能让人等上好几分钟。
+ * `Duration.max`，真按它等下去，一次 `report` 能让人等上好几分钟。
  */
 private enum connectTimeout = 20.seconds;
 
@@ -95,27 +96,27 @@ struct AgentContext {
   string basctlVersion;
   /** 只跑一轮（`report`）；常驻（`agent`）为 false。 */
   bool once;
-  /** 这一轮到底报上去了没有：`report` 据此定退出码，启停之后的顺带上报据此决定要不要提醒。 */
+  /** 这一轮到底报上去了没有：`report` 据此定退出码。 */
   bool served;
   /** 请求号 → 已发出的 result；跨重连保留，按插入顺序淘汰。 */
   string[string] recentResults;
   string[] recentRequestIds;
 }
 
-/** `basctl agent [server.xml]`：常驻，连上就报，断线重连。 */
+/** `basagent [server.xml]`：常驻，连上就报，断线重连。 */
 int runAgent(string configFile, string basctlVersion, string[] rest) {
   if (rest.length) {
     stderr.writeln("Unknown option: " ~ rest[0]);
     return 1;
   }
   if (!exists(configFile)) {
-    stderr.writeln("basctl agent: cannot find config file " ~ configFile);
+    stderr.writeln("basagent: cannot find config file " ~ configFile);
     return 1;
   }
   auto remotePath = agentRemotePath(configFile);
   auto remote = loadRemoteConf(remotePath);
   if (!channelEnabled(remote)) {
-    stderr.writeln("basctl agent: warning: remote is not configured in " ~ remotePath
+    stderr.writeln("basagent: warning: remote is not configured in " ~ remotePath
         ~ "; agent not started.");
     return 0;
   }
@@ -124,7 +125,7 @@ int runAgent(string configFile, string basctlVersion, string[] rest) {
     validateRemoteConf(remote, remotePath);
     ctx = agentContext(parseServerXmlFile(configFile), remote, configFile, basctlVersion, false);
   } catch (Exception e) {
-    stderr.writeln("basctl agent: " ~ e.msg);
+    stderr.writeln("basagent: " ~ e.msg);
     return 1;
   }
   writeln("channel: reporting to " ~ ctx.endpoint);
@@ -132,21 +133,21 @@ int runAgent(string configFile, string basctlVersion, string[] rest) {
   return runApplication(null);
 }
 
-/** `basctl report [server.xml]`：连一次、发两份上报、断开。 */
+/** `basagent report [server.xml]`：连一次、发两份上报、断开。 */
 int runReport(string configFile, string basctlVersion, string[] rest) {
   if (rest.length) {
     stderr.writeln("Unknown option: " ~ rest[0]);
     return 1;
   }
   if (!exists(configFile)) {
-    stderr.writeln("basctl report: cannot find config file " ~ configFile);
+    stderr.writeln("basagent report: cannot find config file " ~ configFile);
     return 1;
   }
   AgentContext ctx;
   try {
     ctx = agentContext(parseServerXmlFile(configFile), configFile, basctlVersion, true);
   } catch (Exception e) {
-    stderr.writeln("basctl report: " ~ e.msg);
+    stderr.writeln("basagent report: " ~ e.msg);
     return 1;
   }
   runTask({ agentLoop(ctx); });
@@ -157,33 +158,6 @@ int runReport(string configFile, string basctlVersion, string[] rest) {
     return 1;
   }
   return code;
-}
-
-/**
- * `start` / `stop` 之后顺手推一次现状：阶段 1「事件驱动」的时机，与 {@link bas.setline} 的对账同构。
- *
- * 没有完整的 `basctl.conf [remote]` 就什么都不做；推不上去只留一行提醒——通道是附带能力，不该挡住
- * 应用启停，也不该改它们的退出码。下一次启停、常驻 agent 的周期上报或手工 `basctl report`
- * 都会补上这一次。
- */
-void publishSnapshot(const Container conf, string configFile, string basctlVersion) {
-  auto remotePath = agentRemotePath(configFile);
-  auto remote = loadRemoteConf(remotePath);
-  // 没有完整的 [remote] 配置就直接返回：不配就不该在每次启停后往 stderr 喊一声
-  if (!channelEnabled(remote))
-    return;
-  AgentContext ctx;
-  try {
-    validateRemoteConf(remote, remotePath);
-    ctx = agentContext(conf, remote, configFile, basctlVersion, true);
-  } catch (Exception e) {
-    stderr.writeln("snapshot not published: " ~ e.msg);
-    return;
-  }
-  runTask({ agentLoop(ctx); });
-  runApplication(null);
-  if (!ctx.served)
-    stderr.writeln("Snapshot not published (" ~ ctx.endpoint ~ "); the instances themselves are fine.");
 }
 
 /** `[remote] url/profile/token` 齐全即启用通道；文件不存在或字段缺失都静默跳过。 */
@@ -204,7 +178,7 @@ AgentContext agentContext(const Container conf, string configFile, string basctl
   return agentContext(conf, remote, configFile, basctlVersion, once);
 }
 
-/** 已读取并校验过的远程配置；`publishSnapshot` 用它避免重复读文件。 */
+/** 已读取并校验过的远程配置。 */
 private AgentContext agentContext(const Container conf, const RemoteConfig remote, string configFile,
     string basctlVersion, bool once) {
   return AgentContext(agentUrl(agentChannelUrl(remote)), bearerCredential(remote), configFile, hostName(),
@@ -302,6 +276,34 @@ private void sendReports(const AgentContext ctx, scope WebSocket ws) {
   ws.send(reportMessage("report:bas", basReport(ctx.basHome, container)));
 }
 
+/**
+ * 远程 start/restart 前拉一次配置：配置拉不下来就不执行动作，避免拿旧拓扑冒充当前意图。
+ * `stop` 不走这里——停机必须按当前运行信息完成，不能被一次配置更新挡住。
+ */
+private bool refreshBeforeService(ref AgentContext ctx) {
+  auto remotePath = agentRemotePath(ctx.configFile);
+  try {
+    auto remote = loadRemoteConf(remotePath);
+    validateRemoteConf(remote, remotePath);
+  } catch (Exception e) {
+    logWarn("channel: service postponed, remote config is not usable: %s", e.msg);
+    return false;
+  }
+
+  auto basHome = dirName(dirName(absolutePath(ctx.configFile)));
+  if (runPull([basHome]) != 0) {
+    logWarn("channel: service postponed, pull failed");
+    return false;
+  }
+  try {
+    ctx.basVersion = parseServerXmlFile(ctx.configFile).version_;
+  } catch (Exception e) {
+    logWarn("channel: service postponed, pulled server.xml is invalid: %s", e.msg);
+    return false;
+  }
+  return true;
+}
+
 /** 处理一条来自 hub 的消息：白名单分支 + 认不出就拒绝（既不执行，也不退出）。 */
 private void handle(ref AgentContext ctx, scope WebSocket ws, string text) {
   Envelope msg;
@@ -340,6 +342,12 @@ private void handle(ref AgentContext ctx, scope WebSocket ws, string text) {
       break;
     }
     auto action = msg.type["service:".length .. $];
+    if ((action == "start" || action == "restart") && !refreshBeforeService(ctx)) {
+      auto reply = resultMessage(msg.id, false, JSONValue(null), "pull-failed");
+      rememberResult(ctx, msg.id, reply);
+      ws.send(reply);
+      break;
+    }
     auto reply = serviceResult(ctx.configFile, msg.id, action, msg.body);
     rememberResult(ctx, msg.id, reply);
     ws.send(reply);

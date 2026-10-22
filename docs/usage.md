@@ -8,9 +8,10 @@
 
 ```sh
 # 源码构建（需要 ldc2 >= 1.32、dub >= 1.34）
-dub build --build=release-nobounds --compiler=ldc2     # 产物 target/basctl
+dub build -c basctl --build=release-nobounds --compiler=ldc2    # 产物 target/basctl
+dub build -c basagent --build=release-nobounds --compiler=ldc2  # 产物 target/basagent
 
-# 或者打成系统包（只安装 /usr/bin/basctl，不硬依赖 java / jstart / setline）
+# 或者打成系统包（同一个包安装 /usr/bin/basctl 与 /usr/bin/basagent）
 scripts/build_deb.sh        # Debian 系
 scripts/build_rpm.sh        # Fedora / RHEL 系
 
@@ -26,8 +27,8 @@ docker run -d --name bas -p 8080:8080 -v ~/bas-work:/var/lib/bas basctl:0.0.1
 
 ### 方式一：接入 bashub（推荐）
 
-bashub 是配置与实例的远端权威：`basctl pull` 从它拉取 `conf/server.xml`，`basctl agent` 把本机
-现状报回去，并接收日志 / 启停指令。先在 bashub 里为这台机器建好 Profile，再填写本地配置：
+bashub 是配置与实例的远端权威：`bas.sh pull` 从它拉取 `conf/server.xml`，常驻 `basagent`
+把本机现状报回去，并接收日志 / 启停指令。先在 bashub 里为这台机器建好 Profile，再填写本地配置：
 
 ```sh
 # 1. 铺控制脚本与 conf/ 目录，并生成 basctl.conf 注释模板
@@ -48,30 +49,30 @@ token = 9f8e7d6c5b4a39281706f5e4d3c2b1a0
 ```
 
 ```sh
-# 3. 拉取控制台生成的 server.xml，再自查、启动
-basctl pull /opt/bas
+# 3. 显式拉取控制台生成的 server.xml，再自查、启动
+"$BAS_HOME/bin/bas.sh" pull
 basctl doctor
 basctl start all
 basctl status
 
 # 4. 手工报一次，确认控制台能看见这台机器
-basctl report "$BAS_HOME/conf/server.xml"
+basagent report "$BAS_HOME/conf/server.xml"
 
-# 5. 后台启动常驻通道（前台调试仍可直接运行 basctl agent）
-"$BAS_HOME/bin/start-agent.sh"
+# 5. 后台启动常驻通道（前台调试可直接运行 basagent）
+"$BAS_HOME/bin/bas.sh" agent-start
 tail -f "$BAS_HOME/agent/console.out"
-"$BAS_HOME/bin/stop-agent.sh"
+"$BAS_HOME/bin/bas.sh" agent-stop
 ```
 
 把 `url` / `profile` / `token` 换成 bashub 中这台机器对应 Profile 的值：`profile` 必须是
 `org.name`，`token` 就是 `Profile.key`。三项齐全才会启用 `pull` 与汇报通道；缺项时按未接入
-处理，不影响本地 `start` / `stop`。`bin/start.sh` 只在填写了任一字段时尝试 `pull`；
-`init` 生成的空模板会直接跳过。拉取失败只告警并继续使用现有 `server.xml`。字段说明见下方
-「远程配置」，失败行为见 [channel.md](channel.md)。
+处理，不影响本地 `start` / `stop`。`bin/start.sh` / `bin/restart.sh` 只读本地配置，不会隐式
+拉取；需要更新时显式执行 `bin/bas.sh pull`。字段说明见下方「远程配置」，失败行为见
+[channel.md](channel.md)。
 
 ### 方式二：不接 bashub，单独使用
 
-只需要 `conf/server.xml`；`init` 生成的 `conf/basctl.conf` 空模板会被自动跳过：
+只需要 `conf/server.xml`；`init` 生成的空 `conf/basctl.conf` 不影响本地命令：
 
 ```sh
 basctl init /opt/bas
@@ -129,15 +130,16 @@ setline 与 bashub 通道互不依赖，配置、部署与安全边界统一见 
 | `basctl setline --sync` | 同上（显式写法，便于脚本与记忆）；只推一次，推完即退出，没有常驻模式——路由变化的时机就是实例的启停 |
 | `basctl make <type> [options]` | 容器入口（creator）：把 jstart 的 `[engine] init` 协议翻译成容器启动命令 |
 | `basctl firewall [workdir]` | 按配置交互式配置 firewalld 端口 |
-| `basctl pull [--file=<basctl.conf>] [workdir]` | 按 `conf/basctl.conf` 的 `[remote]` 拉取 `conf/server.xml`：地址为 `<url>/api/bashub/config/<profile>/server`，请求用 `Authorization: Bearer <profile>:<token>`；旧配置备份为 `server_old.xml`。未配置 `[remote]` 时告警并以 0 退出，配置无效或下载失败时非 0 |
-| `basctl report [server.xml]` | 连一次控制台（bashub）报一次主机与实例现状后退出；地址与凭证都取同目录 `basctl.conf` 的 `[remote]`，报上去了退出码才是 0。见 [channel.md](channel.md) |
-| `basctl agent [server.xml]` | 常驻：连上控制台后周期上报、回保活、执行固定指令（取日志 / 启停实例），断线自动重连；`start` / `stop` 之后也会顺带报一次 |
+| `bas.sh pull` | 按 `conf/basctl.conf` 的 `[remote]` 拉取 `conf/server.xml`（底层调用 `basagent pull`）：地址为 `<url>/api/bashub/config/<profile>/server`，请求用 `Authorization: Bearer <profile>:<token>`；旧配置备份为 `server_old.xml`。未配置 `[remote]` 时告警并以 0 退出，配置无效或下载失败时非 0 |
+| `basagent report [server.xml]` | 连一次控制台（bashub）报一次主机与实例现状后退出；地址与凭证都取同目录 `basctl.conf` 的 `[remote]`，报上去了退出码才是 0。见 [channel.md](channel.md) |
+| `basagent [server.xml]` | 常驻：连上控制台后周期上报、回保活、执行固定指令（取日志 / 启停实例），断线自动重连；远程 `service:start` / `service:restart` 执行前会先拉取一次配置，`stop` 不拉取 |
+| `bas.sh agent-start` / `bas.sh agent-stop` | 在后台启动 / 停止常驻 agent；PID 与日志分别在 `agent/agent.pid`、`agent/console.out` |
 | `basctl doctor [server.xml]` | 检查 `java`（必需）、`jstart`（可选提示），以及启用 setline 时管理口通不通；必需项缺失时退出码非 0，见 [doctor.md](doctor.md) |
 
 ## 组件目录初始化
 
-`basctl init [workdir]` 把控制脚本（`env.sh`、`bas.sh`、`start.sh`、`stop.sh`、`restart.sh`、
-`start-agent.sh`、`stop-agent.sh`）铺到 `<workdir>/bin` 并建好 `conf/`，用于从零搭建一个
+`basctl init [workdir]` 把控制脚本（`env.sh`、`bas.sh`、`start.sh`、`stop.sh`、`restart.sh`）
+铺到 `<workdir>/bin` 并建好 `conf/`，用于从零搭建一个
 bas 组件目录。agent 的 PID 写在 `<workdir>/agent/agent.pid`，输出追加到
 `<workdir>/agent/console.out`，不会落在组件目录根部。若
 `conf/basctl.conf` 不存在，还会生成一份带注释、`[remote]` 三项留空的模板，权限为 `0600`。
@@ -166,13 +168,12 @@ basctl init --dry-run /opt/bas # 只打印将会写入的文件
 
 - `pull` 请求 `<url>/api/bashub/config/<profile>/server`，并发送
   `Authorization: Bearer <profile>:<token>`。token 不对返回 401，Profile 不存在返回 404。
-- `report` / `agent` 使用同一组地址与 token：拼出
+- `basagent report` / 常驻 agent 使用同一组地址与 token：拼出
   `<url>/api/bashub/monitor/agents/<profile>/channel`，再把 `http(s)` 换成 `ws(s)` 建立出站
   WebSocket。
-- `start.sh` / `restart.sh` / `start-agent.sh` 在 `conf/basctl.conf` **填写了任一字段**时才先尝试一次 `pull`；
-  `init` 生成的空模板直接跳过，不会在每次启动时告警。拉取失败只打印警告，并继续用现有
-  `conf/server.xml`；`restart.sh` 的拉取在 resolve / stop / start 之前完成。远端不可用不会
-  让改配置失败挡住已安装版本的启动。
+- `start.sh` / `restart.sh` **不会**隐式拉取，只读当前 `conf/server.xml`。需要远端更新时显式执行
+  `bin/bas.sh pull`；远程 `service:start` / `service:restart` 由 agent 在动作前拉取一次，拉取失败
+  则动作失败；`service:stop` 始终按当前运行信息停机，不会被拉取挡住。
 - `server.xml` 里仍可写 `${bas_remote_url}` / `${bas_remote_token}`，解析时会用
   `basctl.conf` 的 `remote.url` / `remote.token` 展开，而不是读取环境变量。SNAPSHOT
   下载另有自己的 `token`：bashub 会把 Profile 的 micdn `<auth download-key>` 写入
@@ -207,7 +208,7 @@ basctl run --engine=tomcat-11.0.25 --print  /repo/app.war   # 只打印将要执
 ### 拉配置与开防火墙
 
 ```sh
-basctl pull /opt/bas              # 读取 /opt/bas/conf/basctl.conf
+/opt/bas/bin/bas.sh pull          # 读取 /opt/bas/conf/basctl.conf
 basctl firewall /opt/bas          # 交互式地放行 server.xml 里的端口
 ```
 
@@ -219,6 +220,7 @@ basctl firewall /opt/bas          # 交互式地放行 server.xml 里的端口
 | `JAVA_HOME` | `doctor`、creator 写出的启动命令 | `$JAVA_HOME/bin/java` 优先于 `PATH` 上的 `java` |
 | `beangle_jstart` | 用 jstart 的命令 | jstart 可执行文件路径，缺省按 `PATH` 找 `jstart` |
 | `beangle_basctl` | jstart 回调 creator 时 | basctl 可执行文件路径；缺省用自身（`/proc/self/exe`），debug 构建或改名时可用它指定 |
+| `beangle_basagent` | `bas.sh pull` / `agent-start` | basagent 可执行文件路径，缺省按 `PATH` 找 `basagent` |
 | `M2_REPO` / `M2_REMOTE_REPO` | `run`（`--local` / `--remote` 的缺省值） | 本地 / 远端构件仓库 |
 
 ## 排错

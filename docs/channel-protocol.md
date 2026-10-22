@@ -1,6 +1,6 @@
 # 控制通道协议（草案）
 
-basctl 与 bashub 之间那条 WebSocket 连接上说什么、怎么说。**本文是协议的唯一权威**：两侧各自
+basagent 与 bashub 之间那条 WebSocket 连接上说什么、怎么说。**本文是协议的唯一权威**：两侧各自
 实现，改协议先改本文，再同步两侧代码与测试，但读的都是本文这张表。
 
 设计原则一句话：**原语封闭，字段开放。**
@@ -18,7 +18,7 @@ basctl 与 bashub 之间那条 WebSocket 连接上说什么、怎么说。**本�
 | `{remote.url}` | `conf/basctl.conf` 的 `[remote] url`，如 `https://hub.example.com` 或 `https://hub.example.com/bas/hub`；连接时把 `http` / `https` 换成 `ws` / `wss` |
 | 凭证 | `Authorization: Bearer <profile>:<[remote] token>`（握手头），token 取值是 bashub 的 `Profile.key` |
 
-- **谁拨号**：basctl 主动出站。生产机多在 NAT 后面，开入站口要申请、要另配一套鉴权；出站只要
+- **谁拨号**：basagent 主动出站。生产机多在 NAT 后面，开入站口要申请、要另配一套鉴权；出站只要
   机器能访问控制台。启用开关、地址与 token 都来自同目录 `conf/basctl.conf` 的 `[remote]`；
   三项齐全才拨号，没有该文件或字段不完整就不发任何外连，也不读取环境变量。
 - **鉴权在握手，不在首帧**：凭证随 `pull` 通道下发，换掉即吊销；未通过鉴权的连接在握手阶段就被
@@ -48,7 +48,7 @@ basctl 与 bashub 之间那条 WebSocket 连接上说什么、怎么说。**本�
 
 | 原语 | 类别 | body |
 |---|---|---|
-| `hello` | 通知 | `{host, basctl, basHome, bas, supports[]}`：连上后的第一条，见下「能力协商」 |
+| `hello` | 通知 | `{host, basctl, basHome, bas, supports[]}`：连上后的第一条，见下「能力协商」（`basctl` 字段沿用原协议名，值是同包的发行版本） |
 | `report:os` | 通知 | `{os:{name,kernel,arch}, cpu:{cores,load1,load5,load15}, mem:{total,available}, disk:[{mount,total,available}]}` |
 | `report:bas` | 通知 | `{instances:[...], declared:[...]}`：`instances` 是活着的实例，每项与 `server.info` 的 `[server]` 同构（`id/pid/engine/http.port/started` + `webapps[]`）；`declared` 是本机 `server.xml` 声明的可操作实例（`id/engine/httpPort?/webapps[]`） |
 | `pong` | 通知 | `{}`：保活应答 |
@@ -60,7 +60,7 @@ basctl 与 bashub 之间那条 WebSocket 连接上说什么、怎么说。**本�
 - `declared` 与 `instances` 分开：前者是配置声明（用于停止后仍能启动），后者是运行事实；控制台按
   `id` 合并，未出现在 `instances` 的 `declared` 项按“已停止”渲染。
 - **`report:os` 与 `report:bas` 都是整份替换语义**：谁报的就覆盖谁，天然幂等，hub 不必关心顺序；
-  也因此两者可以各有节拍——OS 指标按周期（秒级），`report:bas` 按事件（`start` / `stop` 之后）
+  也因此两者可以各有节拍——OS 指标按周期（秒级），`report:bas` 按远程动作完成后的立即重报
   加低频兜底——互不牵连，这正是把它们拆成两个原语的理由。
 - 缺的字段就是「本机取不到」（比如 Windows 开发机上没有 `/proc`），**不伪造**；控制台按「不可用」
   渲染。
@@ -86,6 +86,9 @@ basctl 与 bashub 之间那条 WebSocket 连接上说什么、怎么说。**本�
 - `service:*` 的实例名只能是 `server.xml` 里本机声明的 `farm.server`；动作走 basctl 内部的
   start / stop 分支，不拼 shell 命令。动作完成后 agent 还会重发一次 `report:bas`，控制台不必等
   下一轮周期上报才看到新状态。
+- `service:start` / `service:restart` 执行前，agent 先按 `[remote]` 拉取一次 `server.xml`；拉取或
+  新配置解析失败时返回 `result{ok:false, error:"pull-failed"}`，不执行动作。`service:stop` 不拉取，
+  始终按当前运行信息停机。
 - 老 agent 不申报 `service:*` 时，hub 不下发；万一收到，agent 仍按「不认识」回
   `result{ok:false, error:"unsupported:<type>"}`。**改已有原语的语义不允许，改成这一套名字也不行**。
 
@@ -137,11 +140,11 @@ agent 是常驻进程，**任何一条消息都不许让它退出或断连**（�
 
 | 参数 | 取值 | 在哪 |
 |---|---|---|
-| `report:os` / `report:bas` 周期 | 30s | basctl `bas.agent.reportInterval`；hub 的 `report:now` 可随时插一次 |
+| `report:os` / `report:bas` 周期 | 30s | basagent `bas.agent.reportInterval`；hub 的 `report:now` 可随时插一次 |
 | 保活 `ping` | hub 每 30s | bashub `AgentSocketInitializer.HeartbeatInterval` |
-| agent 沉默超时 | 90s | basctl `bas.agent.silentTimeout`（超了重连） |
-| 断线重连 | 10s | basctl `bas.agent.reconnectDelay` |
-| 拨号超时 | 20s | basctl `bas.agent.connectTimeout`（`start` / `stop` 之后那一次不能久等） |
+| agent 沉默超时 | 90s | basagent `bas.agent.silentTimeout`（超了重连） |
+| 断线重连 | 10s | basagent `bas.agent.reconnectDelay` |
+| 拨号超时 | 20s | basagent `bas.agent.connectTimeout`（`report` 与重连都不能久等） |
 
 **不做成参数**：这几条都是「不合适就改代码」的常数，多一个旋钮就多一处漂移。
 

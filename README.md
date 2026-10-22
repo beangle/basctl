@@ -1,6 +1,7 @@
 # basctl
 
-`basctl` 是 Beangle Bas Server 的控制面命令行工具，用 D 语言实现。
+`basctl` 是 Beangle Bas Server 的本地控制面命令行工具，用 D 语言实现；同一仓库还构建
+`basagent`，负责显式配置拉取与出站控制通道。
 它把 `conf/server.xml` 解析成可运行的 Tomcat 实例：解析 webapp（`gav://` /
 `http(s)://` / 本地路径）、生成实例目录与 jstart launch spec，并渲染容器所需的
 `server.xml`、`web.xml`；也可按 farm 直接拉起实例，同时提供实例状态、本地代理对账与防火墙等工具。
@@ -18,7 +19,7 @@
 | [docs/engine-creator.md](docs/engine-creator.md) | 容器入口（creator）：jstart `[engine] init` 协议 |
 | [docs/doctor.md](docs/doctor.md) | 环境自检：`java`（必需）/ `jstart`（可选提示）/ setline 管理口 |
 | [docs/container.md](docs/container.md) | 容器化「一机器一出口」：镜像内容、构建、运行、信号 |
-| [docs/channel.md](docs/channel.md) | 汇报通道（basctl → bashub）：怎么启用、`report` / `agent` 两条命令、上报什么、失败怎么办 |
+| [docs/channel.md](docs/channel.md) | 汇报通道（basagent → bashub）：怎么启用、`report` / 常驻 agent、上报什么、失败怎么办 |
 | [docs/channel-protocol.md](docs/channel-protocol.md) | 控制通道协议：端点与鉴权、消息信封、固定原语、节拍、未知消息的处理与扩展方式 |
 | [docs/roadmap.md](docs/roadmap.md) | 待定项与下一步：R1 与 bashub 的汇报/指令通道（阶段 3 已落地、阶段 4 启停已落地、审计待补）、R2 漂移自动收敛、R3 生产侧拓扑 agent |
 | [scripts/README.md](scripts/README.md) | deb / rpm 打包 |
@@ -51,22 +52,24 @@ IDE 补全与校验（见 `server.xml` 样例）。
 ## 构建与测试
 
 - `ldc2` >= 1.32，`dub` >= 1.34
-- 构建与运行需要 OpenSSL 3.x（`wss://` 控制通道使用 `vibe-stream:tls/openssl-3.0`）
+- `basagent` 构建与运行需要 OpenSSL 3.x（`wss://` 控制通道使用 `vibe-stream:tls/openssl-3.0`）；
+  `basctl` 不链接 OpenSSL 或 vibe
 - `make` / `resolve` / `start` / `run` 需要本机有 `jstart`（负责构件的解析、下载与启动）；
   `basctl doctor` 会显示它是否就位，但在 doctor 中只是可选提示，缺失不影响退出码
   （见 [docs/doctor.md](docs/doctor.md)）
 
 ```sh
-dub build --build=release-nobounds --compiler=ldc2
+dub build -c basctl --build=release-nobounds --compiler=ldc2
+dub build -c basagent --build=release-nobounds --compiler=ldc2
 dub test --compiler=ldc2
 ```
 
-产物为 `target/basctl`。单元测试集中在 `test/`（每个源模块一个 `*_test.d`），用 D 内建
+产物为 `target/basctl` 与 `target/basagent`。单元测试集中在 `test/`（每个源模块一个 `*_test.d`），用 D 内建
 `unittest` + `@("...")` 具名用例。
 
-打包成 deb / rpm（仅安装 `/usr/bin/basctl`）见 [scripts/README.md](scripts/README.md)：
+打包成 deb / rpm（同一安装包内包含 `/usr/bin/basctl` 与 `/usr/bin/basagent`）见 [scripts/README.md](scripts/README.md)：
 `scripts/build_deb.sh`（Debian 系）与 `scripts/build_rpm.sh`（Fedora/RHEL 系），版本取自
-`src/bas/main.d` 的 `basctlVersion`，与 `basctl version` 的输出一致。
+`src/bas/versioninfo.d` 的 `basctlVersion`，与 `basctl version` / `basagent version` 的输出一致。
 
 ## 许可证
 

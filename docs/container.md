@@ -41,7 +41,7 @@ setline 最贴的形态：
 |---|---|
 | 构建阶段 | `alpine:3.23` + apk 的 `ldc` / `dub` / `build-base`，在镜像内编译三份源码 |
 | 运行阶段 | `alpine:3.23` + `openjdk25-jre`（+ `tzdata`、`fontconfig`、`font-dejavu`）、`curl`、`bash`、`bzip2`、`su-exec` |
-| 二进制 | `/usr/bin/basctl`、`/usr/bin/jstart`、`/usr/bin/setline`，D 运行库收在 `/usr/lib/bas/`（`LD_LIBRARY_PATH`） |
+| 二进制 | `/usr/bin/basctl`、`/usr/bin/basagent`、`/usr/bin/jstart`、`/usr/bin/setline`，D 与 OpenSSL 运行库收在 `/usr/lib/bas/`（`LD_LIBRARY_PATH`） |
 | 样例配置 | `/opt/bas/server.xml`（挂载的 `BAS_HOME` 里没有 `conf/server.xml` 时才铺一份） |
 
 **为什么在镜像里编译，而不是搬宿主二进制**：宿主 `ldc` 产出的 `libphobos2-ldc-shared.so` 链接
@@ -69,7 +69,7 @@ class file 版本 69 发布，21 的 JVM 只认到 65，实例会在 `Bootstrap`
 三个仓库的源码由脚本收进 `target/image-context/`：basctl 用当前工作副本，jstart / setline 缺省
 取同级的 `../jstart`、`../setline` 工作副本（开发态常用，可能领先于已推送的提交），没有才
 `git clone`（`JSTART_REF` / `SETLINE_REF` 可指定分支或标签）。镜像标签取自
-`src/bas/main.d` 的 `basctlVersion`——与 deb / rpm 同源，也就是 `basctl version` 的输出。
+`src/bas/versioninfo.d` 的 `basctlVersion`——与 deb / rpm 同源，也就是 `basctl version` 的输出。
 
 构建依赖两个宿主缓存卷，脚本自动挂上：
 

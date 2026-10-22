@@ -83,12 +83,15 @@ pushd "$DESTDIR/$PKGDIR" > /dev/null
 
 mkdir -p usr/bin
 cp -f "$BASCTL_HOME/target/basctl" usr/bin/basctl
+cp -f "$BASCTL_HOME/target/basagent" usr/bin/basagent
 strip --strip-unneeded usr/bin/basctl
-chmod 0755 usr/bin/basctl
+strip --strip-unneeded usr/bin/basagent
+chmod 0755 usr/bin/basctl usr/bin/basagent
 chmod -R 0755 .
 
 # 运行时依赖：curl 负责下载（pull / war 直链）；jstart 由 make/start/resolve/run 使用，
-# 但不作为硬依赖，否则只想用 init/banner/pull 的机器装不上。
+# 但不作为硬依赖，否则只想用 init/banner/pull 的机器装不上。basagent 的 OpenSSL 3.0
+# 动态库依赖由 rpmbuild 的自动依赖生成记录。
 DEPEND="curl"
 
 cd ..
@@ -134,10 +137,11 @@ Requires: ${DEPEND}
 Provides: basctl(${ARCH}) = ${VERSION}-${REVISION}
 
 %description
-Parse conf/server.xml into runnable container instances: resolve webapps,
-generate jstart launch specs, start/stop instances, pull configs and render
-the local setline proxy config. make/start/resolve/run additionally need
-jstart on PATH.
+Basctl parses conf/server.xml into runnable container instances: resolve
+webapps, generate jstart launch specs, start/stop instances and render the
+local setline proxy config. Basagent adds explicit config pull plus the
+outbound WebSocket report/control channel. make/start/resolve/run additionally
+need jstart on PATH.
 Main designer: Duan TiHua
 
 %changelog
@@ -146,7 +150,7 @@ $(printf '%b' "$changes")
 %files
 EOF
 
-# 定位为命令而非系统服务：只安装 /usr/bin/basctl，无 systemd 单元、
+# 定位为命令而非系统服务：安装 /usr/bin/basctl 与 /usr/bin/basagent，无 systemd 单元、
 # 无 %pre/%post/%preun 服务启停脚本、无独立用户
 find "$DESTDIR/$PKGDIR" ! -type d | \
   sed 's|'"$DESTDIR"'/'"$PKGDIR"'|/|' >> basctl.spec

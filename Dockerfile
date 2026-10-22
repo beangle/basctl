@@ -39,8 +39,10 @@ COPY basctl/dub.json basctl/dub.selections.json ./basctl/
 COPY basctl/src ./basctl/src
 COPY basctl/resources ./basctl/resources
 RUN cd basctl \
-    && dub build --build=release-nobounds --compiler=ldc2 \
-    && strip --strip-unneeded target/basctl
+    && dub build -c basctl --build=release-nobounds --compiler=ldc2 \
+    && strip --strip-unneeded target/basctl \
+    && dub build -c basagent --build=release-nobounds --compiler=ldc2 \
+    && strip --strip-unneeded target/basagent
 
 COPY jstart/dub.json ./jstart/
 COPY jstart/source ./jstart/source
@@ -57,8 +59,9 @@ RUN cd setline \
 # musl：跳过 libc 与动态加载器（它们在运行镜像里已有且必须配套），其余 .so
 # （libphobos2-ldc-shared / libdruntime-ldc-shared 等）收进 /pack。
 RUN mkdir -p /pack; \
-    for bin in basctl jstart setline; do \
-      for f in $(ldd /build/$bin/target/$bin | awk '/=>/ {print $3}' | sort -u); do \
+    for binary in /build/basctl/target/basctl /build/basctl/target/basagent \
+        /build/jstart/target/jstart /build/setline/target/setline; do \
+      for f in $(ldd "$binary" | awk '/=>/ {print $3}' | sort -u); do \
         [ -f "$f" ] || continue; \
         b=$(basename "$f"); \
         case "$b" in \
@@ -104,6 +107,7 @@ RUN set -eux; \
 
 COPY --from=builder /pack/ /usr/lib/bas/
 COPY --from=builder /build/basctl/target/basctl /usr/bin/basctl
+COPY --from=builder /build/basctl/target/basagent /usr/bin/basagent
 COPY --from=builder /build/jstart/target/jstart /usr/bin/jstart
 COPY --from=builder /build/setline/target/setline /usr/bin/setline
 
@@ -115,7 +119,7 @@ ENV LD_LIBRARY_PATH=/usr/lib/bas \
 COPY container/entrypoint.sh /entrypoint.sh
 COPY container/server.xml /opt/bas/server.xml
 
-RUN chmod 755 /usr/bin/basctl /usr/bin/jstart /usr/bin/setline /entrypoint.sh \
+RUN chmod 755 /usr/bin/basctl /usr/bin/basagent /usr/bin/jstart /usr/bin/setline /entrypoint.sh \
     && chown -R bas:beangle /var/lib/bas /opt/bas
 
 WORKDIR /var/lib/bas

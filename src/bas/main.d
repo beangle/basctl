@@ -16,15 +16,17 @@
 
 /**
  * basctl 命令行入口：`version` / `banner` / `status` / `logs` / `init` / `make` / `resolve` /
- * `start` / `stop` / `run` / `setline` / `doctor` / `firewall` / `pull` / `report` / `agent`。
+ * `start` / `stop` / `run` / `setline` / `doctor` / `firewall`。
+ *
+ * 只处理本地配置与进程；远端通道、`pull` 与 `report` 属于 `basagent`。
  *
  * `start` / `stop` 在 `server.xml` 配了 `<setline>` 时还会自动对账路由（见 bas.setlineproc），
  * `--no-setline` 可临时跳过。
  */
 module bas.main;
 
-import bas.agent : runAgent, runReport;
 import bas.banner;
+import bas.cli : resolveBasHome, takeConfigFile;
 import bas.config;
 import bas.doctor : runDoctor;
 import bas.embed : defaultBasVersion, runEmbedded;
@@ -34,7 +36,6 @@ import bas.firewall;
 import bas.init;
 import bas.logs : runLogs;
 import bas.net;
-import bas.pull;
 import bas.shellenv : readContainer;
 import bas.resolver;
 import bas.serverinfo : ServerInfo, liveInstances, readInstanceInfo;
@@ -42,18 +43,15 @@ import bas.serverstatus;
 import bas.setline : SetlineConflict, conflictLines, parseRouteTable, routeDriftLines, runningPlan;
 import bas.setlineproc : RouteRead, fetchRouteTable, syncRoutesToSetline;
 import bas.starter;
+import bas.versioninfo : basctlVersion;
 
 import std.algorithm : canFind, sort;
 import std.conv : to;
 import std.file : SpanMode, dirEntries, exists, isDir, mkdirRecurse, readText, write;
 import std.format : format;
 import std.path : absolutePath, baseName, buildPath, dirName;
-import std.process : environment;
 import std.stdio : stderr, stdout, writeln;
-import std.string : endsWith, join, leftJustify, startsWith, strip;
-
-/** CLI 自身版本，随发布更新。 */
-enum basctlVersion = "0.0.1";
+import std.string : join, leftJustify, startsWith, strip;
 
 version (unittest) {
 } else {
@@ -109,16 +107,6 @@ version (unittest) {
     }
     case "firewall":
       return runFirewall(args[1 .. $]);
-    case "pull":
-      return runPull(args[2 .. $]);
-    case "report": {
-      auto rest = args[2 .. $];
-      return runReport(takeConfigFile(rest), basctlVersion, rest);
-    }
-    case "agent": {
-      auto rest = args[2 .. $];
-      return runAgent(takeConfigFile(rest), basctlVersion, rest);
-    }
     case "help", "-h", "--help":
       printUsage();
       return 0;
@@ -163,10 +151,6 @@ void printUsage() {
   stderr.writeln("  doctor [server.xml]           Check java (required), jstart (optional) and setline");
   stderr.writeln("                                (setline only when <setline> is configured)");
   stderr.writeln("  firewall [workdir]            Configure firewalld ports from conf/server.xml");
-  stderr.writeln("  pull [--file=<basctl.conf>] [workdir]  Fetch conf/server.xml from the control endpoint");
-  stderr.writeln("  report [server.xml]           Push one host/instance snapshot to the hub and exit");
-  stderr.writeln("  agent [server.xml]            Stay connected to the hub: periodic reports, log reads,");
-  stderr.writeln("                                and the fixed service actions (see docs/channel-protocol.md)");
 }
 
 /**
@@ -378,30 +362,6 @@ private void setlineUsage() {
   stderr.writeln("  setline at all, so this command has nothing to push.");
   stderr.writeln("  Routes go under the namespace declared by <setline hostname=\"...\"> (default");
   stderr.writeln("  \"*\" for any Host); give each BAS_HOME its own hostname when sharing one setline.");
-}
-
-/** `BAS_HOME` 有值时取其指向目录，否则取当前工作目录。 */
-string resolveBasHome() @trusted {
-  import std.file : getcwd;
-
-  auto fromEnv = strip(environment.get("BAS_HOME", ""));
-  if (fromEnv.length)
-    return absolutePath(fromEnv);
-  return absolutePath(getcwd());
-}
-
-/**
- * 取命令行里的配置文件：第一个位置参数以 `.xml` 结尾即视为 `server.xml`（`<pattern>` 是
- * farm 名 / `farm.server` / `all`，不会以 `.xml` 结尾），否则用 `$BAS_HOME/conf/server.xml`。
- * 命中的参数会从 `rest` 摘掉，剩下的就是 `<pattern>` 与选项，所以选项写在前面或后面都行。
- */
-private string takeConfigFile(ref string[] rest) {
-  if (rest.length && !rest[0].startsWith("-") && rest[0].endsWith(".xml")) {
-    auto value = rest[0];
-    rest = rest[1 .. $];
-    return value;
-  }
-  return buildPath(resolveBasHome(), "conf", "server.xml");
 }
 
 /**

@@ -49,11 +49,13 @@ rm -rf "$PKGDIR"
 mkdir -p "$PKGDIR"
 pushd "$PKGDIR" > /dev/null
 
-# 定位为命令而非系统服务：仅安装 /usr/bin/basctl，无 systemd 单元、无默认配置
+# 定位为命令而非系统服务：安装 /usr/bin/basctl 与 /usr/bin/basagent，无 systemd 单元、无默认配置
 mkdir -p usr/bin
 cp -f "$BASCTL_HOME/target/basctl" usr/bin/basctl
+cp -f "$BASCTL_HOME/target/basagent" usr/bin/basagent
 strip --strip-unneeded usr/bin/basctl
-chmod 0755 usr/bin/basctl
+strip --strip-unneeded usr/bin/basagent
+chmod 0755 usr/bin/basctl usr/bin/basagent
 
 # DEBIAN 控制文件
 mkdir -p DEBIAN
@@ -68,11 +70,12 @@ Architecture: ${ARCH}
 Maintainer: ${MAINTAINER}
 Homepage: https://github.com/beangle/basctl
 Depends: curl
-Description: Beangle Bas Server control-plane CLI
- Parse conf/server.xml into runnable container instances: resolve webapps,
- generate jstart launch specs, start/stop instances, pull configs and render
- the local setline proxy config. make/start/resolve/run additionally need
- jstart on PATH.
+Description: Beangle Bas Server control-plane CLI and agent
+ Basctl parses conf/server.xml into runnable container instances: resolve
+ webapps, generate jstart launch specs, start/stop instances and render the
+ local setline proxy config. Basagent adds explicit config pull plus the
+ outbound WebSocket report/control channel. make/start/resolve/run additionally
+ need jstart on PATH.
  .
  Main designer: Duan TiHua
 EOF

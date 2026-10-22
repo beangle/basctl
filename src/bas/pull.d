@@ -74,13 +74,13 @@ int runPull(string[] args) {
     if (!remote.complete) {
       if (ifConfigured && !remote.configured)
         return 0;
-      stderr.writeln("basctl pull: warning: remote is not configured in " ~ confFile
+      stderr.writeln("basagent pull: warning: remote is not configured in " ~ confFile
           ~ "; server.xml was not refreshed.");
       return 0;
     }
     validateRemoteConf(remote, confFile);
   } catch (Exception e) {
-    stderr.writeln("basctl pull: " ~ e.msg);
+    stderr.writeln("basagent pull: " ~ e.msg);
     return 1;
   }
 
@@ -107,11 +107,11 @@ int runPull(string[] args) {
 
 /** 打印 `pull` 用法到 stderr。 */
 void pullUsage() {
-  stderr.writeln("Usage: basctl pull [--file=<basctl.conf>] [--if-configured] [workdir]");
+  stderr.writeln("Usage: basagent pull [--file=<basctl.conf>] [--if-configured] [workdir]");
   stderr.writeln("  Fetch <remote.url>/api/bashub/config/<remote.profile>/server into <workdir>/conf,");
   stderr.writeln("  authenticating with Bearer <remote.profile>:<remote.token> from");
   stderr.writeln("  <workdir>/conf/basctl.conf. The old");
   stderr.writeln("  file is backed up as server_old.xml. <workdir> defaults to $BAS_HOME (or the");
   stderr.writeln("  current directory). --if-configured exits silently when all remote fields");
-  stderr.writeln("  are empty (used by start.sh / restart.sh / start-agent.sh with the generated template).");
+  stderr.writeln("  are empty (the generated template uses this mode).");
 }

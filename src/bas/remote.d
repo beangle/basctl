@@ -146,7 +146,7 @@ string hubApiRoot(const RemoteConfig conf) {
   return remoteBaseUrl(conf.url) ~ bashubApiPath;
 }
 
-/** basctl `pull` 下载 server.xml 的地址。 */
+/** `basagent pull` 下载 server.xml 的地址。 */
 string serverConfigUrl(const RemoteConfig conf) {
   return hubApiRoot(conf) ~ "/config/" ~ conf.profile ~ "/server";
 }

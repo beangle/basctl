@@ -24,9 +24,8 @@
  */
 module test.agent_test;
 
-import bas.agent : channelEnabled, logReadResult, publishSnapshot, runAgent, runReport, serviceResult;
+import bas.agent : channelEnabled, logReadResult, runAgent, runReport, serviceResult;
 import bas.channel : Envelope, parseEnvelope;
-import bas.config : parseServerXmlFile;
 import bas.remote : loadRemoteConf;
 
 import core.thread : Thread;
@@ -88,25 +87,6 @@ import std.uuid : randomUUID;
   assert(("declared" in bas.body.object) !is null, hub.messages[2]);
 }
 
-@("publishSnapshot pushes the same snapshot as report when start/stop finish") unittest {
-  auto home = buildPath(tempDir(), "basctl-agent-publish");
-  mkdirRecurse(buildPath(home, "conf"));
-  auto configFile = buildPath(home, "conf", "server.xml");
-  auto hub = new FakeHub();
-  write(configFile, "<bas version=\"0.14.0\"/>");
-  write(buildPath(home, "conf", "basctl.conf"), "[remote]\nurl = http://127.0.0.1:"
-      ~ hub.port.to!string ~ "\nprofile = demo.prod\ntoken = k1\n");
-
-  auto serving = new Thread({ hub.serve(); });
-  serving.start();
-  publishSnapshot(parseServerXmlFile(configFile), configFile, "0.0.0-test");
-  serving.join();
-
-  assert(hub.messages.length == 3, hub.messages.join("\n"));
-  assert(parseEnvelope(hub.messages[0]).type == "hello", hub.messages[0]);
-  assert(parseEnvelope(hub.messages[2]).type == "report:bas", hub.messages[2]);
-}
-
 @("channel is enabled only by a complete basctl.conf [remote] section") unittest {
   auto home = buildPath(tempDir(), "basctl-agent-switch-" ~ randomUUID().toString);
   mkdirRecurse(buildPath(home, "conf"));
@@ -114,9 +94,6 @@ import std.uuid : randomUUID;
   auto remoteFile = buildPath(home, "conf", "basctl.conf");
   write(configFile, "<bas version=\"0.14.0\"/>");
   assert(!channelEnabled(loadRemoteConf(remoteFile)), "没有 basctl.conf 就不该拨号");
-  // 没有完整 [remote] 时 publishSnapshot 什么都不做：连不上也谈不上，直接返回
-  publishSnapshot(parseServerXmlFile(configFile), configFile, "0.0.0-test");
-
   write(remoteFile, "[remote]\nurl = http://127.0.0.1:8080\nprofile = demo\n");
   assert(!channelEnabled(loadRemoteConf(remoteFile)), "缺 token 不启用");
 

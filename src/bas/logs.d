@@ -20,7 +20,7 @@
  * 两处消费者共用本模块，所以「日志在哪」「怎么数行」只写一遍：
  *
  * - `basctl logs <实例> [-n <行数>] [-f]`（人看的本地命令）；
- * - 通道的 `log:read`（控制台经 basctl 取日志，见 {@link bas.agent.logReadResult}）。
+ * - 通道的 `log:read`（控制台经 basagent 取日志，见 {@link bas.agent.logReadResult}）。
  *
  * 实例名在这里当**目录名**用，不是路径：{@link plainName} 挡掉 `../` 这类输入，否则控制台就能借
  * 日志接口读机器上任何文件。读窗口按行数上限截断（{@link maxLogLines}），一次请求不该把内存撑爆。

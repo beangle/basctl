@@ -6,10 +6,10 @@
 basctl_package_version() {
   local root="${BASCTL_HOME:?BASCTL_HOME not set}"
   local ver
-  ver="$(sed -n 's/^enum basctlVersion = "\([^"]*\)";.*$/\1/p' "$root/src/bas/main.d" | head -n 1)"
+  ver="$(sed -n 's/^enum basctlVersion = "\([^"]*\)";.*$/\1/p' "$root/src/bas/versioninfo.d" | head -n 1)"
   if [ -z "$ver" ]; then
     echo "==========================================================" >&2
-    echo "Could not determine version from src/bas/main.d" >&2
+    echo "Could not determine version from src/bas/versioninfo.d" >&2
     echo '（期望找到：enum basctlVersion = "x.y.z";）' >&2
     echo "==========================================================" >&2
     exit 1
@@ -27,6 +27,8 @@ basctl_prepare_release_build() {
   echo "basctl: removing target/ ..."
   rm -rf "$root/target"
   mkdir -p "$root/target"
-  echo "basctl: dub build --build=release-nobounds --compiler=ldc2"
-  dub build --build=release-nobounds --compiler=ldc2
+  echo "basctl: dub build -c basctl --build=release-nobounds --compiler=ldc2"
+  dub build -c basctl --build=release-nobounds --compiler=ldc2
+  echo "basagent: dub build -c basagent --build=release-nobounds --compiler=ldc2"
+  dub build -c basagent --build=release-nobounds --compiler=ldc2
 }

@@ -12,30 +12,57 @@
     "ldc": ">=1.32.0"
   },
   "dependencies": {
-    "dxml": "~>0.4.5",
-    "vibe-inet": "~>1.3.0",
-    "vibe-http": "~>1.5.0",
-    "vibe-stream:tls": "~>1.4.0"
+    "dxml": "~>0.4.5"
   },
   "configurations": [
     {
-      "name": "executable",
+      "name": "basctl",
       "targetType": "executable",
       "targetPath": "target",
       "targetName": "basctl",
+      "mainSourceFile": "src/bas/main.d",
+      "excludedSourceFiles": [
+        "src/bas/agent.d",
+        "src/bas/agentmain.d",
+        "src/bas/channel.d",
+        "src/bas/hub.d",
+        "src/bas/pull.d",
+        "src/bas/report.d"
+      ],
       "versions": ["EventCoreSilenceLeakWarnings", "VibeDisableCommandLineParsing"]
+    },
+    {
+      "name": "basagent",
+      "targetType": "executable",
+      "targetPath": "target",
+      "targetName": "basagent",
+      "mainSourceFile": "src/bas/agentmain.d",
+      "excludedSourceFiles": ["src/bas/main.d"],
+      "versions": ["EventCoreSilenceLeakWarnings", "VibeDisableCommandLineParsing"],
+      "dependencies": {
+        "vibe-inet": "~>1.3.0",
+        "vibe-http": "~>1.5.0",
+        "vibe-stream:tls": "~>1.4.0"
+      },
+      "subConfigurations": {
+        "vibe-stream:tls": "openssl-3.0"
+      }
     },
     {
       "name": "unittest",
       "targetPath": "target",
       "sourcePaths": ["src", "test"],
+      "sourceFiles": ["src/bas/main.d", "src/bas/agentmain.d"],
       "importPaths": ["src", "test"],
       "dependencies": {
-        "silly": "~>1.1.1"
+        "silly": "~>1.1.1",
+        "vibe-inet": "~>1.3.0",
+        "vibe-http": "~>1.5.0",
+        "vibe-stream:tls": "~>1.4.0"
+      },
+      "subConfigurations": {
+        "vibe-stream:tls": "openssl-3.0"
       }
     }
-  ],
-  "subConfigurations": {
-    "vibe-stream:tls": "openssl-3.0"
-  }
+  ]
 }

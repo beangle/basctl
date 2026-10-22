@@ -24,7 +24,7 @@ BASCTL_HOME="$ROOT"
 export BASCTL_HOME
 . "$ROOT/scripts/build_common.sh"
 
-# 标签与 deb / rpm 同源：src/bas/main.d 的 basctlVersion，也就是 `basctl version` 的输出。
+# 标签与 deb / rpm 同源：src/bas/versioninfo.d 的 basctlVersion，也就是 `basctl version` 的输出。
 VERSION="$(basctl_package_version)"
 IMAGE="${IMAGE:-basctl}"
 CTX="$ROOT/target/image-context"
@@ -51,7 +51,7 @@ clone_sibling() { # clone_sibling <仓库地址> <分支或标签> <目标目录
   fi
 }
 
-echo "build_image: version $VERSION (from src/bas/main.d)"
+echo "build_image: version $VERSION (from src/bas/versioninfo.d)"
 echo "build_image: staging context $CTX"
 rm -rf "$CTX"
 mkdir -p "$CTX"

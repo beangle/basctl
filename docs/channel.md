@@ -1,6 +1,6 @@
-# 汇报通道（basctl → bashub）
+# 汇报通道（basagent → bashub）
 
-basctl 主动拨一条出站 WebSocket 到控制台（bashub），把**这台机器的现状**报上去，并接收控制台下发的
+basagent 主动拨一条出站 WebSocket 到控制台（bashub），把**这台机器的现状**报上去，并接收控制台下发的
 固定指令。现状 = 主机家底（CPU / 内存 / 磁盘）+ 本机活着的 bas 实例；指令 = 立即上报、取日志区间、
 启动 / 停止 / 重启实例。
 
@@ -20,7 +20,7 @@ profile = openurp.prod
 token = 9f8e7d6c5b4a39281706f5e4d3c2b1a0
 ```
 
-- `[remote] url` / `profile` / `token` 三项齐全才启用；`basctl` 拼出
+- `[remote] url` / `profile` / `token` 三项齐全才启用；`basagent` 拼出
   `https://hub.example.com/api/bashub/monitor/agents/<profile>/channel` 拨号，`http(s)` 自动
   换成 `ws(s)`。
 - `token` 同时用于 `pull` 和通道握手，取值是 bashub 的 `Profile.key`。在 bashub 的配置详情里可以查看，
@@ -29,15 +29,17 @@ token = 9f8e7d6c5b4a39281706f5e4d3c2b1a0
 - `server.xml` **不再**保存通道地址或凭证；旧文件里遗留的 `<hub>` 元素会被直接忽略。
 - 不再读取 `bas_remote_url` 等环境变量。
 
-## 两条命令
+## 命令
 
 | 命令 | 做什么 | 什么时候用 |
 |---|---|---|
-| `basctl report [server.xml]` | 连一次、发 `hello` + 两份上报、断开；报上去了退出码 0 | 手工对一次账；脚本 / cron |
-| `basctl agent [server.xml]` | 常驻：连上就报，之后按 30s 周期上报、回保活、执行固定指令（读日志 / 启停实例），断线 10s 后重连；未配置 `[remote]` 时告警并以 0 退出 | 生产机上以 systemd unit 跑起来 |
+| `basagent report [server.xml]` | 连一次、发 `hello` + 两份上报、断开；报上去了退出码 0 | 手工对一次账；脚本 / cron |
+| `basagent [server.xml]` | 常驻：连上就报，之后按 30s 周期上报、回保活、执行固定指令（读日志 / 启停实例），断线 10s 后重连；未配置 `[remote]` 时告警并以 0 退出 | 生产机上由 `bin/bas.sh agent-start` 拉起 |
+| `bin/bas.sh pull` | 显式拉取一次 `conf/server.xml`（底层调用 `basagent pull`） | 需要从 bashub 更新配置时 |
 
-`start` / `stop` 之后还会**顺带报一次**（与 setline 的路由对账同构）：`[remote]` 不完整就不做，推不上去
-只留一行提醒、**不改启停的退出码**——控制台挂了不该挡住应用启停，下一次启停或常驻 agent 会补上。
+`basctl start` / `basctl stop` 与 `bin/start.sh` / `bin/restart.sh` 只做本地动作，不拉配置、
+也不顺带上报。常驻 agent 按周期上报；远程 `service:start` / `service:restart` 执行前会先拉取一次
+配置，拉取失败就返回失败而不执行动作；`service:stop` 不拉取。
 
 本地看同一个日志：`basctl logs <实例> -f`——它和 `log:read` 走**同一份读法**
 （`src/bas/logs.d`），所以控制台上看到的行号与本地 `-n` 数出来的是同一个。
@@ -54,8 +56,8 @@ token = 9f8e7d6c5b4a39281706f5e4d3c2b1a0
 
 | 现象 | 多半是 | 怎么办 |
 |---|---|---|
-| `warning: remote is not configured` | `basctl.conf` 缺字段或文件不在 `server.xml` 同目录；`agent` / `pull` 视为未启用，正常退出 | 需要通道时补全 `[remote]` 三项，见上面的样例 |
-| `no snapshot published: wss://…` | 地址不对 / 控制台不可达 / 网络不通 | 先确认 `basctl pull` 能通；地址看 `conf/basctl.conf` |
+| `warning: remote is not configured` | `basctl.conf` 缺字段或文件不在 `server.xml` 同目录；`basagent` / `pull` 视为未启用，正常退出 | 需要通道时补全 `[remote]` 三项，见上面的样例 |
+| `no snapshot published: wss://…` | 地址不对 / 控制台不可达 / 网络不通 | 先确认 `bin/bas.sh pull` 能通；地址看 `conf/basctl.conf` |
 | 常驻 agent 反复重连 | 同上，或 token 被重置过 | 更新 `basctl.conf` 的 token 后重启 agent |
 | 控制台看不到这台机器 | 通道没连上，或 profile 名不对 | 看 agent 日志的 `channel:` 行；确认路径里的 profile 与 bashub 的配置名一致 |
 
@@ -63,20 +65,16 @@ token = 9f8e7d6c5b4a39281706f5e4d3c2b1a0
 
 ```bash
 # 前台跑（调试用，Ctrl-C 退出）
-basctl agent "$BAS_HOME/conf/server.xml"
+basagent "$BAS_HOME/conf/server.xml"
 
-# 后台跑：basctl init 生成的两个脚本
-"$BAS_HOME/bin/start-agent.sh"
-"$BAS_HOME/bin/stop-agent.sh"
-
-# 等价入口
+# 后台跑：basctl init 生成的 bas.sh 子命令
 "$BAS_HOME/bin/bas.sh" agent-start
 "$BAS_HOME/bin/bas.sh" agent-stop
 ```
 
-`start-agent.sh` 会先像 `start.sh` 一样尝试刷新远端配置，然后用 `nohup` 启动 agent。
-PID 写在 `$BAS_HOME/agent/agent.pid`，日志追加到 `$BAS_HOME/agent/console.out`；重复执行
-不会启动第二份 agent，`stop-agent.sh` 只停止 PID 文件里那个 `basctl agent` 进程。
+`agent-start` 用 `nohup` 启动 `basagent`，不会自动拉取配置。PID 写在
+`$BAS_HOME/agent/agent.pid`，日志追加到 `$BAS_HOME/agent/console.out`；重复执行不会启动第二份
+agent，`agent-stop` 只停止 PID 文件里那个 `basagent` 进程。
 
 agent 只做「上报 + 固定指令」，**不做 supervisor**：实例崩了不会自动重启（这条一直不变），
 也没被超时或坏消息弄退出的风险——它宁可重连也不退出。`service:stop` / `service:restart`
@@ -91,4 +89,4 @@ agent 只做「上报 + 固定指令」，**不做 supervisor**：实例崩了�
 | 地址从哪来 | `server.xml` 的 `<setline port>` | `conf/basctl.conf` 的 `[remote]` |
 | 失败的影响 | 路由不更新，实例本身没事 | 控制台看不到现状，实例本身没事 |
 
-两者都不常驻在 basctl 里（setline 是独立进程，通道靠 `basctl agent`），互不依赖。
+两者都不常驻在 basctl 里（setline 是独立进程，通道靠 `basagent`），互不依赖。
