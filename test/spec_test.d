@@ -20,7 +20,10 @@ module test.spec_test;
 import bas.spec;
 
 import std.algorithm : canFind;
+import std.file : exists, mkdirRecurse, rmdirRecurse, tempDir, write;
+import std.path : buildPath;
 import std.string : startsWith;
+import std.uuid : randomUUID;
 
 @("renderLaunchSpec writes engine, runtime, args and one section per subapp") unittest {
   auto text = renderLaunchSpec("/srv/bas/servers", "platform.server1", "/srv/bas",
@@ -67,4 +70,30 @@ import std.string : startsWith;
   assert(engineInitCommand("tomcat").canFind(" make tomcat"));
   assert(engineInitCommand("undertow").canFind(" make undertow"));
   assert(engineInitCommand("jetty").canFind(" make jetty"));
+}
+
+@("basctlPathFor never selects basagent for engine init") unittest {
+  version (Windows) {
+    enum agentName = "basagent.exe";
+    enum basctlName = "basctl.exe";
+  } else {
+    enum agentName = "basagent";
+    enum basctlName = "basctl";
+  }
+
+  auto dir = buildPath(tempDir, "basctl-spec-" ~ randomUUID().toString());
+  mkdirRecurse(dir);
+  scope (exit) if (exists(dir)) rmdirRecurse(dir);
+
+  auto agent = buildPath(dir, agentName);
+  auto basctl = buildPath(dir, basctlName);
+  write(agent, "");
+  write(basctl, "");
+
+  assert(basctlPathFor(agent) == basctl);
+  assert(basctlPathFor(basctl) == basctl);
+
+  import std.file : remove;
+  remove(basctl);
+  assert(basctlPathFor(agent) == "basctl");
 }

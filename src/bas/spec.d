@@ -83,7 +83,7 @@ string renderLaunchSpec(string baseRoot, string instance, string workingDir, str
 }
 
 /**
- * jstart 的 `[engine] init` 命令行：调用本 basctl 的 `make <type>`。
+ * jstart 的 `[engine] init` 命令行：调用 basctl 的 `make <type>`。
  * jstart 自己完成分词，所以路径含空格时按 shell 规则加引号即可，无需 wrapper 脚本。
  */
 string engineInitCommand(string containerType = "tomcat-server") {
@@ -94,8 +94,8 @@ string engineInitCommand(string containerType = "tomcat-server") {
 enum basctlEnvVar = "beangle_basctl";
 
 /**
- * basctl 可执行文件路径：优先环境变量 {@link basctlEnvVar}，否则用 `/proc/self/exe`，
- * 最后退回 `PATH` 上的 `basctl`。
+ * basctl 可执行文件路径：优先环境变量 {@link basctlEnvVar}，否则用当前进程的可执行文件；
+ * 当前进程是 `basagent` 时改取同目录的 `basctl`，最后退回 `PATH` 上的 `basctl`。
  */
 string basctlExecutable() @trusted {
   auto fromEnv = strip(environment.get(basctlEnvVar, ""));
@@ -107,12 +107,36 @@ string basctlExecutable() @trusted {
     try {
       auto self = readLink("/proc/self/exe");
       if (self.length)
-        return self;
+        return basctlPathFor(self);
     } catch (Exception) {
       // 忽略：退回 PATH 查找
     }
   }
   return "basctl";
+}
+
+/**
+ * 从当前进程的可执行文件路径推导 basctl 路径。
+ *
+ * `basagent` 也会生成 launch spec（远端 `start` / `restart`），但 `make` 只属于 basctl；
+ * 此时优先使用与 agent 同目录安装的 basctl，找不到则交给 `PATH` 查找。
+ */
+string basctlPathFor(string self) @trusted {
+  version (Windows) {
+    enum agentName = "basagent.exe";
+    enum basctlName = "basctl.exe";
+  } else {
+    enum agentName = "basagent";
+    enum basctlName = "basctl";
+  }
+
+  import std.file : exists, isFile;
+  import std.path : baseName, buildPath, dirName;
+
+  if (baseName(self) != agentName)
+    return self;
+  auto sibling = buildPath(dirName(self), basctlName);
+  return exists(sibling) && isFile(sibling) ? sibling : "basctl";
 }
 
 /** 单引号包裹 shell 参数（内嵌单引号按 `'\''` 转义）。 */

@@ -152,9 +152,9 @@ org.beangle.bas:beangle-bas-engine:0.14.0
 
 - `tomcat-server` 走多应用全量发行包（`org.apache.tomcat:tomcat:zip`）；
   `tomcat` / `undertow` / `jetty` 只支持单应用，多于一个 webapp 时报错；
-- `[engine] init` 直接写当前 `basctl` 的 `make tomcat-server` 命令行（路径取自
-  `/proc/self/exe`，可用环境变量 `beangle_basctl` 覆盖，含空格时会加引号）；`jstart` 仍用
-  `beangle_jstart` 指定；
+- `[engine] init` 直接写 `basctl` 的 `make tomcat-server` 命令行（路径取自当前 basctl 的
+  `/proc/self/exe`，由 basagent 生成时取同目录的 basctl；可用环境变量 `beangle_basctl` 覆盖，
+  含空格时会加引号）；`jstart` 仍用 `beangle_jstart` 指定；
 - 实例目录靠 `[app] instance` 显式命名（`servers/<farm.server>`），与 `make`/`status`/`logs`
   的布局一致；
 - 生成物是派生物：改配置后重跑 `basctl start` 会覆盖 spec；

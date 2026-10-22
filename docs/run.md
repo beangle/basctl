@@ -45,9 +45,9 @@ basctl run --engine=tomcat-11.0.26 --port=8080 /repo/app.war
 
 - `beangle_jstart`：jstart 可执行文件路径，缺省按 `PATH` 找 `jstart`（见 `src/bas/jstart.d`）。
   开发态没装到 `PATH`，**必须**显式指定（或写 `PATH=$(dirname ...):$PATH`）。
-- `beangle_basctl`：写进 spec 的 `[engine] init` 命令行，缺省依次取 `/proc/self/exe`、`basctl`
-  （见 `src/bas/spec.d`）。直接调用 `target/basctl` 时 `/proc/self/exe` 已指向它，通常不设也
-  可以；显式设一份更稳。
+- `beangle_basctl`：写进 spec 的 `[engine] init` 命令行，缺省取当前 basctl（`/proc/self/exe`），
+  由 basagent 生成时取同目录的 basctl，最后退回 `PATH` 上的 `basctl`（见 `src/bas/spec.d`）。
+  直接调用 `target/basctl` 时 `/proc/self/exe` 已指向它，通常不设也可以；显式设一份更稳。
 - `M2_REPO` / `M2_REMOTE_REPO` 都不是必须的：jstart 的本地仓库缺省就是 `~/.m2/repository`；
   缺件由 jstart 按内置上游（aliyun 等）下载，纯离线时加 `--offline`。
 - `--print` 只写 spec 并打印 `jstart` 命令行，**不**执行 jstart，适合先确认依赖集。

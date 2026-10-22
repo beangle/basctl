@@ -219,7 +219,7 @@ basctl firewall /opt/bas          # 交互式地放行 server.xml 里的端口
 | `BAS_HOME` | 所有命令 | 组件目录；不给就用当前工作目录。`conf/server.xml`、`servers/` 等都相对它解析 |
 | `JAVA_HOME` | `doctor`、creator 写出的启动命令 | `$JAVA_HOME/bin/java` 优先于 `PATH` 上的 `java` |
 | `beangle_jstart` | 用 jstart 的命令 | jstart 可执行文件路径，缺省按 `PATH` 找 `jstart` |
-| `beangle_basctl` | jstart 回调 creator 时 | basctl 可执行文件路径；缺省用自身（`/proc/self/exe`），debug 构建或改名时可用它指定 |
+| `beangle_basctl` | jstart 回调 creator 时 | basctl 可执行文件路径；缺省用当前 basctl（`/proc/self/exe`），由 basagent 生成 spec 时取同目录的 basctl，debug 构建或改名时可用它指定 |
 | `beangle_basagent` | `bas.sh pull` / `agent-start` | basagent 可执行文件路径，缺省按 `PATH` 找 `basagent` |
 | `M2_REPO` / `M2_REMOTE_REPO` | `run`（`--local` / `--remote` 的缺省值） | 本地 / 远端构件仓库 |
 
