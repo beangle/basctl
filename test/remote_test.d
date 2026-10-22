@@ -17,8 +17,8 @@
 /** Unit tests for conf/basctl.conf. */
 module test.remote_test;
 
-import bas.remote : RemoteConfig, agentChannelUrl, bearerCredential, parseRemoteConf, serverConfigUrl,
-  isAllowedRemoteUrl, validateRemoteConf;
+import bas.remote : RemoteConfig, agentChannelUrl, bearerCredential, isAllowedRemoteUrl, parseRemoteConf,
+  serverConfigUrl, validateRemoteConf;
 
 import std.exception : assertThrown;
 

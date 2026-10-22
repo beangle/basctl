@@ -167,6 +167,13 @@ basctl init --dry-run /opt/bas # 只打印将会写入的文件
 | `profile` | 是 | bashub 里的配置名，必须是 `org.name` |
 | `token` | 是 | 该 Profile 的 `key`（bashub 配置详情里可查看/重置） |
 
+运行历史采样由 bashub 控制：agent 不保存采样间隔或时间窗口，只在收到 hub 下发的
+`report:health` 时即时返回实例的 `id` / `state`。采样频率与时间窗口配置在 bashub 的
+`hub.xml`，修改后无需调整各生产机上的 `basctl.conf`。
+
+在线页的详细 OS、磁盘和 webapps 信息不参与周期采样：agent 首次连接时发一次完整快照，
+之后由控制台点击“刷新详情”下发 `report:now` 按需获取。
+
 - `pull` 请求 `<url>/api/bashub/config/<profile>/server`，并发送
   `Authorization: Bearer <profile>:<token>`。token 不对返回 401，Profile 不存在返回 404。
 - `basagent report` / 常驻 agent 使用同一组地址与 token：拼出

@@ -53,6 +53,7 @@ basagent 与 bashub 之间那条 WebSocket 连接上说什么、怎么说。**�
 | `hello` | 通知 | `{host, basctl, basHome, bas, supports[]}`：连上后的第一条，见下「能力协商」（`basctl` 字段沿用原协议名，值是同包的发行版本） |
 | `report:os` | 通知 | `{os:{name,kernel,arch}, cpu:{cores,load1,load5,load15}, mem:{total,available}, disk:[{mount,total,available}]}` |
 | `report:bas` | 通知 | `{instances:[...], declared:[...]}`：`instances` 是活着的实例，每项与 `server.info` 的 `[server]` 同构（`id/pid/engine/http.port/started` + `webapps[]`）；`declared` 是本机 `server.xml` 声明的可操作实例（`id/engine/httpPort?/webapps[]`） |
+| `report:health` | 通知 | `{servers:[{id,state}]}`：响应 hub 的 `report:health`，只报本机声明实例的 `running` / `stopped`（hub 也接受 `error` 以便扩展）；不带 OS、内存、磁盘与 webapps 明细 |
 | `pong` | 通知 | `{}`：保活应答 |
 | `result` | 应答 | `{ok:bool, data?, error?}`：对所有带 `id` 请求的应答；失败时也可带限长后的 `data` 供排错 |
 
@@ -61,9 +62,8 @@ basagent 与 bashub 之间那条 WebSocket 连接上说什么、怎么说。**�
 - 字节数一律用字节（不是 MB/G）、行号一律 1 基含两端。
 - `declared` 与 `instances` 分开：前者是配置声明（用于停止后仍能启动），后者是运行事实；控制台按
   `id` 合并，未出现在 `instances` 的 `declared` 项按“已停止”渲染。
-- **`report:os` 与 `report:bas` 都是整份替换语义**：谁报的就覆盖谁，天然幂等，hub 不必关心顺序；
-  也因此两者可以各有节拍——OS 指标按周期（秒级），`report:bas` 按远程动作完成后的立即重报
-  加低频兜底——互不牵连，这正是把它们拆成两个原语的理由。
+- **`report:os`、`report:bas` 与 `report:health` 都是整份替换语义**：谁报的就覆盖谁，天然幂等，
+  hub 不必关心顺序。`report:health` 只覆盖轻量实例状态，不影响已缓存的完整快照。
 - 缺的字段就是「本机取不到」（比如 Windows 开发机上没有 `/proc`），**不伪造**；控制台按「不可用」
   渲染。
 
@@ -73,6 +73,7 @@ basagent 与 bashub 之间那条 WebSocket 连接上说什么、怎么说。**�
 |---|---|---|---|
 | `ping` | 通知 | `{}` | 保活 |
 | `report:now` | 通知 | `{}` | 请立刻报一次：agent 收到就发 `report:os` + `report:bas`。**不带 `id`**——报告本身就是回执，省一次往返 |
+| `report:health` | 通知 | `{}` | 请立刻报一次轻量实例状态：agent 收到就发 agent→hub 的 `report:health`。**不带 `id`**——状态报告本身就是回执。bashub 用它控制运行历史的采样频率与窗口 |
 | `log:read` | 请求 | `{instance, from, to, tail?}` | 读 `logs/<farm.server>/console.out` 的第 `from`–`to` 行；`from` / `to` 都省略时，`tail` 指定只取最后 N 行 |
 | `agent:log` | 请求 | `{from, to, tail?}` | 读 basagent 自身的 console 日志；窗口语义与 `log:read` 相同 |
 | `service:start` | 请求 | `{instance}` | 起一个实例 |
@@ -93,8 +94,8 @@ basagent 与 bashub 之间那条 WebSocket 连接上说什么、怎么说。**�
   并可在 `result.data` 中带限长排错信息：`{detail?, logTail?:[...], truncated?}`。`detail` 最多
   8 KiB，`logTail` 最多 100 行且每行最多 1000 字节；完整日志继续用 `log:read`。
 - `service:*` 的实例名只能是 `server.xml` 里本机声明的 `farm.server`；动作走 basctl 内部的
-  start / stop 分支，不拼 shell 命令。动作完成后 agent 还会重发一次 `report:bas`，控制台不必等
-  下一轮周期上报才看到新状态。
+  start / stop 分支，不拼 shell 命令。动作完成后 agent 重发一次完整 `report:bas`，控制台不必等
+  下一轮轻量采样才看到新状态。
 - `service:*` 必须带合法 `id` 与新鲜的 `at`；同一 `id` 只回放上次结果，不重复执行。WebSocket
   单帧上限为 256 KiB，超过的消息由连接层拒绝。
 - `service:start` / `service:restart` 执行前，agent 先按 `[remote]` 拉取一次 `server.xml`；拉取或
@@ -106,8 +107,8 @@ basagent 与 bashub 之间那条 WebSocket 连接上说什么、怎么说。**�
 ## 能力协商
 
 `hello.supports` 是 agent 唯一的自述：它支持的原语名单（本文两张表里属于它的那些，**包括
-`ping` / `report:now` / `log:read` / `agent:log` 这些 hub → agent 原语**）。hub 只下发**交集**里的原语——
-老 agent 不会收到它不认识的东西。
+`ping` / `report:now` / `report:health` / `log:read` / `agent:log` 这些 hub → agent 原语**）。
+hub 只下发**交集**里的原语——老 agent 不会收到它不认识的东西。
 
 **不设协议版本号**：能力即版本。多一个 `protocol: 1` 就多一张「版本号 ↔ 有哪些功能」的对应表要维护，
 而 `supports` 直接就是那张表。
@@ -147,17 +148,19 @@ agent 是常驻进程，**任何一条消息都不许让它退出或断连**（�
 [roadmap.md](roadmap.md) 的「不借鉴」）。差别就在开头那句话：**它的原语是开放的，我们的原语封闭、
 字段开放**。
 
-## 节拍（已定，都是常数）
+## 节拍与超时
 
 | 参数 | 取值 | 在哪 |
 |---|---|---|
-| `report:os` / `report:bas` 周期 | 60s | basagent `bas.agent.reportInterval`；hub 的 `report:now` 可随时插一次 |
+| 完整快照 `report:os` / `report:bas` | 首次连接、`report:now`、实例动作后可触发 | 不在常驻循环中周期重发 |
+| 轻量 health 采样 | 缺省 300s，仅 07:00–22:00（bashub 主机时区） | bashub `hub.xml` 的 `agent-health-interval/start/end`；关闭后不再下发 `report:health` |
 | 保活 `ping` | hub 每 30s | bashub `AgentSocketInitializer.HeartbeatInterval` |
 | agent 沉默超时 | 90s | basagent `bas.agent.silentTimeout`（超了重连） |
 | 断线重连 | 10s | basagent `bas.agent.reconnectDelay` |
 | 拨号超时 | 20s | basagent `bas.agent.connectTimeout`（`report` 与重连都不能久等） |
 
-**不做成参数**：这几条都是「不合适就改代码」的常数，多一个旋钮就多一处漂移。
+所有采样节拍都由 hub 控制；agent 本地不保存 interval 或时间窗口。`agent-health-*` 的值只在
+bashub 启动时读取，修改后重启 bashub 生效。
 
 ## 未定
 

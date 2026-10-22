@@ -35,7 +35,7 @@ import bas.config : Container, engineRefText;
 import bas.net : localAddresses;
 import bas.serverinfo : liveInstances;
 
-import std.algorithm : canFind;
+import std.algorithm : canFind, sort;
 import std.json : JSONValue;
 
 /** `report:os` 的 body：OS / CPU / 内存 / 磁盘的「家底 + 水位」。 */
@@ -113,6 +113,49 @@ JSONValue basReport(string basHome, Container container = null) {
   if (container !is null)
     body["declared"] = JSONValue(declared);
   return body;
+}
+
+/**
+ * `report:health` 的 body：只含本机声明的实例与运行状态。
+ *
+ * 历史监控按 hub 配置的周期只需要这一份小报文；OS/内存/磁盘与 webapps 明细仍在
+ * `report:os` / `report:bas` 里，由首次连接或 `report:now` 触发。`state` 只有
+ * `running` / `stopped` 两种，没有运行实例即视为停止；不猜测「异常」。
+ */
+JSONValue healthReport(string basHome, Container container = null) {
+  bool[string] runningById;
+  string[] ids;
+  foreach (info; liveInstances(basHome)) {
+    if (!info.id.length)
+      continue;
+    if ((info.id in runningById) is null)
+      ids ~= info.id;
+    runningById[info.id] = true;
+  }
+
+  if (container !is null) {
+    auto ips = localAddresses();
+    foreach (farm; container.farms) {
+      foreach (server; farm.servers) {
+        if (!ips.canFind(server.host.ip))
+          continue;
+        auto id = server.qualifiedName;
+        if ((id in runningById) is null) {
+          ids ~= id;
+          runningById[id] = false;
+        }
+      }
+    }
+  }
+
+  ids.sort();
+  JSONValue[] servers;
+  foreach (id; ids)
+    servers ~= JSONValue([
+      "id": JSONValue(id),
+      "state": JSONValue(runningById[id] ? "running" : "stopped")
+    ]);
+  return JSONValue(["servers": JSONValue(servers)]);
 }
 
 private:

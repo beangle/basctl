@@ -41,7 +41,7 @@ import bas.net : hostName;
 import bas.pull : runPull;
 import bas.remote : RemoteConfig, agentChannelUrl, bearerCredential, loadRemoteConf, remoteConfFileName,
   validateRemoteConf;
-import bas.report : basReport, osReport;
+import bas.report : basReport, healthReport, osReport;
 import bas.starter : serviceAction;
 
 import vibe.core.core : exitEventLoop, runApplication, runTask, sleep;
@@ -64,9 +64,6 @@ import std.string : format, strip;
 
 /** 心跳节拍：循环等消息的超时。等到了就处理消息，等不到就用来看计时器。 */
 private enum tick = 1.seconds;
-
-/** 周期上报的间隔（`report:os` / `report:bas` 各按这个节拍报一次）。 */
-private enum reportInterval = 60.seconds;
 
 /** 多久没收到任何消息就认为这条连接已经废了，交给外层重连（中间设备会静默掐断空闲连接）。 */
 private enum silentTimeout = 90.seconds;
@@ -194,8 +191,16 @@ AgentContext agentContext(const Container conf, string configFile, string basctl
 /** 已读取并校验过的远程配置。 */
 private AgentContext agentContext(const Container conf, const RemoteConfig remote, string configFile,
     string basctlVersion, bool once) {
-  return AgentContext(agentUrl(agentChannelUrl(remote)), bearerCredential(remote), configFile, hostName(),
-      dirName(dirName(absolutePath(configFile))), conf.version_, basctlVersion, once);
+  AgentContext ctx;
+  ctx.endpoint = agentUrl(agentChannelUrl(remote));
+  ctx.credential = bearerCredential(remote);
+  ctx.configFile = configFile;
+  ctx.host = hostName();
+  ctx.basHome = dirName(dirName(absolutePath(configFile)));
+  ctx.basVersion = conf.version_;
+  ctx.basctlVersion = basctlVersion;
+  ctx.once = once;
+  return ctx;
 }
 
 /**
@@ -297,7 +302,7 @@ private void swallow(scope void delegate() action) @system nothrow {
   }
 }
 
-/** 一条连接的生命周期：`hello` → 两份上报 → 按节拍上报、回 `ping`、执行固定原语。 */
+/** 一条连接的生命周期：`hello` → 完整快照 → 响应 hub 下发的固定原语。 */
 private void serve(ref AgentContext ctx, scope WebSocket ws) {
   ws.send(helloMessage(ctx.host, ctx.basctlVersion, ctx.basHome, ctx.basVersion));
   sendReports(ctx, ws);
@@ -307,18 +312,13 @@ private void serve(ref AgentContext ctx, scope WebSocket ws) {
   if (ctx.once)
     return;
 
-  auto lastReport = MonoTime.currTime;
-  auto lastTraffic = lastReport;
+  auto lastTraffic = MonoTime.currTime;
   while (ws.connected) {
     if (ws.waitForData(tick)) {
       handle(ctx, ws, ws.receiveText());
       lastTraffic = MonoTime.currTime;
     } else if (MonoTime.currTime - lastTraffic > silentTimeout) {
       throw new Exception("no traffic from hub for " ~ silentTimeout.to!string);
-    }
-    if (MonoTime.currTime - lastReport > reportInterval) {
-      sendReports(ctx, ws);
-      lastReport = MonoTime.currTime;
     }
   }
 }
@@ -334,6 +334,17 @@ private void sendReports(const AgentContext ctx, scope WebSocket ws) {
     logWarn("channel: cannot read declared instances from %s: %s", ctx.configFile, e.msg);
   }
   ws.send(reportMessage("report:bas", basReport(ctx.basHome, container)));
+}
+
+/** 响应 hub 的 `report:health`：只报实例 id 与 running/stopped，不重复采集 OS 和 webapps。 */
+private void sendHealth(const AgentContext ctx, scope WebSocket ws) {
+  Container container;
+  try {
+    container = parseServerXmlFile(ctx.configFile);
+  } catch (Exception e) {
+    logWarn("channel: cannot read declared instances from %s: %s", ctx.configFile, e.msg);
+  }
+  ws.send(reportMessage("report:health", healthReport(ctx.basHome, container)));
 }
 
 /**
@@ -389,6 +400,9 @@ private void handle(ref AgentContext ctx, scope WebSocket ws, string text) {
   case "report:now":
     sendReports(ctx, ws);
     break;
+  case "report:health":
+    sendHealth(ctx, ws);
+    break;
   case "log:read":
     auto reply = logReadResult(ctx.basHome, msg.id, msg.body);
     rememberResult(ctx, msg.id, reply);
@@ -422,7 +436,7 @@ private void handle(ref AgentContext ctx, scope WebSocket ws, string text) {
     auto reply = serviceResult(ctx.configFile, msg.id, action, msg.body);
     rememberResult(ctx, msg.id, reply);
     ws.send(reply);
-    // 结果是「动作做完了」，不是「快照已经推到」；随后整份重报，控制台不必再等下一轮。
+    // 结果是「动作做完了」，不是「快照已经推到」；重发完整快照，保证摘要不会停在动作前。
     sendReports(ctx, ws);
     break;
   default:

@@ -38,12 +38,13 @@ token = 9f8e7d6c5b4a39281706f5e4d3c2b1a0
 | 命令 | 做什么 | 什么时候用 |
 |---|---|---|
 | `basagent report [server.xml]` | 连一次、发 `hello` + 两份上报、断开；报上去了退出码 0 | 手工对一次账；脚本 / cron |
-| `systemctl start basagent.service` | 常驻：连上就报，之后按 60s 周期上报、回保活、执行固定指令（读日志 / 启停实例），断线 10s 后重连 | 生产机由系统级 systemd 管理，账号固定为 `bas:beangle` |
+| `systemctl start basagent.service` | 常驻：连上发一次完整快照，之后按 hub 下发的 `report:health` 即时返回实例状态、回保活、执行固定指令（读日志 / 启停实例），断线 10s 后重连 | 生产机由系统级 systemd 管理，账号固定为 `bas:beangle` |
 | `bin/bas.sh pull` | 显式拉取一次 `conf/server.xml`（底层调用 `basagent pull`） | 需要从 bashub 更新配置时 |
 
 `basctl start` / `basctl stop` 与 `bin/start.sh` / `bin/restart.sh` 只做本地动作，不拉配置、
-也不顺带上报。常驻 agent 按周期上报；远程 `service:start` / `service:restart` 执行前会先拉取一次
-配置，拉取失败就返回失败而不执行动作；`service:stop` 不拉取。
+也不顺带上报。常驻 agent 不自行安排轻量状态的上报节拍，只响应 bashub 下发的
+`report:health`；远程 `service:start` / `service:restart` 执行前会先拉取一次配置，拉取失败就
+返回失败而不执行动作；`service:stop` 不拉取。
 
 本地看同一个日志：`basctl logs <实例> -f`——它和 `log:read` 走**同一份读法**
 （`src/bas/logs.d`），所以控制台上看到的行号与本地 `-n` 数出来的是同一个。
@@ -54,8 +55,12 @@ token = 9f8e7d6c5b4a39281706f5e4d3c2b1a0
 
 - **是**：主机家底与水位（CPU 核数与负载、内存总量与可用、磁盘各挂载点的容量），以及本机
   `servers/<name>/server.info` 里活着的实例（id / pid / 引擎 / 端口 / webapp / 对外 url）。
-- **不是**：不重新解析 `server.xml`（那是**意图**；报的是**事实**），不碰 setline 的流量与健康，
-  不做通用监控（不替代 Prometheus），也没有远程 shell——能下发的动作是固定的那几个原语。
+- **按需只报状态**：hub 下发 `report:health` 后，agent 才返回每个实例的 `id` 与
+  `running` / `stopped`，供在线页和半年运行历史使用；完整 OS、磁盘、webapps 明细只在首次连接、
+  `report:now` 或实例动作后按需上报。
+- **不是**：不把 `server.xml` 当运行事实（它只用来补充“本机声明了哪些可操作实例”），不碰
+  setline 的流量与健康，不做通用监控（不替代 Prometheus），也没有远程 shell——能下发的动作是
+  固定的那几个原语。
 - 取不到的字段就**留空**，不伪造：Windows 开发机上没有 `/proc`，那些项就是「不可用」。
 
 ## 认证与失败的表现

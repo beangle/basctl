@@ -43,6 +43,7 @@ import std.json : JSONType, parseJSON;
   assert(msg.body["supports"].array.map!(s => s.str).canFind("log:read"));
   assert(msg.body["supports"].array.map!(s => s.str).canFind("agent:log"));
   assert(msg.body["supports"].array.map!(s => s.str).canFind("report:now"));
+  assert(msg.body["supports"].array.map!(s => s.str).canFind("report:health"));
   assert(msg.body["supports"].array.map!(s => s.str).canFind("service:start"));
   assert(msg.body["supports"].array.map!(s => s.str).canFind("service:stop"));
   assert(msg.body["supports"].array.map!(s => s.str).canFind("service:restart"));

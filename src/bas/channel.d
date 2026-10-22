@@ -38,25 +38,26 @@ import std.json : JSONType, JSONValue, parseJSON;
 import std.string : strip;
 
 /** agent → hub 的原语。 */
-immutable string[] agentPrimitives = ["hello", "report:os", "report:bas", "result", "pong"];
+immutable string[] agentPrimitives = ["hello", "report:os", "report:bas", "report:health", "result", "pong"];
 
 /**
  * hub 能下发的原语（本端认识的）。不在这里的 `type` 一律按「不支持」处理——这就是「原语封闭」：
  * 名单之外没有可执行的东西，也就没有「随便发个命令字符串」的余地。
  */
 immutable string[] hubPrimitives = [
-  "ping", "report:now", "log:read", "agent:log", "service:start", "service:stop", "service:restart"
+  "ping", "report:now", "report:health", "log:read", "agent:log", "service:start", "service:stop",
+  "service:restart"
 ];
 
 /**
  * `hello.supports` 申报的能力：两个方向里本端能处理的原语。
  *
  * 不能只报 {@link agentPrimitives}：hub 要据此决定能不能下发 `log:read` / `report:now` /
- * `service:*`。
+ * `report:health` / `service:*`。
  */
 immutable string[] supportedPrimitives = [
-  "hello", "report:os", "report:bas", "result", "pong", "ping", "report:now", "log:read",
-  "agent:log", "service:start", "service:stop", "service:restart"
+  "hello", "report:os", "report:bas", "report:health", "result", "pong", "ping", "report:now",
+  "log:read", "agent:log", "service:start", "service:stop", "service:restart"
 ];
 
 /** 请求号上限；hub 目前发 UUID。 */
@@ -182,7 +183,7 @@ string helloMessage(string host, string basctlVersion, string basHome, string ba
   return renderEnvelope("hello", "", body);
 }
 
-/** `report:os` / `report:bas`：整份替换语义的通知，不带 `id`。 */
+/** `report:os` / `report:bas` / `report:health`：整份替换语义的通知，不带 `id`。 */
 string reportMessage(string type, JSONValue body) {
   return renderEnvelope(type, "", body);
 }
