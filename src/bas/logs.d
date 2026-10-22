@@ -58,6 +58,11 @@ string consoleLog(string basHome, string instance) {
   return buildPath(basHome, "logs", instance, "console.out");
 }
 
+/** basagent 自身的日志：`logs/agent/console.out`；生产安装中由 `/var/log/bas` 承接。 */
+string agentLog(string basHome) {
+  return buildPath(basHome, "logs", "agent", "console.out");
+}
+
 /** 实例控制台日志（按 `farm.server` 限定的实例名）。 */
 string consoleLog(string basHome, Server server) {
   return consoleLog(basHome, server.qualifiedName);
@@ -271,7 +276,7 @@ private bool parseLineCount(string text, ref long lines) {
   return true;
 }
 
-/** `logs/` 下有日志的实例名（`archive` 是归档目录，不是实例），供「找不到实例」时提示。 */
+/** `logs/` 下有日志的实例名（`archive` / `agent` 不是实例），供「找不到实例」时提示。 */
 private string[] loggedInstances(string basHome) {
   string[] names;
   auto dir = buildPath(basHome, "logs");
@@ -279,7 +284,7 @@ private string[] loggedInstances(string basHome) {
     return names;
   foreach (entry; dirEntries(dir, SpanMode.shallow)) {
     auto name = baseName(entry.name);
-    if (entry.isDir && name != "archive" && exists(consoleLog(basHome, name)))
+    if (entry.isDir && name != "archive" && name != "agent" && exists(consoleLog(basHome, name)))
       names ~= name;
   }
   names.sort();

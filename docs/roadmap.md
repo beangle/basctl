@@ -94,7 +94,7 @@ basagent 侧 `src/bas/{channel,agent,agentmain,hub,report,logs}.d`、bashub 侧
 
 协议是**固定原语**——这就是「不是通用命令通道」的落点：agent → hub 只有
 `hello` / `report:os` / `report:bas` / `result` / `pong`，hub → agent 只有
-`ping` / `report:now` / `log:read` / `service:start|stop|restart`。
+`ping` / `report:now` / `log:read` / `agent:log` / `service:start|stop|restart`。
 
 信封、每个原语的 body、未知消息怎么处理、以后怎么扩展，**只在
 [channel-protocol.md](channel-protocol.md) 里定义一份**（草案），本文不复述，免得两张表漂移。
@@ -195,7 +195,7 @@ OpenSSL 3.x。`pull` 与 war 直链下载仍走宿主 `curl` 子进程。
   `WsFilter` 比 `Dispatcher` 先拿到升级请求；但**没在 ems 的完整过滤链下实测过**，落地前要跑一次
   （起一个真 bashub，用 `basagent report` 连过去看 `AgentRegistry` 有没有登记上）。
 - `hello` 里要不要带 `basctl` / `bas` 版本之外的构建信息（如 JDK 版本）——倾向不加。
-- agent 常驻的落地形态：systemd unit 归 `basctl init` 铺，还是发行包自带；以什么账号跑。
+- agent 常驻的落地形态（已定）：发行包自带 systemd unit，以 `bas:beangle` 跑，`BAS_HOME=/var/lib/bas`。
 - bashub 侧的存储形态：现状表（只留最近一次）还是保留若干历史点——决定控制台有没有曲线。
 - 同机多份 `BAS_HOME` 时，主机指标由 bashub 按 host 合并，还是 agent 干脆提到机器级只报一次。
 - 控制台页面：`GET /api/bashub/monitor/agents/status` 已经能拿到在线节点与现状，但 SPA 里还没有页面。

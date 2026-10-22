@@ -1,0 +1,25 @@
+[Unit]
+Description=Beangle basagent
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=/var/lib/bas/conf/server.xml
+
+[Service]
+Type=simple
+User=bas
+Group=beangle
+Environment=HOME=/var/lib/bas
+Environment=BAS_HOME=/var/lib/bas
+EnvironmentFile=-/etc/sysconfig/basagent
+EnvironmentFile=-/etc/default/basagent
+WorkingDirectory=/var/lib/bas
+ExecStartPre=/bin/mkdir -p /var/log/bas/agent
+ExecStart=/bin/sh -c 'exec /usr/bin/basagent /var/lib/bas/conf/server.xml >>/var/log/bas/agent/console.out 2>&1'
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=20
+UMask=0077
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

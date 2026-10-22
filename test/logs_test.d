@@ -39,6 +39,7 @@ private void appendText(string path, string text) {
 
 @("consoleLog points at logs/<instance>/console.out") unittest {
   assert(consoleLog("/opt/bas", "tools.server1") == "/opt/bas/logs/tools.server1/console.out");
+  assert(agentLog("/opt/bas") == "/opt/bas/logs/agent/console.out");
 }
 
 @("plainName treats the instance as one directory name, not a path") unittest {

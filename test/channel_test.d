@@ -41,6 +41,7 @@ import std.json : JSONType, parseJSON;
   foreach (primitive; supportedPrimitives)
     assert(msg.body["supports"].array.map!(s => s.str).canFind(primitive), primitive);
   assert(msg.body["supports"].array.map!(s => s.str).canFind("log:read"));
+  assert(msg.body["supports"].array.map!(s => s.str).canFind("agent:log"));
   assert(msg.body["supports"].array.map!(s => s.str).canFind("report:now"));
   assert(msg.body["supports"].array.map!(s => s.str).canFind("service:start"));
   assert(msg.body["supports"].array.map!(s => s.str).canFind("service:stop"));
@@ -78,6 +79,13 @@ import std.json : JSONType, parseJSON;
   auto bad = parseEnvelope(resultMessage("r2", false, parseJSON("null"), "bad-request"));
   assert(!bad.body["ok"].boolean);
   assert(bad.body["error"].str == "bad-request");
+  assert("data" !in bad.body.object);
+
+  auto detailed = parseEnvelope(resultMessage("r3", false,
+      parseJSON(`{"detail":"boom","logTail":["line"],"truncated":false}`), "start-failed"));
+  assert(!detailed.body["ok"].boolean);
+  assert(detailed.body["error"].str == "start-failed");
+  assert(detailed.body["data"]["detail"].str == "boom");
 }
 
 @("missing optional fields are tolerated, a missing type is not") unittest {

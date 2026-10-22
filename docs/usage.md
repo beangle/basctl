@@ -11,7 +11,7 @@
 dub build -c basctl --build=release-nobounds --compiler=ldc2    # 产物 target/basctl
 dub build -c basagent --build=release-nobounds --compiler=ldc2  # 产物 target/basagent
 
-# 或者打成系统包（同一个包安装 /usr/bin/basctl 与 /usr/bin/basagent）
+# 或者打成系统包（安装 /usr/bin/basctl、/usr/bin/basagent 与 basagent.service）
 scripts/build_deb.sh        # Debian 系
 scripts/build_rpm.sh        # Fedora / RHEL 系
 
@@ -20,6 +20,8 @@ docker run -d --name bas -p 8080:8080 -v ~/bas-work:/var/lib/bas basctl:0.0.1
 ```
 
 打包与镜像细节见 [scripts/README.md](../scripts/README.md)、[container.md](container.md)。
+系统包会创建 `bas:beangle` 账号、`/var/lib/bas`、`/var/log/bas`，并启用
+`basagent.service`；basagent 不允许以 root 运行。
 
 ## 五分钟上手
 
@@ -32,11 +34,10 @@ bashub 是配置与实例的远端权威：`bas.sh pull` 从它拉取 `conf/serv
 
 ```sh
 # 1. 铺控制脚本与 conf/ 目录，并生成 basctl.conf 注释模板
-basctl init /opt/bas
-export BAS_HOME=/opt/bas
+sudo -u bas -H basctl init /var/lib/bas
 
 # 2. 填写 init 生成的模板（已按 0600 创建、含字段说明）
-${EDITOR:-vi} "$BAS_HOME/conf/basctl.conf"
+sudo -u bas -H "${EDITOR:-vi}" /var/lib/bas/conf/basctl.conf
 ```
 
 模板结构如下，把三个空值填成 bashub 中这台机器对应的值：
@@ -50,18 +51,17 @@ token = 9f8e7d6c5b4a39281706f5e4d3c2b1a0
 
 ```sh
 # 3. 显式拉取控制台生成的 server.xml，再自查、启动
-"$BAS_HOME/bin/bas.sh" pull
-basctl doctor
-basctl start all
-basctl status
+sudo -u bas -H /var/lib/bas/bin/bas.sh pull
+sudo -u bas -H basctl doctor
+sudo -u bas -H basctl start all
+sudo -u bas -H basctl status
 
 # 4. 手工报一次，确认控制台能看见这台机器
-basagent report "$BAS_HOME/conf/server.xml"
+sudo -u bas -H basagent report /var/lib/bas/conf/server.xml
 
-# 5. 后台启动常驻通道（前台调试可直接运行 basagent）
-"$BAS_HOME/bin/bas.sh" agent-start
-tail -f "$BAS_HOME/agent/console.out"
-"$BAS_HOME/bin/bas.sh" agent-stop
+# 5. 启动常驻通道（RPM/DEB 已安装并 enable 该服务）
+sudo systemctl start basagent.service
+sudo -u bas -H tail -f /var/log/bas/agent/console.out
 ```
 
 把 `url` / `profile` / `token` 换成 bashub 中这台机器对应 Profile 的值：`profile` 必须是
@@ -133,15 +133,16 @@ setline 与 bashub 通道互不依赖，配置、部署与安全边界统一见 
 | `bas.sh pull` | 按 `conf/basctl.conf` 的 `[remote]` 拉取 `conf/server.xml`（底层调用 `basagent pull`）：地址为 `<url>/api/bashub/config/<profile>/server`，请求用 `Authorization: Bearer <profile>:<token>`；旧配置备份为 `server_old.xml`。未配置 `[remote]` 时告警并以 0 退出，配置无效或下载失败时非 0 |
 | `basagent report [server.xml]` | 连一次控制台（bashub）报一次主机与实例现状后退出；地址与凭证都取同目录 `basctl.conf` 的 `[remote]`，报上去了退出码才是 0。见 [channel.md](channel.md) |
 | `basagent [server.xml]` | 常驻：连上控制台后周期上报、回保活、执行固定指令（取日志 / 启停实例），断线自动重连；远程 `service:start` / `service:restart` 执行前会先拉取一次配置，`stop` 不拉取 |
-| `bas.sh agent-start` / `bas.sh agent-stop` | 在后台启动 / 停止常驻 agent；PID 与日志分别在 `agent/agent.pid`、`agent/console.out` |
+| `systemctl start/stop/restart basagent.service` | 管理系统级常驻 agent；运行账号固定为 `bas:beangle` |
 | `basctl doctor [server.xml]` | 检查 `java`（必需）、`jstart`（可选提示），以及启用 setline 时管理口通不通；必需项缺失时退出码非 0，见 [doctor.md](doctor.md) |
 
 ## 组件目录初始化
 
 `basctl init [workdir]` 把控制脚本（`env.sh`、`bas.sh`、`start.sh`、`stop.sh`、`restart.sh`）
 铺到 `<workdir>/bin` 并建好 `conf/`，用于从零搭建一个
-bas 组件目录。agent 的 PID 写在 `<workdir>/agent/agent.pid`，输出追加到
-`<workdir>/agent/console.out`，不会落在组件目录根部。若
+bas 组件目录。常驻 agent 由系统级 systemd 管理，不再生成 `agent/agent.pid` 或
+`agent/console.out`；标准安装中实例日志位于 `/var/log/bas`，并通过
+`/var/lib/bas/logs` 符号链接保持原有路径。若
 `conf/basctl.conf` 不存在，还会生成一份带注释、`[remote]` 三项留空的模板，权限为 `0600`。
 脚本与模板都内嵌在 basctl 里，随 basctl 版本发布，不再依赖单独的发行包：
 
@@ -223,7 +224,7 @@ basctl firewall /opt/bas          # 交互式地放行 server.xml 里的端口
 | `JAVA_HOME` | `doctor`、creator 写出的启动命令 | `$JAVA_HOME/bin/java` 优先于 `PATH` 上的 `java` |
 | `beangle_jstart` | 用 jstart 的命令 | jstart 可执行文件路径，缺省按 `PATH` 找 `jstart` |
 | `beangle_basctl` | jstart 回调 creator 时 | basctl 可执行文件路径；缺省用当前 basctl（`/proc/self/exe`），由 basagent 生成 spec 时取同目录的 basctl，debug 构建或改名时可用它指定 |
-| `beangle_basagent` | `bas.sh pull` / `agent-start` | basagent 可执行文件路径，缺省按 `PATH` 找 `basagent` |
+| `beangle_basagent` | `bas.sh pull` | basagent 可执行文件路径，缺省按 `PATH` 找 `basagent` |
 | `M2_REPO` / `M2_REMOTE_REPO` | `run`（`--local` / `--remote` 的缺省值） | 本地 / 远端构件仓库 |
 
 ## 排错

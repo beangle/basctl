@@ -25,7 +25,6 @@ import std.algorithm : canFind;
 import std.file : exists, readText, rmdirRecurse, tempDir, write;
 import std.path : buildPath;
 import std.process : execute;
-import std.string : strip;
 import std.uuid : randomUUID;
 
 private immutable string[] names =
@@ -195,45 +194,4 @@ private string fakeBasagent(string root) {
 
   assert(result.status == 0, result.output);
   assert(readText(buildPath(root, "fake-agent-calls")) == "pull " ~ root ~ "\n");
-}
-
-@("bas.sh agent-start keeps pid and log under agent/") unittest {
-  auto root = newRoot("agent");
-  auto bas = buildPath(root, "bin", "bas.sh");
-  auto pidFile = buildPath(root, "agent", "agent.pid");
-  auto logFile = buildPath(root, "agent", "console.out");
-  scope (exit) {
-    if (exists(pidFile))
-      execute(["bash", bas, "agent-stop"]);
-    if (exists(root)) rmdirRecurse(root);
-  }
-
-  installScripts(root, false, false);
-  write(buildPath(root, "conf", "server.xml"), "<bas version=\"0.14.0\"/>\n");
-  auto fake = fakeBasagent(root);
-  auto started = execute(["bash", bas, "agent-start"], ["beangle_basagent": fake]);
-  assert(started.status == 0, started.output);
-  assert(started.output.canFind("log: " ~ logFile), started.output);
-
-  assert(exists(pidFile));
-  assert(exists(logFile));
-  assert(!exists(buildPath(root, "run")));
-  auto pid = strip(readText(pidFile));
-  assert(pid.length);
-  assert(execute(["kill", "-0", pid]).status == 0);
-  assert(readText(logFile).canFind("fake basagent started"));
-
-  auto callsFile = buildPath(root, "fake-agent-calls");
-  auto calls = readText(callsFile);
-  assert(calls == buildPath(root, "conf", "server.xml") ~ "\n", calls);
-
-  auto again = execute(["bash", bas, "agent-start"], ["beangle_basagent": fake]);
-  assert(again.status == 0, again.output);
-  assert(again.output.canFind("agent already running (pid=" ~ pid ~ ")"), again.output);
-  assert(readText(pidFile) == pid ~ "\n");
-  assert(readText(callsFile) == calls, "a second agent must not be started");
-
-  auto stopped = execute(["bash", bas, "agent-stop"]);
-  assert(stopped.status == 0, stopped.output);
-  assert(!exists(pidFile));
 }

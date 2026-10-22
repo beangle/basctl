@@ -16,6 +16,14 @@ import std.string : startsWith;
 version (unittest) {
 } else {
   int main(string[] args) {
+    version (Posix) {
+      import core.sys.posix.unistd : geteuid;
+
+      if (geteuid() == 0) {
+        stderr.writeln("basagent: refusing to run as root; use the dedicated bas service account.");
+        return 2;
+      }
+    }
     try
       return dispatch(args);
     catch (Exception e) {

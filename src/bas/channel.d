@@ -44,7 +44,7 @@ immutable string[] agentPrimitives = ["hello", "report:os", "report:bas", "resul
  * 名单之外没有可执行的东西，也就没有「随便发个命令字符串」的余地。
  */
 immutable string[] hubPrimitives = [
-  "ping", "report:now", "log:read", "service:start", "service:stop", "service:restart"
+  "ping", "report:now", "log:read", "agent:log", "service:start", "service:stop", "service:restart"
 ];
 
 /**
@@ -55,7 +55,7 @@ immutable string[] hubPrimitives = [
  */
 immutable string[] supportedPrimitives = [
   "hello", "report:os", "report:bas", "result", "pong", "ping", "report:now", "log:read",
-  "service:start", "service:stop", "service:restart"
+  "agent:log", "service:start", "service:stop", "service:restart"
 ];
 
 /** 信封：`type` / `id` / `at` / `body`，所有消息共用。 */
@@ -151,12 +151,12 @@ string pongMessage() {
   return renderEnvelope("pong", "", emptyBody());
 }
 
-/** `result`：对所有带 `id` 请求的应答。成功可带 `data`，失败带 `error`。 */
+/** `result`：对所有带 `id` 请求的应答。成功或带失败详情时可带 `data`，失败带 `error`。 */
 string resultMessage(string id, bool ok, JSONValue data, string error) {
   JSONValue body = ["ok": JSONValue(ok)];
-  if (ok)
+  if (ok || data.type != JSONType.null_)
     body["data"] = data;
-  else
+  if (!ok)
     body["error"] = JSONValue(error);
   return renderEnvelope("result", id, body);
 }

@@ -36,7 +36,7 @@ module bas.agent;
 import bas.channel;
 import bas.config : Container, parseServerXmlFile;
 import bas.hub : agentUrl;
-import bas.logs : consoleLog, countLines, maxLogLines, plainName, readLogWindow;
+import bas.logs : agentLog, consoleLog, countLines, maxLogLines, plainName, readLogWindow;
 import bas.net : hostName;
 import bas.pull : runPull;
 import bas.remote : RemoteConfig, agentChannelUrl, bearerCredential, loadRemoteConf, remoteConfFileName,
@@ -334,6 +334,11 @@ private void handle(ref AgentContext ctx, scope WebSocket ws, string text) {
     rememberResult(ctx, msg.id, reply);
     ws.send(reply);
     break;
+  case "agent:log":
+    auto reply = agentLogResult(ctx.basHome, msg.id, msg.body);
+    rememberResult(ctx, msg.id, reply);
+    ws.send(reply);
+    break;
   case "service:start":
   case "service:stop":
   case "service:restart":
@@ -395,8 +400,16 @@ string logReadResult(string basHome, string id, ref JSONValue body) {
   auto instance = bodyText(body, "instance");
   if (!plainName(instance))
     return resultMessage(id, false, JSONValue(null), "bad-request");
+  return logWindowResult(consoleLog(basHome, instance), id, body);
+}
 
-  auto path = consoleLog(basHome, instance);
+/** `agent:log`：读取 basagent 自身日志，请求体与 `log:read` 同形但不接受实例名。 */
+string agentLogResult(string basHome, string id, ref JSONValue body) {
+  return logWindowResult(agentLog(basHome), id, body);
+}
+
+/** 从一个固定日志文件读取 `from/to/tail` 窗口；路径只由调用方拼出，不接受控制台输入。 */
+private string logWindowResult(string path, string id, ref JSONValue body) {
   if (!exists(path))
     return resultMessage(id, false, JSONValue(null), "no-log");
 
@@ -451,8 +464,20 @@ string serviceResult(string configFile, string id, string action, ref JSONValue 
     return resultMessage(id, false, JSONValue(null), "bad-request");
 
   auto result = serviceAction(configFile, action, instance);
-  if (!result.ok)
-    return resultMessage(id, false, JSONValue(null), result.error);
+  if (!result.ok) {
+    JSONValue data = JSONValue(null);
+    if (result.detail.length || result.logTail.length || result.truncated) {
+      JSONValue[] lines;
+      foreach (line; result.logTail)
+        lines ~= JSONValue(line);
+      data = [
+        "detail": JSONValue(result.detail),
+        "logTail": JSONValue(lines),
+        "truncated": JSONValue(result.truncated)
+      ];
+    }
+    return resultMessage(id, false, data, result.error);
+  }
 
   JSONValue data = ["state": JSONValue(result.state)];
   if (result.pid > 0)

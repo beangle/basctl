@@ -52,7 +52,7 @@ basagent 与 bashub 之间那条 WebSocket 连接上说什么、怎么说。**�
 | `report:os` | 通知 | `{os:{name,kernel,arch}, cpu:{cores,load1,load5,load15}, mem:{total,available}, disk:[{mount,total,available}]}` |
 | `report:bas` | 通知 | `{instances:[...], declared:[...]}`：`instances` 是活着的实例，每项与 `server.info` 的 `[server]` 同构（`id/pid/engine/http.port/started` + `webapps[]`）；`declared` 是本机 `server.xml` 声明的可操作实例（`id/engine/httpPort?/webapps[]`） |
 | `pong` | 通知 | `{}`：保活应答 |
-| `result` | 应答 | `{ok:bool, data?, error?}`：对所有带 `id` 请求的应答 |
+| `result` | 应答 | `{ok:bool, data?, error?}`：对所有带 `id` 请求的应答；失败时也可带限长后的 `data` 供排错 |
 
 - 容量与水位同处一个对象（`cpu.cores` 是配置、`cpu.load1` 是水位；`mem.total` 是配置、
   `mem.available` 是水位），控制台一次拿到「家底 + 现状」。
@@ -72,6 +72,7 @@ basagent 与 bashub 之间那条 WebSocket 连接上说什么、怎么说。**�
 | `ping` | 通知 | `{}` | 保活 |
 | `report:now` | 通知 | `{}` | 请立刻报一次：agent 收到就发 `report:os` + `report:bas`。**不带 `id`**——报告本身就是回执，省一次往返 |
 | `log:read` | 请求 | `{instance, from, to, tail?}` | 读 `logs/<farm.server>/console.out` 的第 `from`–`to` 行；`from` / `to` 都省略时，`tail` 指定只取最后 N 行 |
+| `agent:log` | 请求 | `{from, to, tail?}` | 读 basagent 自身的 console 日志；窗口语义与 `log:read` 相同 |
 | `service:start` | 请求 | `{instance}` | 起一个实例 |
 | `service:stop` | 请求 | `{instance}` | 停一个实例 |
 | `service:restart` | 请求 | `{instance}` | 重启一个实例 |
@@ -80,9 +81,14 @@ basagent 与 bashub 之间那条 WebSocket 连接上说什么、怎么说。**�
   动作，不必解析 body；将来加动作 = 加一个原语，审计时也一眼看得出干了什么。
 - `log:read` 的应答：`result.data = {total, from, to, lines:[...]}`。`total` 是文件总行数，控制台据此
   翻页，不必再要一个「问行数」的原语。区间读，**不流式**（要实时看日志就登录机器）。
+- `agent:log` 的应答与 `log:read` 同形。它只读标准安装的 `/var/log/bas/agent/console.out`
+  （未安装时对应 `$BAS_HOME/logs/agent/console.out`），不接受实例名。
 - `tail` 只影响首次窗口定位，不改变后续增量读：控制台取尾部后，用 `from = 上次 to + 1` 再读，
   agent 不保存会话状态，也不需要流式连接。
-- `service:*` 的应答：`result.data = {state:"running"|"stopped", pid?}`。
+- `service:*` 的成功应答：`result.data = {state:"running"|"stopped", pid?}`。
+- `service:*` 的失败应答仍带稳定错误码（如 `start-failed` / `prepare-failed`），
+  并可在 `result.data` 中带限长排错信息：`{detail?, logTail?:[...], truncated?}`。`detail` 最多
+  8 KiB，`logTail` 最多 100 行且每行最多 1000 字节；完整日志继续用 `log:read`。
 - `service:*` 的实例名只能是 `server.xml` 里本机声明的 `farm.server`；动作走 basctl 内部的
   start / stop 分支，不拼 shell 命令。动作完成后 agent 还会重发一次 `report:bas`，控制台不必等
   下一轮周期上报才看到新状态。
@@ -95,7 +101,7 @@ basagent 与 bashub 之间那条 WebSocket 连接上说什么、怎么说。**�
 ## 能力协商
 
 `hello.supports` 是 agent 唯一的自述：它支持的原语名单（本文两张表里属于它的那些，**包括
-`ping` / `report:now` / `log:read` 这些 hub → agent 原语**）。hub 只下发**交集**里的原语——
+`ping` / `report:now` / `log:read` / `agent:log` 这些 hub → agent 原语**）。hub 只下发**交集**里的原语——
 老 agent 不会收到它不认识的东西。
 
 **不设协议版本号**：能力即版本。多一个 `protocol: 1` 就多一张「版本号 ↔ 有哪些功能」的对应表要维护，

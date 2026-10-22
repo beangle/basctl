@@ -81,18 +81,20 @@ rm -rf "$RPMDIR"
 mkdir -p "$DESTDIR/$PKGDIR"
 pushd "$DESTDIR/$PKGDIR" > /dev/null
 
-mkdir -p usr/bin
+mkdir -p usr/bin usr/lib/systemd/system etc/logrotate.d
 cp -f "$BASCTL_HOME/target/basctl" usr/bin/basctl
 cp -f "$BASCTL_HOME/target/basagent" usr/bin/basagent
 strip --strip-unneeded usr/bin/basctl
 strip --strip-unneeded usr/bin/basagent
 chmod 0755 usr/bin/basctl usr/bin/basagent
-chmod -R 0755 .
+install -m 0644 "$BASCTL_HOME/resources/systemd/basagent.service" usr/lib/systemd/system/basagent.service
+install -m 0644 "$BASCTL_HOME/resources/logrotate/bas" etc/logrotate.d/bas
+find . -type d -exec chmod 0755 {} +
 
 # 运行时依赖：curl 负责下载（pull / war 直链）；jstart 由 make/start/resolve/run 使用，
 # 但不作为硬依赖，否则只想用 init/banner/pull 的机器装不上。basagent 的 OpenSSL 3.0
 # 动态库依赖由 rpmbuild 的自动依赖生成记录。
-DEPEND="curl"
+DEPEND="curl, logrotate"
 
 cd ..
 
@@ -144,16 +146,48 @@ outbound WebSocket report/control channel. make/start/resolve/run additionally
 need jstart on PATH.
 Main designer: Duan TiHua
 
+%pre
+getent group beangle >/dev/null || groupadd -r beangle
+getent passwd bas >/dev/null || useradd -r -g beangle -d /var/lib/bas -s /bin/bash \
+  -c "Beangle bas service" bas
+exit 0
+
+%post
+mkdir -p /var/lib/bas /var/log/bas /var/log/bas/agent
+chown bas:beangle /var/lib/bas /var/log/bas /var/log/bas/agent
+chmod 0750 /var/lib/bas /var/log/bas
+chmod 0700 /var/log/bas/agent
+if [ ! -e /var/lib/bas/logs ]; then
+  ln -s /var/log/bas /var/lib/bas/logs
+fi
+systemctl daemon-reload >/dev/null 2>&1 || :
+systemctl enable basagent.service >/dev/null 2>&1 || :
+if [ "\$1" = "2" ]; then
+  systemctl try-restart basagent.service >/dev/null 2>&1 || :
+fi
+exit 0
+
+%preun
+if [ "\$1" = "0" ]; then
+  systemctl stop basagent.service >/dev/null 2>&1 || :
+  systemctl disable basagent.service >/dev/null 2>&1 || :
+fi
+exit 0
+
+%postun
+systemctl daemon-reload >/dev/null 2>&1 || :
+exit 0
+
 %changelog
 $(printf '%b' "$changes")
 
 %files
 EOF
 
-# 定位为命令而非系统服务：安装 /usr/bin/basctl 与 /usr/bin/basagent，无 systemd 单元、
-# 无 %pre/%post/%preun 服务启停脚本、无独立用户
-find "$DESTDIR/$PKGDIR" ! -type d | \
+# basagent 以专用账号 bas:beangle 由 systemd 常驻；logrotate 单独作为配置文件安装。
+find "$DESTDIR/$PKGDIR" ! -type d | grep -v '/etc/logrotate.d/bas$' | \
   sed 's|'"$DESTDIR"'/'"$PKGDIR"'|/|' >> basctl.spec
+echo '%config(noreplace) /etc/logrotate.d/bas' >> basctl.spec
 
 echo >> basctl.spec
 mkdir -p "$RPMDIR"

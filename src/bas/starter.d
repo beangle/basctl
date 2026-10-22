@@ -78,6 +78,11 @@ import std.typecons : Nullable, nullable;
 /** 启动后等待多久（毫秒）再确认进程存活，用于 Webapp 启动失败/依赖缺失的快速反馈。 */
 private enum startupProbeMs = 2000;
 
+/** `service:*` 失败详情上限：完整日志仍由 `log:read` 提供。 */
+private enum maxServiceDetailBytes = 8 * 1024;
+private enum maxServiceLogLines = 100;
+private enum maxServiceLogLineBytes = 1000;
+
 /** 实例 launch spec 文件名；与 `engine-subapps.jstart` 等 jstart 固定约定分开。 */
 private enum launchSpecFile = "launch.jstart";
 
@@ -458,6 +463,9 @@ struct ServiceResult {
   string state;
   int pid;
   string error;
+  string detail;
+  string[] logTail;
+  bool truncated;
 }
 
 /**
@@ -497,13 +505,19 @@ ServiceResult serviceAction(string configFile, string action, string instance) {
     target.http = previous.get.httpPort;
 
   // 与 restart.sh 同序：准备失败就停在原处，不先停服务。
-  if (action == "restart" && prepareServer(basHome, container, target).isNull)
-    return ServiceResult(false, "", 0, "prepare-failed");
+  if (action == "restart" && prepareServer(basHome, container, target).isNull) {
+    auto result = ServiceResult(false, "", 0, "prepare-failed");
+    attachFailureDetail(basHome, instance, result);
+    return result;
+  }
 
   if (action == "stop" || action == "restart") {
     final switch (stopInstance(basHome, target, false, defaultStopTimeoutSec)) {
-    case StopOutcome.failed:
-      return ServiceResult(false, "", 0, "stop-failed");
+    case StopOutcome.failed: {
+      auto result = ServiceResult(false, "", 0, "stop-failed");
+      attachFailureDetail(basHome, instance, result);
+      return result;
+    }
     case StopOutcome.stopped:
     case StopOutcome.notRunning:
       break;
@@ -513,12 +527,61 @@ ServiceResult serviceAction(string configFile, string action, string instance) {
       return ServiceResult(true, "stopped", 0, "");
   }
 
-  if (startServers(container, basHome, [target], defaultPortRange, false) != 0)
-    return ServiceResult(false, "", 0, "start-failed");
+  if (startServers(container, basHome, [target], defaultPortRange, false) != 0) {
+    auto result = ServiceResult(false, "", 0, "start-failed");
+    attachFailureDetail(basHome, instance, result);
+    return result;
+  }
   auto info = readInstanceInfo(basHome, instance);
-  if (info.isNull || info.get.pid <= 0 || !processRunning(info.get.pid))
-    return ServiceResult(false, "", 0, "start-failed");
+  if (info.isNull || info.get.pid <= 0 || !processRunning(info.get.pid)) {
+    auto result = ServiceResult(false, "", 0, "start-failed");
+    attachFailureDetail(basHome, instance, result);
+    return result;
+  }
   return ServiceResult(true, "running", info.get.pid, "");
+}
+
+/**
+ * 给失败结果补上本机可读的详情：准备错误文件与实例 console.out 的尾部。
+ *
+ * `error` 保持稳定的机器码（`start-failed` 等），人类可读内容只放 `detail` / `logTail`，
+ * 两者都限长；完整日志仍由控制台的 `log:read` 按需拉取。
+ */
+private void attachFailureDetail(string basHome, string instance, ref ServiceResult result) {
+  auto errorFile = buildPath(basHome, "servers", instance, "error");
+  if (exists(errorFile)) {
+    try
+      result.detail = truncateUtf8(strip(readText(errorFile)), maxServiceDetailBytes, result.truncated);
+    catch (Exception)
+      result.detail = "";
+  }
+
+  auto logPath = consoleLog(basHome, instance);
+  if (!exists(logPath))
+    return;
+  try {
+    auto window = readTail(logPath, maxServiceLogLines);
+    if (window.total > maxServiceLogLines)
+      result.truncated = true;
+    foreach (line; window.lines) {
+      bool lineTruncated;
+      result.logTail ~= truncateUtf8(line, maxServiceLogLineBytes, lineTruncated);
+      result.truncated = result.truncated || lineTruncated;
+    }
+  } catch (Exception) {
+    result.logTail = [];
+  }
+}
+
+/** 按字节截断 UTF-8 文本，避免切在多字节字符中间。 */
+private string truncateUtf8(string text, size_t limit, ref bool truncated) {
+  if (text.length <= limit)
+    return text;
+  auto cut = limit;
+  while (cut > 0 && (cast(ubyte) text[cut] & 0xC0) == 0x80)
+    cut--;
+  truncated = true;
+  return text[0 .. cut];
 }
 
 /** 等进程退出，最多 `timeoutSec` 秒；已经退出返回 true。 */

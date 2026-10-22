@@ -24,7 +24,7 @@
  */
 module test.agent_test;
 
-import bas.agent : channelEnabled, logReadResult, runAgent, runReport, serviceResult;
+import bas.agent : agentLogResult, channelEnabled, logReadResult, runAgent, runReport, serviceResult;
 import bas.channel : Envelope, parseEnvelope;
 import bas.remote : loadRemoteConf;
 
@@ -156,6 +156,18 @@ import std.uuid : randomUUID;
   auto missing = parseJSON(`{"instance":"ghost.server1"}`);
   auto reply = parseEnvelope(logReadResult(home, "r3", missing));
   assert(reply.body["error"].str == "no-log", reply.body["error"].str);
+}
+
+@("agentLogResult reads the agent console without an instance name") unittest {
+  auto home = buildPath(tempDir(), "basctl-agent-own-log-" ~ randomUUID().toString);
+  mkdirRecurse(buildPath(home, "logs", "agent"));
+  write(buildPath(home, "logs", "agent", "console.out"), "hello\nworld\n".representation);
+
+  auto request = parseJSON(`{"tail":1}`);
+  auto reply = parseEnvelope(agentLogResult(home, "a1", request));
+  assert(reply.body["ok"].boolean, reply.body.toString());
+  assert(reply.body["data"]["total"].integer == 2, reply.body.toString());
+  assert(reply.body["data"]["lines"].array[0].str == "world", reply.body.toString());
 }
 
 @("serviceResult rejects bad requests and unknown instances without touching the host") unittest {
