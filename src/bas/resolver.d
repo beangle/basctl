@@ -113,8 +113,8 @@ Nullable!string chooseSnapshotEntry(string basHome, Artifact gav, Nullable!strin
 /**
  * 确保一个构件在本地存在，返回其本地绝对路径。
  *
- * 正式版用 release 仓库、开发版用快照仓库，两者都交给 jstart fetch；上游不可达时
- * 退回本地快照库已有文件。
+ * 两者都交给 jstart fetch；fetch 对 Maven SNAPSHOT 的 jar/war 会按 `latest` /
+ * `maven-metadata.xml` 解析最新时间戳，native tar.gz 才按字面版本处理。
  */
 Nullable!string resolveArtifact(Repository releaseRepo, SnapshotRepo snapshotRepo, Artifact gav) {
   if (gav.isSnapshot())
