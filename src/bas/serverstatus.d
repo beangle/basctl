@@ -21,14 +21,14 @@ module bas.serverstatus;
 
 import bas.config : Server;
 
-import std.algorithm : canFind, splitter;
-import std.string : startsWith;
+import std.algorithm : canFind, filter, splitter;
+import std.string : lastIndexOf, startsWith;
 import std.conv : to;
-import std.array : split;
+import std.array : array, split;
 import std.datetime.systime : Clock;
 import std.file;
 import std.format : format;
-import std.path : buildPath;
+import std.path : baseName, buildPath;
 
 /**
  * 扫描 `/proc`，返回命令行带 `-Dbas.server=<instance>` 的进程（Linux）。
@@ -74,6 +74,81 @@ int[] instanceProcessIds(string instance, string home = "") @trusted {
       }
     } catch (Exception) {
       // /proc 不可读就返回空，调用方只做提示
+    }
+  }
+  return pids;
+}
+
+/**
+ * 找出在 `port` 上 LISTEN 的进程（Linux）。
+ *
+ * 用于端口被占时的报错：先查 `/proc/net/tcp{,6}` 里该端口的 socket inode，再扫 `/proc/<pid>/fd`
+ * 找持有这个 socket 的进程。读不到（权限不足、进程已退出）就返回空——调用方只把它当补充信息。
+ */
+int[] listeningProcessIds(ushort port) @trusted {
+  int[] pids;
+  version (linux) {
+    long[] inodes;
+    auto portHex = format!"%04X"(port);
+    foreach (table; ["/proc/net/tcp", "/proc/net/tcp6"]) {
+      string text;
+      try
+        text = readText(table);
+      catch (Exception)
+        continue;
+      auto lines = text.split('\n');
+      foreach (line; lines.length > 1 ? lines[1 .. $] : []) {
+        auto fields = line.splitter().filter!(s => s.length > 0).array;
+        if (fields.length < 10 || fields[3] != "0A")
+          continue;
+        auto colon = fields[1].lastIndexOf(':');
+        if (colon < 0 || fields[1][colon + 1 .. $] != portHex)
+          continue;
+        try
+          inodes ~= fields[9].to!long;
+        catch (Exception) {
+          // inode 解析失败就跳过这一行
+        }
+      }
+    }
+    if (!inodes.length)
+      return pids;
+    try {
+      foreach (entry; dirEntries("/proc", SpanMode.shallow)) {
+        if (!entry.isDir)
+          continue;
+        int pid;
+        try
+          pid = baseName(entry.name).to!int;
+        catch (Exception)
+          continue;
+        if (pid <= 0)
+          continue;
+        bool held;
+        try {
+          foreach (fd; dirEntries(entry.name ~ "/fd", SpanMode.shallow)) {
+            string target;
+            try
+              target = readLink(fd.name);
+            catch (Exception)
+              continue;
+            foreach (inode; inodes) {
+              if (target == "socket:[" ~ inode.to!string ~ "]") {
+                held = true;
+                break;
+              }
+            }
+            if (held)
+              break;
+          }
+        } catch (Exception) {
+          // 读不到这个进程的 fd（权限/已退出）就跳过
+        }
+        if (held)
+          pids ~= pid;
+      }
+    } catch (Exception) {
+      // /proc 不可读就只返回已经找到的部分
     }
   }
   return pids;

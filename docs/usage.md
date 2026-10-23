@@ -122,7 +122,7 @@ setline 与 bashub 通道互不依赖，配置、部署与安全边界统一见 
 |---|---|
 | `basctl version` | 打印 `basctl <版本>`（单行纯文本，便于脚本取值） |
 | `basctl banner [server.xml]` | 操作者横幅：logo + bas 引擎版本（取自 `<bas version>`）+ basctl 版本 + 本机地址；`bas.sh version` 调它。图形为纯 ASCII，只在交互终端出现，重定向到日志/管道时只剩版本行与本机地址 |
-| `basctl status` | 列出 `$BAS_HOME/servers` 下运行中的实例：读 `server.info` 展示 pid、端口与各 webapp 的对外 url（引擎与启动时间只留在 `server.info` 里，不再打印）；pid 已不在的显示为 `stale`。配了 `<setline>` 时另起一节报名命空间、管理口地址与通不通（`up` / `down`），并读一次 `GET /_setline/routes`（本机来源免凭据）给出 route 列（缺 / 端口对不上 / 多 / `routes in sync`） |
+| `basctl status` | 列出 `$BAS_HOME/servers` 下运行中的实例：读 `server.info` 展示 pid、端口与各 webapp 的对外 url（引擎与启动时间只留在 `server.info` 里，不再打印）。记录 pid 已失效时，会按命令行 `-Dbas.server` + `-Dbas.home` 找回本实例的真实进程；找不到就不出现在这一节（不再打印 `stale`）。配了 `<setline>` 时另起一节报名命空间、管理口地址与通不通（`up` / `down`），并读一次 `GET /_setline/routes`（本机来源免凭据）给出 route 列（缺 / 端口对不上 / 多 / `routes in sync`） |
 | `basctl logs [server.xml] <farm.server> [-n <行数>] [-f]` | 读 `$BAS_HOME/logs/<farm.server>/console.out` 的尾部：`-n` 缺省 50 行、上限 2000；`-f` 持续跟随（Ctrl-C 退出），日志滚动后自动跟新文件。归档的旧日志在 `logs/archive/`，要查直接读文件 |
 | `basctl init [--force] [--dry-run] [workdir]` | 初始化组件目录：把控制脚本铺到 `<workdir>/bin`，并生成带注释的 `conf/basctl.conf` 模板（已存在则不覆盖） |
 | `basctl make [server.xml] <farm\|server\|all>` | 只准备不启动：生成 jstart spec 并 `jstart resolve` 预取依赖 |
@@ -261,7 +261,8 @@ basctl firewall /opt/bas          # 交互式地放行 server.xml 里的端口
 | `Route conflict on /x` | 同一个路径被**端口集合不同**的多个 webapp 认领 | 给 webapp 显式声明 `<url path="…"/>`，让每个前缀有唯一归属 |
 | `No setline listening on …`（推送 / `start`） | setline 没在跑，或管理口端口不对 | 看 `<setline port>`（那是 setline 的 `adminListen` 端口）；basctl 不会替你拉起 setline |
 | `Cannot run jstart …` | `jstart` 不在 `PATH` | 装 jstart，或 `export beangle_jstart=/path/to/jstart`；`basctl doctor` 会提示它是否就位（`jstart` 为可选提示，不影响 doctor 退出码，但实际调用仍会失败） |
-| `status` 里某个实例是 `stale` | 进程已不在（崩了或手工 kill） | `basctl stop <name>` 清掉运行信息，再 `start`；对账会把它的路由摘掉 |
+| `status` 里看不到某个实例，但 `servers/<name>` 还在 | 进程真的不在了（崩了或手工 kill），命令行也匹配不到 | `basctl stop <name>` 清掉残留运行信息，再 `start`；对账会把它的路由摘掉 |
+| `start` 报 `port ... is already in use` | 端口被别的进程占着（常见是未登记的残留实例） | 先 `basctl stop <name>`（会按命令行找回本实例残留进程并停掉）；报错里会带本实例残留 pid 和真正监听该端口的 pid（Linux），用 `ps -fp <pid>` 确认占用者，必要时手工停掉或换端口 |
 | 容器外访问不到 | 出口端口没映射，或 setline 的 `listen` 绑成了 `127.0.0.1` | `-p 8080:8080` 且容器内 `listen` 绑 `*:8080`（入口脚本默认如此），见 [container.md](container.md) |
 
 外部命令是否就位，优先用 `basctl doctor` 自查；它的输出与退出码见 [doctor.md](doctor.md)。

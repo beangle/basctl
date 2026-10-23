@@ -38,7 +38,7 @@ import bas.logs : runLogs;
 import bas.net;
 import bas.shellenv : readContainer;
 import bas.resolver;
-import bas.serverinfo : ServerInfo, liveInstances, readInstanceInfo;
+import bas.serverinfo : ServerInfo, liveInstancePid, liveInstances, readInstanceInfo;
 import bas.serverstatus;
 import bas.setline : SetlineConflict, conflictLines, parseRouteTable, routeDriftLines, runningPlan;
 import bas.setlineproc : RouteRead, fetchRouteTable, syncRoutesToSetline;
@@ -434,8 +434,8 @@ public string[] setlineStatusLines(const Container container, const(ServerInfo)[
  * `status`：列出 `$BAS_HOME/servers` 下仍在运行的实例。
  *
  * 有运行信息（`server.info`）的实例按它展示端口、引擎、启动时间与各 webapp 的对外 url——端口是
- * 启动前就定下的，不必再用 `ss` / `netstat` 反查监听端口（Windows 开发机同样可用）。pid 已经
- * 不在的显示成 `stale`，提示信息还在但进程没了；没有运行信息的目录直接忽略。
+ * 启动前就定下的，不必再用 `ss` / `netstat` 反查监听端口（Windows 开发机同样可用）。记录 pid
+ * 不在时按命令行找回本实例再展示；找不到就不出现（不再打印 stale 行）；没有运行信息的目录直接忽略。
  */
 int cmdStatus() {
   auto basHome = resolveBasHome();
@@ -464,12 +464,13 @@ int cmdStatus() {
     auto info = readInstanceInfo(basHome, name);
     if (info.isNull)
       continue;
-    if (info.get.pid <= 0 || !processRunning(info.get.pid)) {
-      lines ~= staleStatusLine(info.get, name);
-    } else {
-      lines ~= statusLines(info.get);
-      live ~= info.get;
-    }
+    // 记录 pid 失效但命令行仍能匹配到本实例时，按真实进程展示；真的不在了就不出现在 running 一节。
+    auto livePid = liveInstancePid(basHome, name);
+    if (livePid.isNull)
+      continue;
+    info.get.pid = livePid.get;
+    lines ~= statusLines(info.get);
+    live ~= info.get;
   }
 
   if (lines.length) {
@@ -511,8 +512,3 @@ public string[] statusLines(const ServerInfo info) {
   return lines;
 }
 
-/** 有运行信息但进程已不在的实例：信息还在，说明它是崩溃或被 `kill -9` 留下的。 */
-public string staleStatusLine(const ServerInfo info, string name) {
-  auto pid = info.pid > 0 ? " pid=" ~ info.pid.to!string : "";
-  return format!"%s(stale%s port=%s)"(info.id.length ? info.id : name, pid, info.httpPort);
-}

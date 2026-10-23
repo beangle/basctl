@@ -24,6 +24,24 @@ import std.path : buildPath;
 import std.process : spawnProcess, thisProcessID, wait;
 import std.uuid : randomUUID;
 
+@("listeningProcessIds finds the process holding a listening socket") unittest {
+  version (linux) {
+    import std.algorithm : canFind;
+    import std.socket : AddressFamily, InternetAddress, Socket, SocketOption, SocketOptionLevel,
+      SocketType;
+
+    auto sock = new Socket(AddressFamily.INET, SocketType.STREAM);
+    sock.setOption(SocketOptionLevel.SOCKET, SocketOption.REUSEADDR, 1);
+    sock.bind(new InternetAddress("127.0.0.1", 0));
+    sock.listen(1);
+    scope (exit) sock.close();
+
+    auto addr = cast(InternetAddress) sock.localAddress;
+    auto pids = listeningProcessIds(addr.port);
+    assert(pids.canFind(thisProcessID));
+  }
+}
+
 @("pidLooksLikeInstance leaves processes without the marker alone") unittest {
   assert(!pidLooksLikeInstance(thisProcessID, "no-such-instance-marker"));
   assert(!pidLooksLikeInstance(0, "any"));

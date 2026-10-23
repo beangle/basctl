@@ -19,8 +19,8 @@
  *
  * 两条规矩：
  *
- * - **运行状态只报事实**：`instances` 直接取自 `servers/<实例>/server.info`
- *   （{@link bas.serverinfo.liveInstances}），不从配置推断谁在运行。
+ * - **运行状态只报事实**：`instances` 取自 `servers/<实例>/server.info`
+ *   （{@link bas.serverinfo.liveInstances}；记录 pid 失活时按命令行找回本实例），不从配置推断谁在运行。
  * - **另报可操作清单**：`declared` 是本机 `server.xml` 声明的实例，供控制台在实例停止后仍能
  *   发起 `service:start`；它与 `instances` 分开，不把配置意图混进运行事实。
  * - **取不到就留空，不伪造**：Windows 开发机上没有 `/proc`，那些字段就缺着，控制台按「不可用」

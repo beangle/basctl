@@ -31,7 +31,7 @@
 module bas.serverinfo;
 
 import bas.fsutil : mkdirPrivate;
-import bas.serverstatus : processRunning;
+import bas.serverstatus : instanceProcessIds, processRunning;
 
 import std.algorithm : canFind, sort;
 import std.array : appender;
@@ -223,12 +223,29 @@ Nullable!int instancePid(string basHome, string instance) {
   return Nullable!int.init;
 }
 
-/** 实例记录的 pid 且进程确实活着；否则为空（陈旧信息由调用方决定要不要清理）。 */
+/**
+ * `server.info` 的记录 pid 已不在时，按命令行找回本实例的真实进程。
+ *
+ * 典型来源：上一次启动失败把 pid 覆盖成了新进程（旧进程还活着），或手工 kill 错了 pid。
+ * 匹配同时要求 `-Dbas.server=<name>` 与 `-Dbas.home=<serverDir>`，多个命中取最小 pid，输出稳定。
+ */
+private Nullable!int adoptedInstancePid(string basHome, string instance) {
+  auto pids = instanceProcessIds(instance, buildPath(basHome, "servers", instance));
+  if (pids.length == 0)
+    return Nullable!int.init;
+  auto pid = pids[0];
+  foreach (p; pids[1 .. $])
+    if (p < pid)
+      pid = p;
+  return nullable(pid);
+}
+
+/** 实例的真实 pid：记录的 pid 活着就用它，否则按命令行找回残留进程；都没有为空。 */
 Nullable!int liveInstancePid(string basHome, string instance) {
   auto pid = instancePid(basHome, instance);
-  if (pid.isNull || !processRunning(pid.get))
-    return Nullable!int.init;
-  return pid;
+  if (!pid.isNull && processRunning(pid.get))
+    return pid;
+  return adoptedInstancePid(basHome, instance);
 }
 
 /**
@@ -255,11 +272,15 @@ ServerInfo[] liveInstances(string basHome) {
     auto info = readInstanceInfo(basHome, name);
     if (info.isNull)
       continue;
-    if (info.get.pid <= 0 || !processRunning(info.get.pid))
-      continue;
     if (info.get.httpPort <= 0)
       continue;
-    infos ~= info.get;
+    auto pid = info.get.pid > 0 && processRunning(info.get.pid)
+        ? nullable(info.get.pid) : adoptedInstancePid(basHome, name);
+    if (pid.isNull)
+      continue;
+    auto value = info.get;
+    value.pid = pid.get;
+    infos ~= value;
   }
   return infos;
 }

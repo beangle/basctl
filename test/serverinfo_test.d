@@ -20,7 +20,8 @@ module test.serverinfo_test;
 import bas.serverinfo;
 import bas.serverstatus : processRunning;
 
-import core.time : hours;
+import core.thread : Thread;
+import core.time : hours, msecs;
 import std.algorithm : canFind;
 import std.array : split;
 import std.datetime : DateTime, SimpleTimeZone, SysTime, UTC;
@@ -173,6 +174,43 @@ url = /b
   info.pid = 0;
   writeInstanceInfo(home, "f.s1", info);
   assert(liveInstancePid(home, "f.s1").isNull);
+}
+
+@("liveInstancePid adopts a matching process when the recorded pid is stale") unittest {
+  version (linux) {
+    auto home = newHome("adopt");
+    scope (exit) rmdirRecurse(home);
+    // 名字带随机后缀：避免并行/残留用例的进程被当成同一个实例
+    auto name = "f.s1-" ~ randomUUID().toString();
+    auto dir = serverDir(home, name);
+    auto info = sample();
+    info.id = name;
+    info.pid = 0x7fffffff; // 不可能存在、也不会被系统复用的 pid
+    writeInstanceInfo(home, name, info);
+
+    auto child = spawnProcess(["/bin/sh", "-c", "while :; do :; done",
+        "-Dbas.server=" ~ name, "-Dbas.home=" ~ dir]);
+    auto pid = child.processID;
+    scope (exit) {
+      if (processRunning(pid)) {
+        import core.sys.posix.signal : SIGTERM, kill;
+        kill(pid, SIGTERM);
+      }
+      wait(child);
+    }
+
+    // spawnProcess 返回时子进程的命令行可能还没就位，给 /proc 一点时间
+    auto resolved = liveInstancePid(home, name);
+    foreach (attempt; 0 .. 50) {
+      resolved = liveInstancePid(home, name);
+      if (!resolved.isNull)
+        break;
+      Thread.sleep(msecs(20));
+    }
+    assert(!resolved.isNull && resolved.get == pid);
+    auto infos = liveInstances(home);
+    assert(infos.length == 1 && infos[0].pid == pid);
+  }
 }
 
 @("localIsoTimestamp keeps the local offset") unittest {

@@ -18,7 +18,7 @@
 module test.main_test;
 
 import bas.config : Container, Host, parseServerXml;
-import bas.main : setlineStatusLines, staleStatusLine, statusLines;
+import bas.main : setlineStatusLines, statusLines;
 import bas.serverinfo : ServerInfo, WebappInfo;
 
 import core.thread : Thread;
@@ -49,18 +49,6 @@ import std.typecons : nullable;
   assert(lines[1] == "  /portal  gav://org.beangle.ems:beangle-ems-portal:4.20.13");
   assert(lines[2] == "  /        gav://org.beangle.otk:beangle-otk-ws:war:0.0.30"
       ~ "  urls=/context1,/context2");
-}
-
-@("staleStatusLine marks run info left behind by a dead process") unittest {
-  ServerInfo info;
-  info.id = "platform.server2";
-  info.httpPort = 20002;
-  info.pid = 999;
-  assert(staleStatusLine(info, "platform.server2") == "platform.server2(stale pid=999 port=20002)");
-
-  info.id = "";
-  info.pid = 0;
-  assert(staleStatusLine(info, "platform.server2") == "platform.server2(stale port=20002)");
 }
 
 @("setlineStatusLines reports the namespace, the admin port and whether it answers") unittest {

@@ -29,10 +29,10 @@
 | `basctl start` 确认实例存活后 | 补写 `pid` |
 | 启动失败 | 删除该文件（不留半个实例） |
 | `basctl stop` 正常停止后 | 删除该文件 |
-| 崩溃 / `kill -9` | 文件残留；pid 不存活即为 stale，由读者判定，不在文件里记状态 |
+| 崩溃 / `kill -9` | 文件残留；pid 不存活时读者会按命令行找回本实例，找不到才视为不存在，不在文件里记状态 |
 
-文件本身**不记录状态**（starting / running / stale）：状态一律由 pid 是否存在、是否存活推导，
-少一个需要同步的字段。
+文件本身**不记录状态**（starting / running / stale）：状态由 pid 是否存在、是否存活，以及命令行
+能否匹配到本实例推导，少一个需要同步的字段。
 
 ## 格式
 
@@ -171,15 +171,17 @@ jstart 只负责"解析 + 准备 + exec"，实例身份与停止交给 basctl（
 随后生成的 spec 才能带上 `--port=`。准备失败（webapp 解析不出来、引擎依赖缺件）时撤销预留，避免
 这个端口被永久占着。
 
-`stop` 的动作顺序：读 pid → 进程不在就直接清掉陈旧信息（重复 `stop` 不会越做越乱）→ 核对身份 →
+`stop` 的动作顺序：读 pid → 进程不在时先按命令行（`-Dbas.server=<name>` + `-Dbas.home=<serverDir>`）
+找回本实例的残留进程并停掉，找不到才清掉陈旧信息（重复 `stop` 不会越做越乱）→ 核对身份 →
 SIGTERM 并等 `--timeout`（缺省 15 秒）→ 仍在则报错退出（`--force` 才 SIGKILL）。**身份核对**
 （`pidLooksLikeInstance`）看 Linux 的 `/proc/<pid>/cmdline` 里有没有 `-Dbas.server=<name>`
 （jstart 把长参数写进 `@argfile` 时，跟着这个文件再看一层，见 `src/bas/serverstatus.d`）：
 pid 会被系统回收，照着一个陈旧 pid 发信号可能伤及无辜；判定不了时（非 Linux、读不到 cmdline）
 不拦。`--force` 跳过核对，直接 SIGKILL，留作逃生门。
 
-`status` 对 pid 已不在的实例打印 `name(stale pid=... port=...)`：信息还在说明它崩溃或被
-`kill -9` 了；`status` 只读，不清理（清理交给 `stop`，或者用 `--force` 直接杀）。
+`status` 不打印 `stale` 行：记录 pid 不在时先按同一组命令行标记找回本实例的真实进程，找到就按
+真实 pid 展示（端口与 webapp 仍来自 `server.info`），找不到就不出现在 running 一节。`status` 只读，
+不清理（清理交给 `stop`，或者用 `--force` 直接杀）。
 
 `stop` 按 `server.xml` 选实例，所以**已经从配置里删掉**的实例它选不到：那种情况下直接删掉
 `servers/<name>/`（连同 `server.info`）即可。

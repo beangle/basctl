@@ -55,8 +55,8 @@ import bas.portalloc : PortRange, defaultPortRange, defaultPortRangeText, parseP
 import bas.resolver : resolveArtifact, resolveWebapps;
 import bas.serverinfo : ServerInfo, WebappInfo, instancePid, liveInstancePid, liveInstances,
   localIsoTimestamp, readInstanceInfo, removeInstanceInfo, writeInstanceInfo;
-import bas.serverstatus : instanceProcessIds, pidLooksLikeInstance, processRunning, rollLog,
-  signalProcess;
+import bas.serverstatus : instanceProcessIds, listeningProcessIds, pidLooksLikeInstance, processRunning,
+  rollLog, signalProcess;
 import bas.setline : SetlineConflict, conflictLines, runningPlan, setlinePlan;
 import bas.setlineproc : syncRoutesToSetline;
 import bas.spec : SubappSpec, engineInitCommand, renderLaunchSpec, shellQuote;
@@ -416,34 +416,24 @@ private enum StopOutcome {
 private StopOutcome stopInstance(string basHome, Server server, bool force, int timeoutSec) {
   auto name = server.qualifiedName;
   auto pid = instancePid(basHome, name);
+  auto serverHome = buildPath(basHome, "servers", name);
   if (pid.isNull) {
     // 运行信息可能丢过，但进程还在（例如上一次启动在绑定端口前就写坏了 info）：
     // 按命令行里的 `-Dbas.server` + `-Dbas.home` 找回本实例，先停掉再让 restart 起新的。
-    auto stale = instanceProcessIds(name, buildPath(basHome, "servers", name));
+    auto stale = instanceProcessIds(name, serverHome);
     if (stale.length == 0) {
       stderr.writeln(name ~ ": no run info (servers/" ~ name ~ "/server.info); "
           ~ "nothing basctl started is running.");
       return StopOutcome.notRunning;
     }
-    writeln(name ~ ": no run info; stopping stale process(es) " ~ stale.map!(p => p.to!string).join(", "));
-    foreach (p; stale)
-      if (processRunning(p))
-        signalProcess(p, force);
-    bool failed;
-    foreach (p; stale) {
-      if (!waitForExit(p, timeoutSec)) {
-        stderr.writeln(name ~ ": stale pid " ~ p.to!string ~ " did not exit in "
-            ~ timeoutSec.to!string ~ "s; rerun with --force to SIGKILL it.");
-        failed = true;
-      }
-    }
-    if (failed)
-      return StopOutcome.failed;
-    removeRunInfo(basHome, name);
-    writeln(name ~ ": stopped stale instance process(es).");
-    return StopOutcome.stopped;
+    return stopStaleProcesses(basHome, name, stale, force, timeoutSec);
   }
   if (!processRunning(pid.get)) {
+    // 记录的 pid 已经没了，但同实例的进程可能还在（pid 被覆盖/手工 kill 错）：
+    // 先按命令行把它停掉，而不是只删 info 留一个端口占用者。
+    auto stale = instanceProcessIds(name, serverHome);
+    if (stale.length > 0)
+      return stopStaleProcesses(basHome, name, stale, force, timeoutSec);
     removeRunInfo(basHome, name);
     writeln(name ~ ": not running; removed stale run info (pid=" ~ pid.get.to!string ~ ").");
     return StopOutcome.notRunning;
@@ -477,6 +467,28 @@ private StopOutcome stopInstance(string basHome, Server server, bool force, int 
   }
   removeRunInfo(basHome, name);
   writeln(name ~ ": stopped (pid=" ~ pid.get.to!string ~ ").");
+  return StopOutcome.stopped;
+}
+
+/** 停掉按命令行找回的本实例残留进程；全部退出后清掉运行信息。 */
+private StopOutcome stopStaleProcesses(string basHome, string name, const(int)[] stale,
+    bool force, int timeoutSec) {
+  writeln(name ~ ": stopping stale process(es) " ~ stale.map!(p => p.to!string).join(", "));
+  foreach (p; stale)
+    if (processRunning(p))
+      signalProcess(p, force);
+  bool failed;
+  foreach (p; stale) {
+    if (!waitForExit(p, timeoutSec)) {
+      stderr.writeln(name ~ ": stale pid " ~ p.to!string ~ " did not exit in "
+          ~ timeoutSec.to!string ~ "s; rerun with --force to SIGKILL it.");
+      failed = true;
+    }
+  }
+  if (failed)
+    return StopOutcome.failed;
+  removeRunInfo(basHome, name);
+  writeln(name ~ ": stopped stale instance process(es).");
   return StopOutcome.stopped;
 }
 
@@ -555,13 +567,16 @@ ServiceResult serviceAction(string configFile, string action, string instance) {
     attachFailureDetail(basHome, instance, result);
     return result;
   }
+  // start 可能因「已按命令行找回本实例」而跳过，此时 server.info 里的旧 pid 可能是死的：
+  // 以 liveInstancePid 为准，避免把已经运行着的实例回报成 start-failed。
   auto info = readInstanceInfo(basHome, instance);
-  if (info.isNull || info.get.pid <= 0 || !processRunning(info.get.pid)) {
+  auto pid = liveInstancePid(basHome, instance);
+  if (info.isNull || pid.isNull) {
     auto result = ServiceResult(false, "", 0, "start-failed");
     attachFailureDetail(basHome, instance, result);
     return result;
   }
-  return ServiceResult(true, "running", info.get.pid, "");
+  return ServiceResult(true, "running", pid.get, "");
 }
 
 /**
@@ -675,6 +690,9 @@ private Nullable!ServerInfo reserveInstance(string basHome, Container container,
       auto pids = instanceProcessIds(name, buildPath(basHome, "servers", name));
       if (pids.length > 0)
         message ~= "; stale instance process(es): " ~ pids.map!(p => p.to!string).join(", ");
+      auto listeners = listeningProcessIds(cast(ushort) server.http);
+      if (listeners.length > 0)
+        message ~= "; listening pid(s): " ~ listeners.map!(p => p.to!string).join(", ");
       message ~= ". Stop the process holding the port and retry.";
       stderr.writeln(message);
       mkdirRecurse(buildPath(basHome, "servers", name));
