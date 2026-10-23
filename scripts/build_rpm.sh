@@ -154,7 +154,11 @@ getent passwd bas >/dev/null || useradd -r -g beangle -d /var/lib/bas -s /bin/ba
 exit 0
 
 %post
-mkdir -p /var/lib/bas /var/log/bas /var/log/bas/agent
+mkdir -p /var/lib/bas /var/lib/bas/conf /var/log/bas /var/log/bas/agent
+# basctl.conf 是用户配置：只在缺失时从模板生成，升级/重装/卸载都不覆盖或删除。
+if [ ! -f /var/lib/bas/conf/basctl.conf ]; then
+  install -m 0600 /usr/share/basctl/basctl.conf /var/lib/bas/conf/basctl.conf
+fi
 chown bas:beangle /var/lib/bas /var/log/bas /var/log/bas/agent
 chown -R bas:beangle /var/lib/bas/bin /var/lib/bas/conf
 chmod 0750 /var/lib/bas /var/lib/bas/bin /var/lib/bas/conf /var/log/bas
@@ -190,9 +194,10 @@ EOF
 
 # basagent 以专用账号 bas:beangle 由 systemd 常驻；logrotate 单独作为配置文件安装。
 find "$DESTDIR/$PKGDIR" ! -type d | \
-  grep -v -e '/etc/logrotate.d/bas$' -e '/var/lib/bas/conf/basctl.conf$' | \
+  grep -v -e '/etc/logrotate.d/bas$' | \
   sed 's|'"$DESTDIR"'/'"$PKGDIR"'|/|' >> basctl.spec
-echo '%config(noreplace) /var/lib/bas/conf/basctl.conf' >> basctl.spec
+# %ghost：文件由 %post 生成、属于用户，rpm 卸载时不删除；升级/重装保留原值。
+echo '%ghost %config(noreplace) /var/lib/bas/conf/basctl.conf' >> basctl.spec
 echo '%config(noreplace) /etc/logrotate.d/bas' >> basctl.spec
 
 echo >> basctl.spec

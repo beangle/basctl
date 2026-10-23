@@ -58,6 +58,9 @@ chmod 0755 usr/bin/basctl usr/bin/basagent
 install -m 0644 "$BASCTL_HOME/resources/systemd/basagent.service" lib/systemd/system/basagent.service
 install -m 0644 "$BASCTL_HOME/resources/logrotate/bas" etc/logrotate.d/bas
 basctl_stage_runtime_home "$DESTDIR/$PKGDIR"
+# DEB 的 conffiles 要求文件在包内；remove 会保留它，只有 purge 才删除。
+install -d -m 0755 "$DESTDIR/$PKGDIR/var/lib/bas/conf"
+install -m 0600 "$BASCTL_HOME/resources/bas/init/basctl.conf" "$DESTDIR/$PKGDIR/var/lib/bas/conf/basctl.conf"
 
 # DEBIAN 控制文件
 mkdir -p DEBIAN

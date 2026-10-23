@@ -159,8 +159,14 @@ basctl init --dry-run /opt/bas # 只打印将会写入的文件
 
 `conf/basctl.conf` 一旦存在就永不覆盖，`--force` 也只作用于脚本；`bin/setenv.sh` 与
 `conf/server.xml` 是用户配置，`init` 不生成。使用系统包时，升级会刷新 `bin/*.sh`，并保留已有
-的 `basctl.conf`；非系统包目录仍可在升级 basctl 后重跑 `basctl init --force`。不再有单独的
-发行包 zip（原 `bas.sh update` 已移除）。
+的 `basctl.conf`。RPM 把模板放在 `/usr/share/basctl/basctl.conf`，`%post` 只在
+`/var/lib/bas/conf/basctl.conf` 缺失时生成，并以 `%ghost` 登记——卸载、重装、升级都不会覆盖或
+删除它；DEB 仍按 conffile 安装，`apt remove` 保留、`apt purge` 才删除。非系统包目录仍可在
+升级 basctl 后重跑 `basctl init --force`。不再有单独的发行包 zip（原 `bas.sh update` 已移除）。
+
+> **`conf/basctl.conf` 是用户配置，卸载、重装、升级都不得删除或覆盖。** RPM 不要把它改回
+> `%files` 里的普通 `%config`，也不要在 `%preun`/`%postun` 里 `rm`；模板 + 缺失时生成 + `%ghost`
+> 是唯一入口。DEB 的 conffile 语义是 `apt remove` 保留、`apt purge` 删除。
 
 **替换 basagent 不会停实例。** `basctl start` 拉起的实例本来就是独立进程；控制台
 `service:start` 拉起的实例会继承 `basagent.service` 的 cgroup，因此单元设置为

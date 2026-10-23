@@ -68,7 +68,8 @@ dub test --compiler=ldc2
 `unittest` + `@("...")` 具名用例。
 
 打包成 deb / rpm（同一安装包内包含 `/usr/bin/basctl`、`/usr/bin/basagent`，并在
-`/var/lib/bas` 预置 `bin/*.sh` 与 `conf/basctl.conf` 模板）见 [scripts/README.md](scripts/README.md)：
+`/var/lib/bas` 预置 `bin/*.sh`；`basctl.conf` 模板放在 `/usr/share/basctl/basctl.conf`，缺失时生成、
+不随卸载删除）见 [scripts/README.md](scripts/README.md)：
 `scripts/build_deb.sh`（Debian 系）与 `scripts/build_rpm.sh`（Fedora/RHEL 系），版本取自
 `src/bas/versioninfo.d` 的 `basctlVersion`，与 `basctl version` / `basagent version` 的输出一致。
 

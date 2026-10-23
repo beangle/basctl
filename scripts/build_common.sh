@@ -34,15 +34,16 @@ basctl_prepare_release_build() {
 }
 
 # 把标准 BAS_HOME 的控制树装入包根目录：系统包安装后 /var/lib/bas 可直接使用，无需再跑 init。
-# basctl.conf 保持 0600；调用方负责把它登记为配置文件，并在安装后把 bin/conf 交给 bas:beangle。
+# basctl.conf 是用户配置：模板放到 /usr/share/basctl，安装时只在缺失时生成，卸载不删；
+# DEB 仍按 conffile 装到 /var/lib/bas/conf（remove 保留、purge 删除）。
 basctl_stage_runtime_home() {
   local root="${BASCTL_HOME:?BASCTL_HOME not set}"
   local pkgroot="$1"
   local bindir="$pkgroot/var/lib/bas/bin"
-  local confdir="$pkgroot/var/lib/bas/conf"
-  install -d -m 0755 "$bindir" "$confdir"
+  local sharedir="$pkgroot/usr/share/basctl"
+  install -d -m 0755 "$bindir" "$sharedir"
   for script in env.sh bas.sh start.sh stop.sh restart.sh; do
     install -m 0755 "$root/resources/bas/bin/$script" "$bindir/$script"
   done
-  install -m 0600 "$root/resources/bas/init/basctl.conf" "$confdir/basctl.conf"
+  install -m 0600 "$root/resources/bas/init/basctl.conf" "$sharedir/basctl.conf"
 }
