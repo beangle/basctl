@@ -146,8 +146,9 @@ jstart 只负责"解析 + 准备 + exec"，实例身份与停止交给 basctl（
 
 - **原子替换**：先写同目录临时文件再 `rename`，避免读者看到写了一半的文件；补写 `pid` 时同样整
   文件重写，不做就地修改。
-- **唯一写者**：同一实例的运行信息只由 basctl 写；jstart 与引擎的产物（`engine-*.classpath`、
-  `engine-entry.argv`、`webapps/`）各自独立，互不覆盖。
+- **唯一写者**：同一实例的运行信息只由 basctl 写；jstart 与引擎的产物（`engine-entry.argv`、
+  `engine-entry.argv.args`、`webapps/` 等）各自独立，互不覆盖。init 阶段的 `engine-*.classpath`
+  与 `engine-subapps.jstart` 会在启动前删掉，不会留在实例目录里。
 
 ## 与旧 pid 文件的关系
 

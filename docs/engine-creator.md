@@ -183,6 +183,10 @@ libs = org.postgresql:postgresql:42.7.9
 运行时 jstart 写 `<base>/engine-subapps.jstart`，creator 逐段解压 docBase、生成多个
 `<Context>`；每个 Context 用自己的 `DependencyClassLoader`，应用依赖不进 JVM classpath。
 
+init 成功后 jstart 会清掉 `<base>/engine-deps.classpath`、`<base>/engine-app.classpath`
+（单应用才有）与 `<base>/engine-subapps.jstart`，只留 `engine-entry.argv`（命令超长时
+另有 `engine-entry.argv.args`，java 启动时还要读）。因此实例目录里不会长期堆着中间文件。
+
 **手工调试**（直接按协议调用 creator，看它写出什么）：
 
 ```sh
