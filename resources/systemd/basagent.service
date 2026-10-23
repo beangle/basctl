@@ -18,6 +18,9 @@ ExecStart=/bin/sh -c 'exec /usr/bin/basagent /var/lib/bas/conf/server.xml >>/var
 Restart=on-failure
 RestartSec=10
 TimeoutStopSec=20
+# 控制台（service:start）拉起的实例继承本单元的 cgroup；升级/重启 agent 时只结束
+# agent 自己，别把正在运行的应用一起 SIGTERM（实例的生命周期归 basctl / server.info）。
+KillMode=process
 UMask=0077
 NoNewPrivileges=true
 

@@ -137,7 +137,7 @@ setline 与 bashub 通道互不依赖，配置、部署与安全边界统一见 
 | `bas.sh pull` | 按 `conf/basctl.conf` 的 `[remote]` 拉取 `conf/server.xml`（底层调用 `basagent pull`）：地址为 `<url>/api/bashub/config/<profile>/server`，请求用 `Authorization: Bearer <profile>:<token>`；旧配置备份为 `server_old.xml`。未配置 `[remote]` 时告警并以 0 退出，配置无效或下载失败时非 0 |
 | `basagent report [server.xml]` | 连一次控制台（bashub）报一次主机与实例现状后退出；地址与凭证都取同目录 `basctl.conf` 的 `[remote]`，报上去了退出码才是 0。见 [channel.md](channel.md) |
 | `basagent [server.xml]` | 常驻：连上控制台后周期上报、回保活、执行固定指令（取日志 / 启停实例），断线自动重连；远程 `service:start` / `service:restart` 执行前会先拉取一次配置，`stop` 不拉取 |
-| `systemctl start/stop/restart basagent.service` | 管理系统级常驻 agent；运行账号固定为 `bas:beangle` |
+| `systemctl start/stop/restart basagent.service` | 管理系统级常驻 agent；运行账号固定为 `bas:beangle`。单元设置 `KillMode=process`：停止、重启或升级 agent 只结束 agent 自己，不会停掉实例（包括控制台 `service:start` 拉起的那些） |
 | `basctl doctor [server.xml]` | 检查 `java`（必需）、`jstart`（可选提示），以及启用 setline 时管理口通不通；必需项缺失时退出码非 0，见 [doctor.md](doctor.md) |
 
 ## 组件目录初始化
@@ -161,6 +161,12 @@ basctl init --dry-run /opt/bas # 只打印将会写入的文件
 `conf/server.xml` 是用户配置，`init` 不生成。使用系统包时，升级会刷新 `bin/*.sh`，并保留已有
 的 `basctl.conf`；非系统包目录仍可在升级 basctl 后重跑 `basctl init --force`。不再有单独的
 发行包 zip（原 `bas.sh update` 已移除）。
+
+**替换 basagent 不会停实例。** `basctl start` 拉起的实例本来就是独立进程；控制台
+`service:start` 拉起的实例会继承 `basagent.service` 的 cgroup，因此单元设置为
+`KillMode=process`，停止/重启/升级 agent 只结束 agent 自己。装的是旧单元时，先更新
+`/usr/lib/systemd/system/basagent.service` 并 `systemctl daemon-reload`，再替换二进制；
+直接用新包升级时 `%post` 会先 `daemon-reload` 再 `try-restart`，实例不受影响。
 
 ## 远程配置 `conf/basctl.conf`
 
