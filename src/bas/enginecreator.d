@@ -434,21 +434,31 @@ void writeArgv(string path, string[] argv) {
 
 /**
  * 写出最终启动命令：argv[0] 是 java 可执行文件。命令不长时直接写 argv；超过
- * {@link argFileLimit} 时把 argv[1..] 写入 `<entryOut>.args`（java 参数文件，每行一个
+ * {@link argFileLimit} 时把 argv[1..] 写入 `jstart.args`（java 参数文件，每行一个
  * 参数），entry-out 只留 `[java, "@<file>"]`，由 java launcher 展开，避免超长 classpath
  * 触发 E2BIG。
  */
+/** 长命令的 java 参数文件：`jstart.argv` → `jstart.args`。 */
+private string launchArgsFile(string entryOut) {
+  return entryOut.endsWith(".argv")
+      ? entryOut[0 .. $ - ".argv".length] ~ ".args"
+      : entryOut ~ ".args";
+}
+
 void writeLaunchArgv(string entryOut, string[] argv) {
   if (argv.length == 0)
     throw new Exception("Empty launch command");
   int size;
   foreach (i; 1 .. argv.length)
     size += cast(int) argv[i].length + 1;
+  auto argFile = launchArgsFile(entryOut);
   if (size <= argFileLimit) {
+    // 上一次可能是长命令，清掉它留下的 argfile
+    if (exists(argFile))
+      remove(argFile);
     writeArgv(entryOut, argv);
     return;
   }
-  auto argFile = entryOut ~ ".args";
   auto parent = dirName(argFile);
   if (parent.length)
     mkdirRecurse(parent);

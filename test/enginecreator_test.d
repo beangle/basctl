@@ -115,12 +115,27 @@ import std.zip : ArchiveMember, CompressionMethod, ZipArchive;
   assert(readText(shortOut) == "java\0-cp\0a.jar\0Main\0");
 
   auto longOut = buildPath(root, "long.argv");
+  auto longArgs = buildPath(root, "long.args");
   writeLaunchArgv(longOut, ["java", "-cp", replicate("x", 5000), "Main"]);
-  assert(readText(longOut) == "java\0@" ~ absolutePath(longOut ~ ".args") ~ "\0");
-  auto argFile = readText(longOut ~ ".args");
+  assert(readText(longOut) == "java\0@" ~ absolutePath(longArgs) ~ "\0");
+  auto argFile = readText(longArgs);
   auto lines = split(argFile, "\n");
   assert(lines[0] == "-cp");
   assert(lines[2] == "Main");
+}
+
+@("writeLaunchArgv clears a stale argfile when the command becomes short") unittest {
+  auto root = buildPath(tempDir, "basctl-argv-short-" ~ randomUUID().toString());
+  mkdirRecurse(root);
+  scope (exit)
+    if (exists(root))
+      rmdirRecurse(root);
+  auto entryOut = buildPath(root, "jstart.argv");
+  writeLaunchArgv(entryOut, ["java", "-cp", replicate("x", 5000), "Main"]);
+  auto args = buildPath(root, "jstart.args");
+  assert(exists(args));
+  writeLaunchArgv(entryOut, ["java", "-version"]);
+  assert(!exists(args));
 }
 
 @("prepareWebapp explodes a war and keeps a directory") unittest {

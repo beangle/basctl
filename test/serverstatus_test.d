@@ -53,7 +53,7 @@ import std.uuid : randomUUID;
   auto dir = buildPath(tempDir, "basctl-serverstatus-" ~ randomUUID().toString());
   mkdirRecurse(dir);
   scope (exit) rmdirRecurse(dir);
-  auto argFile = buildPath(dir, "engine-entry.argv.args");
+  auto argFile = buildPath(dir, "jstart.args");
   write(argFile, "-server\n-Xmx256m\n-Dbas.server=f.s1\n-cp\n/somewhere.jar\n");
 
   // sh 只看 -c 的脚本，`@file` 只是 argv 里的一个参数——正好模拟 `java @file` 的 cmdline

@@ -48,7 +48,7 @@ creator 只写启动命令，容器运行时入口仍在 Java 侧：`tomcat` / `
   据此解析 war 内依赖清单）；
 - `--entry-out`：最终 argv 的写出文件（NUL 分隔），jstart 读到后 exec。
 
-最终命令参数总长超过 4000 时不直接写 argv，而是折叠成 `java @<entry-out>.args`
+最终命令参数总长超过 4000 时不直接写 argv，而是折叠成 `java @<base>/jstart.args`
 （java 参数文件，每行一个参数），避免超长 classpath 触发 `E2BIG`。
 
 ## 如何调用 `[engine] init`
@@ -99,7 +99,7 @@ classpath 上。
 
 ```sh
 jstart run app.jstart            # 运行：init 准备环境 → jstart exec 容器
-jstart run --print app.jstart    # 只打印最终启动命令，不 exec
+jstart run app.jstart             # 启动后看 <base>/jstart.argv
 ```
 
 `basctl start` 会自动按 `server.xml` 生成 spec（`[engine] init` 按 `<engine type>` 写成
@@ -184,8 +184,9 @@ libs = org.postgresql:postgresql:42.7.9
 `<Context>`；每个 Context 用自己的 `DependencyClassLoader`，应用依赖不进 JVM classpath。
 
 init 成功后 jstart 会清掉 `<base>/engine-deps.classpath`、`<base>/engine-app.classpath`
-（单应用才有）与 `<base>/engine-subapps.jstart`，只留 `engine-entry.argv`（命令超长时
-另有 `engine-entry.argv.args`，java 启动时还要读）。因此实例目录里不会长期堆着中间文件。
+（单应用才有）与 `<base>/engine-subapps.jstart`；最终命令写到 `<base>/jstart.argv`
+并保留。命令超长时另有 `<base>/jstart.args`，java 启动时还要读。因此实例目录里只有启动记录，
+没有 init 阶段的中间文件。
 
 **手工调试**（直接按协议调用 creator，看它写出什么）：
 
