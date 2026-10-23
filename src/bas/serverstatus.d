@@ -30,6 +30,55 @@ import std.file;
 import std.format : format;
 import std.path : buildPath;
 
+/**
+ * 扫描 `/proc`，返回命令行带 `-Dbas.server=<instance>` 的进程（Linux）。
+ *
+ * 用于诊断「实例没登记但端口/进程还在」的残留：只做只读扫描，不杀进程；读不到命令行的
+ * 进程直接跳过，避免把内核线程误判成实例。
+ */
+int[] instanceProcessIds(string instance, string home = "") @trusted {
+  int[] pids;
+  version (linux) {
+    import std.file : SpanMode, dirEntries, readText;
+    import std.path : baseName;
+
+    if (instance.length == 0)
+      return pids;
+    auto serverMarker = "-Dbas.server=" ~ instance;
+    auto homeMarker = home.length > 0 ? "-Dbas.home=" ~ home : "";
+    try {
+      foreach (entry; dirEntries("/proc", SpanMode.shallow)) {
+        if (!entry.isDir)
+          continue;
+        auto name = entry.name.baseName;
+        int pid;
+        try
+          pid = name.to!int;
+        catch (Exception)
+          continue;
+        if (pid <= 0)
+          continue;
+        try {
+          bool serverHit, homeHit;
+          foreach (arg; readText(entry.name ~ "/cmdline").split('\0')) {
+            if (arg == serverMarker)
+              serverHit = true;
+            else if (homeMarker.length > 0 && arg == homeMarker)
+              homeHit = true;
+          }
+          if (serverHit && (homeMarker.length == 0 || homeHit))
+            pids ~= pid;
+        } catch (Exception) {
+          // 读不到命令行的进程（内核线程等）跳过
+        }
+      }
+    } catch (Exception) {
+      // /proc 不可读就返回空，调用方只做提示
+    }
+  }
+  return pids;
+}
+
 /** 判断 pid 对应的进程是否存活（POSIX `kill(pid,0)` / Windows `OpenProcess`）。 */
 bool processRunning(int pid) @trusted {
   version (Windows) {

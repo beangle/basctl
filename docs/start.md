@@ -19,10 +19,12 @@ basctl start all --no-setline                # 临时不把这批实例的路由
 
 1. **选实例**：从 `<farms>` 中挑出匹配 pattern（farm 名 / `farm.server` / `all`）、且
    `<server>` 所属 host 在本机的实例；
-2. **定端口并写运行信息**：`<server http>` 有值就用它，为 `0`（或缺省）时在 `--port-range`
-   区间内分配一个空闲端口（缺省 `20000-29999`）；随后写 `servers/<farm.server>/server.info`
-   的第一段——不含 `pid`，同时兼作端口预留。端口先定下来，第 3 步生成的 spec 才能带上
-   `--port=`。格式见 [server-info.md](server-info.md)；
+2. **定端口并写运行信息**：`<server http>` 有值就用它（启动前先确认该端口没人监听；
+   被占用时写 `servers/<farm.server>/error` 并跳过，不会拉起一个绑定失败、却因进程存活被误记为
+   running 的实例），为 `0`（或缺省）时在 `--port-range` 区间内分配一个空闲端口（缺省
+   `20000-29999`）；随后写 `servers/<farm.server>/server.info` 的第一段——不含 `pid`，同时兼作
+   端口预留。端口先定下来，第 3 步生成的 spec 才能带上 `--port=`。格式见
+   [server-info.md](server-info.md)；
 3. **解析 webapp**：沿用 `make` / `resolve` 的语义（`gav://`、http(s) 直链、本地路径、
    SNAPSHOT 本地覆盖）；失败写 `servers/<farm.server>/error` 并跳过该实例；
 4. **生成 spec**：`servers/<farm.server>/launch.jstart`——一个 `<server>` 一份 spec（一个 JVM），

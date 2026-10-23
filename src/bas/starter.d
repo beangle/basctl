@@ -50,12 +50,13 @@ import bas.config;
 import bas.fsutil : linkIfMissing, mkdirPrivate;
 import bas.jstart : jstartCommand;
 import bas.logs : consoleLog, plainName, readTail;
-import bas.net : localAddresses;
+import bas.net : canBindPort, localAddresses;
 import bas.portalloc : PortRange, defaultPortRange, defaultPortRangeText, parsePortRange, reservePort;
 import bas.resolver : resolveArtifact, resolveWebapps;
 import bas.serverinfo : ServerInfo, WebappInfo, instancePid, liveInstancePid, liveInstances,
   localIsoTimestamp, readInstanceInfo, removeInstanceInfo, writeInstanceInfo;
-import bas.serverstatus : pidLooksLikeInstance, processRunning, rollLog, signalProcess;
+import bas.serverstatus : instanceProcessIds, pidLooksLikeInstance, processRunning, rollLog,
+  signalProcess;
 import bas.setline : SetlineConflict, conflictLines, runningPlan, setlinePlan;
 import bas.setlineproc : syncRoutesToSetline;
 import bas.spec : SubappSpec, engineInitCommand, renderLaunchSpec, shellQuote;
@@ -63,7 +64,7 @@ import bas.spec : SubappSpec, engineInitCommand, renderLaunchSpec, shellQuote;
 import core.thread : Thread;
 import core.time : msecs;
 
-import std.algorithm : canFind;
+import std.algorithm : canFind, map;
 import std.array : join, split;
 import std.conv : to;
 import std.datetime.systime : Clock;
@@ -416,9 +417,31 @@ private StopOutcome stopInstance(string basHome, Server server, bool force, int 
   auto name = server.qualifiedName;
   auto pid = instancePid(basHome, name);
   if (pid.isNull) {
-    stderr.writeln(name ~ ": no run info (servers/" ~ name ~ "/server.info); "
-        ~ "nothing basctl started is running.");
-    return StopOutcome.notRunning;
+    // 运行信息可能丢过，但进程还在（例如上一次启动在绑定端口前就写坏了 info）：
+    // 按命令行里的 `-Dbas.server` + `-Dbas.home` 找回本实例，先停掉再让 restart 起新的。
+    auto stale = instanceProcessIds(name, buildPath(basHome, "servers", name));
+    if (stale.length == 0) {
+      stderr.writeln(name ~ ": no run info (servers/" ~ name ~ "/server.info); "
+          ~ "nothing basctl started is running.");
+      return StopOutcome.notRunning;
+    }
+    writeln(name ~ ": no run info; stopping stale process(es) " ~ stale.map!(p => p.to!string).join(", "));
+    foreach (p; stale)
+      if (processRunning(p))
+        signalProcess(p, force);
+    bool failed;
+    foreach (p; stale) {
+      if (!waitForExit(p, timeoutSec)) {
+        stderr.writeln(name ~ ": stale pid " ~ p.to!string ~ " did not exit in "
+            ~ timeoutSec.to!string ~ "s; rerun with --force to SIGKILL it.");
+        failed = true;
+      }
+    }
+    if (failed)
+      return StopOutcome.failed;
+    removeRunInfo(basHome, name);
+    writeln(name ~ ": stopped stale instance process(es).");
+    return StopOutcome.stopped;
   }
   if (!processRunning(pid.get)) {
     removeRunInfo(basHome, name);
@@ -645,6 +668,19 @@ private Nullable!ServerInfo reserveInstance(string basHome, Container container,
   auto name = server.qualifiedName;
   auto info = describeInstance(container, server, startedAt);
   if (server.http > 0) {
+    // 固定端口先确认没人监听：Tomcat 的 connector 初始化失败只记日志、不会让进程退出，
+    // 直接起会留下「进程活着但没有监听端口」的假实例，所以要在拉起前挡住。
+    if (!canBindPort("", cast(ushort) server.http)) {
+      auto message = name ~ ": port " ~ server.http.to!string ~ " is already in use";
+      auto pids = instanceProcessIds(name, buildPath(basHome, "servers", name));
+      if (pids.length > 0)
+        message ~= "; stale instance process(es): " ~ pids.map!(p => p.to!string).join(", ");
+      message ~= ". Stop the process holding the port and retry.";
+      stderr.writeln(message);
+      mkdirRecurse(buildPath(basHome, "servers", name));
+      write(buildPath(basHome, "servers", name, "error"), message ~ "\n");
+      return Nullable!ServerInfo.init;
+    }
     writeInstanceInfo(basHome, name, info);
     return nullable(info);
   }

@@ -128,7 +128,7 @@ setline 与 bashub 通道互不依赖，配置、部署与安全边界统一见 
 | `basctl make [server.xml] <farm\|server\|all>` | 只准备不启动：生成 jstart spec 并 `jstart resolve` 预取依赖 |
 | `basctl resolve <server.xml> [pattern...]` | 只解析 webapp，不生成实例 |
 | `basctl start [server.xml] <farm\|server\|all> [--port-range=<from>-<to>] [--no-setline]` | 为实例定端口（`<server http="0">` 时在区间内分配，缺省 `20000-29999`）、写 `server.info`、生成 jstart spec、resolve 并后台启动；配了 `<setline>` 时启动后对账路由（`--no-setline` 跳过） |
-| `basctl stop [server.xml] <farm\|server\|all> [--force] [--timeout=<sec>] [--no-setline]` | 按 `server.info` 里的 pid 停止 `start` 启动的实例：SIGTERM 后等 `--timeout`（缺省 15 秒），`--force` 直接 SIGKILL；配了 `<setline>` 时停完对账路由（`--no-setline` 跳过） |
+| `basctl stop [server.xml] <farm\|server\|all> [--force] [--timeout=<sec>] [--no-setline]` | 按 `server.info` 里的 pid 停止 `start` 启动的实例：SIGTERM 后等 `--timeout`（缺省 15 秒），`--force` 直接 SIGKILL；`server.info` 缺失时按命令行 `-Dbas.server` + `-Dbas.home` 找回本实例的残留进程并停止，`restart` 因此在 info 丢失后也能先停旧进程；配了 `<setline>` 时停完对账路由（`--no-setline` 跳过） |
 | `basctl run --engine=<type>-<version> <app>` | 嵌入式运行单个 webapp：`--engine=tomcat-11.0.25` 同时给出容器类型与版本，生成单应用 spec 后前台 `jstart run` |
 | `basctl setline [server.xml]` | 把**运行中实例**（`server.info`，含动态端口）的路由整组推给已在跑的 setline（管理口端口只从 `<setline port>` 来，无缺省、无命令行覆盖；没人应答就报错，basctl 不拉起它、也不生成 setline 的配置；配置里没有 `<setline>` 就报"没启用 setline"）；与 `basctl start` / `stop` 之后的自动对账同一条路 |
 | `basctl setline --sync` | 同上（显式写法，便于脚本与记忆）；只推一次，推完即退出，没有常驻模式——路由变化的时机就是实例的启停 |
