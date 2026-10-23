@@ -21,6 +21,7 @@
 | [docs/container.md](docs/container.md) | 容器化「一机器一出口」：镜像内容、构建、运行、信号 |
 | [docs/channel.md](docs/channel.md) | 汇报通道（basagent → bashub）：怎么启用、`report` / 常驻 agent、上报什么、失败怎么办 |
 | [docs/channel-protocol.md](docs/channel-protocol.md) | 控制通道协议：端点与鉴权、消息信封、固定原语、节拍、未知消息的处理与扩展方式 |
+| [docs/channel-summary.md](docs/channel-summary.md) | 通信备忘：传什么、什么格式、多久一次（速查；细节仍以协议为准） |
 | [docs/roadmap.md](docs/roadmap.md) | 待定项与下一步：R1 与 bashub 的汇报/指令通道（阶段 3 已落地、阶段 4 启停已落地、审计待补）、R2 漂移自动收敛、R3 生产侧拓扑 agent |
 | [scripts/README.md](scripts/README.md) | deb / rpm 打包 |
 

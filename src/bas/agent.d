@@ -68,7 +68,7 @@ import std.string : format, strip;
 private enum tick = 1.seconds;
 
 /** 多久没收到任何消息就认为这条连接已经废了，交给外层重连（中间设备会静默掐断空闲连接）。 */
-private enum silentTimeout = 90.seconds;
+private enum silentTimeout = 150.seconds;
 
 /** 断线后的重连间隔：固定值，不做指数退避——少一个要调的参数。 */
 private enum reconnectDelay = 10.seconds;
@@ -230,8 +230,8 @@ private void connectOnce(ref AgentContext ctx) {
   swallow({ logInfo("channel: connecting to %s", ctx.endpoint); });
   auto settings = new HTTPClientSettings;
   settings.connectTimeout = connectTimeout;
-  // WebSocket 复用底层 TCP 的 readTimeout。若这里仍用 20s，而 hub 的 ping 是 30s，
-  // 空闲连接会在第一轮心跳前就被客户端自己掐断，表现为每 30s 重连一次。
+  // WebSocket 复用底层 TCP 的 readTimeout。若这里仍用 20s，而 hub 的 ping 是 60s，
+  // 空闲连接会在第一轮心跳前就被客户端自己掐断，表现为每 60s 重连一次。
   settings.readTimeout = silentTimeout;
   settings.webSocketPayloadMaxLength = maxChannelPayloadBytes;
 

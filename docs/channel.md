@@ -1,5 +1,7 @@
 # 汇报通道（basagent → bashub）
 
+> 只想知道传什么、什么格式、多久一次：看 [channel-summary.md](channel-summary.md)。
+
 basagent 主动拨一条出站 WebSocket 到控制台（bashub），把**这台机器的现状**报上去，并接收控制台下发的
 固定指令。现状 = 主机家底（CPU / 内存 / 磁盘）+ 本机活着的 bas 实例；指令 = 立即上报、取日志区间、
 启动 / 停止 / 重启实例。

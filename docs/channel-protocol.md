@@ -1,5 +1,7 @@
 # 控制通道协议（草案）
 
+> 只想知道传什么、什么格式、多久一次：看 [channel-summary.md](channel-summary.md)。
+
 basagent 与 bashub 之间那条 WebSocket 连接上说什么、怎么说。**本文是协议的唯一权威**：两侧各自
 实现，改协议先改本文，再同步两侧代码与测试，但读的都是本文这张表。
 
@@ -32,7 +34,7 @@ basagent 与 bashub 之间那条 WebSocket 连接上说什么、怎么说。**�
   控制面和配置下载都不接受非回环地址上的明文 HTTP/WS。
 - **一条连接一个 profile**：同一 profile 再次登录时服务端踢掉旧连接——agent 断线重连常常是「旧的
   还没超时、新的已经进来」，留着旧的会让 hub 往一条死连接发指令。所以路径里不带连接 id。
-- **保活**：hub 按期发 `ping`，agent 回 `pong`；agent 那边沉默超时（90s）就重连。不用 WebSocket
+- **保活**：hub 按期发 `ping`，agent 回 `pong`；agent 那边沉默超时（150s）就重连。不用 WebSocket
   自带的 ping 帧——`vibe` 的客户端没有公开的 ping API，用消息做，协议少一层特例。
 - **都不许退出**：任何一条消息、任何一次解析失败都不许让 agent 退出或断连；hub 侧同理（见下面
   「遇到不认识的怎么办」）。
@@ -56,7 +58,7 @@ basagent 与 bashub 之间那条 WebSocket 连接上说什么、怎么说。**�
 |---|---|---|
 | `hello` | 通知 | `{host, basctl, basHome, bas, supports[]}`：连上后的第一条，见下「能力协商」（`basctl` 字段沿用原协议名，值是同包的发行版本） |
 | `report:os` | 通知 | `{os:{name,kernel,arch}, cpu:{cores,load1,load5,load15}, mem:{total,available}, disk:[{mount,total,available}]}` |
-| `report:bas` | 通知 | `{instances:[...], declared:[...]}`：`instances` 是活着的实例，每项与 `server.info` 的 `[server]` 同构（`id/pid/engine/http.port/started` + `webapps[]`）；`declared` 是本机 `server.xml` 声明的可操作实例（`id/engine/httpPort?/webapps[]`） |
+| `report:bas` | 通知 | `{instances:[...], declared:[...]}`：`instances` 是活着的实例，每项与 `server.info` 的 `[server]` 同构（`id/pid/engine/httpPort/started` + `webapps[]`）；`declared` 是本机 `server.xml` 声明的可操作实例（`id/engine/httpPort?/webapps[]`） |
 | `report:health` | 通知 | `{servers:[{id,state}]}`：响应 hub 的 `report:health`，只报本机声明实例的 `running` / `stopped`（hub 也接受 `error` 以便扩展）；不带 OS、内存、磁盘与 webapps 明细 |
 | `pong` | 通知 | `{}`：保活应答 |
 | `result` | 应答 | `{ok:bool, data?, error?}`：对所有带 `id` 请求的应答；失败时也可带限长后的 `data` 供排错 |
@@ -98,7 +100,7 @@ basagent 与 bashub 之间那条 WebSocket 连接上说什么、怎么说。**�
   并可在 `result.data` 中带限长排错信息：`{detail?, logTail?:[...], truncated?}`。`detail` 最多
   8 KiB，`logTail` 最多 100 行且每行最多 1000 字节；完整日志继续用 `log:read`。
 - `service:*` 的实例名只能是 `server.xml` 里本机声明的 `farm.server`；动作走 basctl 内部的
-  start / stop 分支，不拼 shell 命令。动作完成后 agent 重发一次完整 `report:bas`，控制台不必等
+  start / stop 分支，不拼 shell 命令。动作完成后 agent 重发一次完整快照（`report:os` + `report:bas`），控制台不必等
   下一轮轻量采样才看到新状态。
 - `service:*` 必须带合法 `id` 与新鲜的 `at`；同一 `id` 只回放上次结果，不重复执行。WebSocket
   单帧上限为 256 KiB，超过的消息由连接层拒绝。
@@ -157,9 +159,9 @@ agent 是常驻进程，**任何一条消息都不许让它退出或断连**（�
 | 参数 | 取值 | 在哪 |
 |---|---|---|
 | 完整快照 `report:os` / `report:bas` | 首次连接、`report:now`、实例动作后可触发 | 不在常驻循环中周期重发 |
-| 轻量 health 采样 | 缺省 300s，仅 07:00–22:00（bashub 主机时区） | bashub `hub.xml` 的 `agent-health-interval/start/end`；关闭后不再下发 `report:health` |
-| 保活 `ping` | hub 每 30s | bashub `AgentSocketInitializer.HeartbeatInterval` |
-| agent 沉默超时 | 90s | basagent `bas.agent.silentTimeout`（超了重连） |
+| 轻量 health 采样 | 缺省 300s，仅 07:00–22:00（bashub 主机时区） | bashub `hub.xml` 的 `<agent health-interval/health-start/health-end>`（兼容旧 `agent-health-*` 属性）；关闭后不再下发 `report:health` |
+| 保活 `ping` | hub 每 60s | bashub `AgentSocketInitializer.HeartbeatInterval` |
+| agent 沉默超时 | 150s | basagent `bas.agent.silentTimeout`（超了重连） |
 | 断线重连 | 10s | basagent `bas.agent.reconnectDelay` |
 | 拨号超时 | 20s | basagent `bas.agent.connectTimeout`（`report` 与重连都不能久等） |
 
