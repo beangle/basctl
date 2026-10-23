@@ -37,7 +37,7 @@ import bas.channel;
 import bas.config : Container, parseServerXmlFile;
 import bas.hub : agentUrl;
 import bas.logs : agentLog, consoleLog, countLines, maxLogLines, plainName, readLogWindow;
-import bas.net : hostName;
+import bas.net : hostName, localAddresses;
 import bas.pull : runPull;
 import bas.remote : RemoteConfig, agentChannelUrl, bearerCredential, loadRemoteConf, remoteConfFileName,
   validateRemoteConf;
@@ -53,6 +53,8 @@ import vibe.stream.tls : TLSContext, TLSPeerValidationMode;
 
 import core.time : Duration, seconds;
 import core.stdc.stdlib : abort;
+import std.algorithm : filter;
+import std.array : array, join;
 import std.datetime.stopwatch : MonoTime;
 import std.file : exists;
 import std.json : JSONValue;
@@ -254,9 +256,18 @@ private void connectOnce(ref AgentContext ctx) {
       }
     }
   };
+  // 身份：profile + 本机 IP。hub 用 ip 区分同一 profile 的多台 agent，只顶掉同 IP 的旧连接；
+  // 多网卡时全部上报，由 hub 取与 profile / hosts 配置命中的那个。@safe 闭包里不做系统调用，
+  // 所以先算好。
+  // 回环地址有意不发：它不构成一台机器的对外身份，留着只会让所有机器都命中 profile 里的
+  // 127.0.0.1 配置；只有回环的开发机才如实上报，否则 hub 无从识别。
+  auto allIps = localAddresses();
+  auto serverIps = allIps.filter!(ip => ip != "127.0.0.1").array;
+  immutable localIps = join(serverIps.length ? serverIps : allIps, ",");
   auto ws = connectWebSocketEx(URL(ctx.endpoint),
       (scope HTTPClientRequest req) @safe {
         req.headers["Authorization"] = "Bearer " ~ ctx.credential;
+        req.headers["ip"] = localIps;
       }, settings);
   scope (exit) {
     if (ws.connected)

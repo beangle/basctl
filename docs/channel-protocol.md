@@ -17,7 +17,11 @@ basagent 与 bashub 之间那条 WebSocket 连接上说什么、怎么说。**�
 | 路径 | `{remote.url}/api/bashub/monitor/agents/{profile}/channel` |
 | `{remote.url}` | `conf/basctl.conf` 的 `[remote] url`，如 `https://hub.example.com` 或 `https://hub.example.com/bas/hub`；生产必须 HTTPS，连接时换成 `wss`。`http://` 只允许精确的本机回环地址 |
 | 凭证 | `Authorization: Bearer <profile>:<[remote] token>`（握手头），token 取值是 bashub 的 `Profile.key` |
+| 身份 | `ip: <addr>[,<addr>…]`（握手头）：本机地址，多网卡时全部上报（**回环地址不发**，只有回环的开发机例外）；hub 过滤后只保留与 Profile/Host 配置命中的那个作为 `profile + server ip` 身份，只顶掉同一 IP 的旧连接 |
 
+- **一个 profile 多台机器**：同一 profile 的不同机器各持一条连接，互不顶替；hub 靠 `ip` 头区分，
+  因此这个头在握手时必填。头里没有合法 IP 时 hub 返回 400；地址合法但不属于该 Profile 的
+  `ip` / `hosts.ip` 时返回 403（配置里没有任何 IP 也拒绝，不做“没配置就放行”的兜底）。
 - **谁拨号**：basagent 主动出站。生产机多在 NAT 后面，开入站口要申请、要另配一套鉴权；出站只要
   机器能访问控制台。启用开关、地址与 token 都来自同目录 `conf/basctl.conf` 的 `[remote]`；
   三项齐全才拨号，没有该文件或字段不完整就不发任何外连，也不读取环境变量。
