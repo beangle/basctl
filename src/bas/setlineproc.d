@@ -53,15 +53,16 @@ enum RouteSync {
  * 把本 `BAS_HOME` 的整组路由推给 setline，返回 0 表示已推到位。
  *
  * 入口没在跑**不**就地拉起：setline 的起停归 systemd / 容器入口，basctl 越俎代庖会让「谁拥有
- * 进程」说不清。推不上去不影响应用本身（`start` / `stop` 只警告，见 `bas.starter`），这里把原因
- * 写清楚，让人去把服务起起来。`quiet` 只影响成功时的输出，对账路径用它避免周期刷屏。
+ * 进程」说不清。推不上去不影响应用本身（`start` / `stop` 只警告，见 `bas.starter`）。
+ * `quiet=true` 用于启停对账：连失败原因也不打印，由调用方汇总成一行，避免一次 restart 刷两屏。
  */
 int syncRoutesToSetline(const(SetlineRoute)[] routes, ushort port, string hostname,
     bool quiet = false) {
   if (portFree(port)) {
-    stderr.writeln("No setline listening on " ~ adminAddress(port)
-        ~ "; start the setline service (basctl does not launch it), or point"
-        ~ " <setline port=\"...\"> at the right port.");
+    if (!quiet)
+      stderr.writeln("No setline listening on " ~ adminAddress(port)
+          ~ "; start the setline service (basctl does not launch it), or point"
+          ~ " <setline port=\"...\"> at the right port.");
     return 1;
   }
   final switch (syncRoutes(port, hostname, renderRouteMap(routes))) {
@@ -71,11 +72,13 @@ int syncRoutesToSetline(const(SetlineRoute)[] routes, ushort port, string hostna
           routes.length, adminAddress(port), hostname));
     return 0;
   case RouteSync.rejected:
-    stderr.writeln("Port " ~ adminAddress(port)
-        ~ " answers HTTP but rejected the route update; it is probably not the setline we expect.");
+    if (!quiet)
+      stderr.writeln("Port " ~ adminAddress(port)
+          ~ " answers HTTP but rejected the route update; it is probably not the setline we expect.");
     return 1;
   case RouteSync.unreachable:
-    stderr.writeln("Cannot reach setline at " ~ adminAddress(port) ~ ".");
+    if (!quiet)
+      stderr.writeln("Cannot reach setline at " ~ adminAddress(port) ~ ".");
     return 1;
   }
 }

@@ -47,6 +47,7 @@ module bas.starter;
 
 import bas.artifact : isMavenCoord, parseArtifact;
 import bas.config;
+import bas.endpoint : adminAddress;
 import bas.fsutil : linkIfMissing, mkdirPrivate;
 import bas.jstart : jstartCommand;
 import bas.logs : consoleLog, plainName, readTail;
@@ -133,8 +134,8 @@ private void reconcileRoutes(const Container container, string basHome, bool noS
     return;
   }
   if (syncRoutesToSetline(plan.routes, setline.adminPort, setline.hostname, true) != 0)
-    stderr.writeln("setline routes were not fully reconciled; the instances themselves are fine"
-        ~ " (the next start/stop retries).");
+    stderr.writeln("setline routes not synced (" ~ adminAddress(setline.adminPort)
+        ~ "); retrying on next start/stop.");
 }
 
 int runStart(string configFile, string[] rest) {

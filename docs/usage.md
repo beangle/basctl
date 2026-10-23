@@ -259,7 +259,7 @@ basctl firewall /opt/bas          # 交互式地放行 server.xml 里的端口
 |---|---|---|
 | `Cannot find config file …` | `BAS_HOME` 不对，或 `conf/server.xml` 还没写 | `export BAS_HOME=…`，或直接用参数给配置文件路径 |
 | `Route conflict on /x` | 同一个路径被**端口集合不同**的多个 webapp 认领 | 给 webapp 显式声明 `<url path="…"/>`，让每个前缀有唯一归属 |
-| `No setline listening on …`（推送 / `start`） | setline 没在跑，或管理口端口不对 | 看 `<setline port>`（那是 setline 的 `adminListen` 端口）；basctl 不会替你拉起 setline |
+| `setline routes not synced (…)`（启停时一行提示） | setline 没在跑，或管理口端口不对 | 看 `<setline port>`（那是 setline 的 `adminListen` 端口）；basctl 不会替你拉起 setline。手工 `basctl setline --sync` 会给出更详细的原因（没监听 / 拒绝 / 连不上） |
 | `Cannot run jstart …` | `jstart` 不在 `PATH` | 装 jstart，或 `export beangle_jstart=/path/to/jstart`；`basctl doctor` 会提示它是否就位（`jstart` 为可选提示，不影响 doctor 退出码，但实际调用仍会失败） |
 | `status` 里看不到某个实例，但 `servers/<name>` 还在 | 进程真的不在了（崩了或手工 kill），命令行也匹配不到 | `basctl stop <name>` 清掉残留运行信息，再 `start`；对账会把它的路由摘掉 |
 | `start` 报 `port ... is already in use` | 端口被别的进程占着（常见是未登记的残留实例） | 先 `basctl stop <name>`（会按命令行找回本实例残留进程并停掉）；报错里会带本实例残留 pid 和真正监听该端口的 pid（Linux），用 `ps -fp <pid>` 确认占用者，必要时手工停掉或换端口 |
