@@ -37,6 +37,19 @@ import std.algorithm : canFind;
       == "/opt/bas/servers/platform.server1/launch.jstart");
 }
 
+@("runtimeArgsFor splits space-separated and quoted farm options") unittest {
+  auto cfg = parseServerXml(`<bas version="1"><engines><engine name="tomcat" type="tomcat-server"
+      version="11.0.18"/></engines><farms><farm name="f" engine="tomcat">
+      <server-options>-Dems.profile=sues.minor -Duser.timezone=Asia/Shanghai -Dfoo='a b'</server-options>
+      <server name="s1" http="8080"/></farm></farms>
+      <webapps><webapp uri="gav://g:a:1" run-at="f" path="/"/></webapps></bas>`);
+  auto args = runtimeArgsFor(cfg.farms[0].servers[0]);
+  assert(args.canFind("-Dems.profile=sues.minor"));
+  assert(args.canFind("-Duser.timezone=Asia/Shanghai"));
+  assert(args.canFind("-Dfoo=a b"));
+  assert(!args.canFind("-Dems.profile=sues.minor -Duser.timezone=Asia/Shanghai"));
+}
+
 @("standaloneWebappError restricts embed engines to one webapp") unittest {
   assert(standaloneWebappError("tomcat", "tomcat", 1) == "");
   assert(standaloneWebappError("undertow", "undertow", 1) == "");

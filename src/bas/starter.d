@@ -864,19 +864,52 @@ string subappId(string contextPath, const(string)[] used) {
   return id;
 }
 
+/**
+ * 拆 `<server-options>`：按空白分词，支持单/双引号；反斜杠原样保留（兼容 Windows 路径）。
+ *
+ * `<server-options>-Dems.profile=x -Duser.timezone=Asia/Shanghai</server-options>` 这种一行多个
+ * 参数是常见写法；整行当成一个 JVM 参数会让前一个 `-D` 的值把后面的选项一起吞掉。
+ */
+private string[] splitServerOptions(string text) {
+  string[] args;
+  string current;
+  bool started, inSingle, inDouble;
+  foreach (c; text) {
+    if (c == '\'' && !inDouble) {
+      inSingle = !inSingle;
+      started = true;
+      continue;
+    }
+    if (c == '"' && !inSingle) {
+      inDouble = !inDouble;
+      started = true;
+      continue;
+    }
+    if (!inSingle && !inDouble
+        && (c == ' ' || c == '\t' || c == '\r' || c == '\n')) {
+      if (started) {
+        args ~= current;
+        current = "";
+        started = false;
+      }
+      continue;
+    }
+    current ~= c;
+    started = true;
+  }
+  if (started)
+    args ~= current;
+  return args;
+}
+
 /** `[runtime]`：bas 的 JVM 默认参数 + `<farm><server-options>`。 */
 string[] runtimeArgsFor(Server server) {
   auto farm = server.farm;
   auto heap = server.maxHeapSize.length ? server.maxHeapSize : "300M";
   string[] args = ["-server", "-Djava.awt.headless=true", "-Xmx" ~ heap,
     "-Djava.security.egd=file:/dev/./urandom", "-Dbas.server=" ~ server.qualifiedName];
-  if (!farm.serverOptions.isNull) {
-    foreach (line; farm.serverOptions.get.split("\n")) {
-      auto one = strip(line);
-      if (one.length)
-        args ~= one;
-    }
-  }
+  if (!farm.serverOptions.isNull)
+    args ~= splitServerOptions(farm.serverOptions.get);
   return args;
 }
 

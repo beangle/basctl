@@ -239,7 +239,7 @@
     <xs:choice minOccurs="0" maxOccurs="unbounded">
       <xs:element name="server-options" type="xs:string">
         <xs:annotation>
-          <xs:documentation>追加到 JVM 参数的进程参数（整段文本，按行拼接）。</xs:documentation>
+          <xs:documentation>追加到 JVM 参数的进程参数：按空白分隔，单个参数含空格时用单/双引号包起来。</xs:documentation>
         </xs:annotation>
       </xs:element>
       <xs:element name="proxy-options" type="xs:string">
