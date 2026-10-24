@@ -8,11 +8,11 @@
 | 项 | 取值 |
 |---|---|
 | 传输 | WebSocket（生产 `wss`，回环才允许明文 `ws`） |
-| 端点 | `{remote.url}/api/bashub/monitor/agents/{profile}/channel` |
+| 端点 | `{remote.url}/api/bashub/monitor/agents/{project}/channel` |
 | 方向 | **basagent 主动出站**拨号，bashub 只应答；不在生产机开入站口 |
-| 鉴权 | 握手头 `Authorization: Bearer <profile>:<Profile.key>`，key 来自 `conf/basctl.conf` 的 `[remote] token` |
-| 身份 | 握手头 `ip: <addr>[,<addr>…]`；hub 只保留与 Profile/Host 配置匹配的那个地址 |
-| 连接粒度 | 一个 profile 的每台机器一条；同一 IP 重连会顶掉旧连接，不同 IP 互不影响 |
+| 鉴权 | 握手头 `Authorization: Bearer <project>:<Project.key>`，key 来自 `conf/basctl.conf` 的 `[remote] token` |
+| 身份 | 握手头 `ip: <addr>[,<addr>…]`；hub 只保留与 Host 配置匹配的那个地址 |
+| 连接粒度 | 一个 project 的每台机器一条；同一 IP 重连会顶掉旧连接，不同 IP 互不影响 |
 | 能力协商 | agent 在 `hello.supports[]` 里声明自己支持的原语，hub 只下发交集 |
 
 ## 2. 信封
@@ -83,8 +83,8 @@
 
 | 项 | 取值 |
 |---|---|
-| 端点 | `GET {remote.url}/api/bashub/config/{profile}/server` |
-| 鉴权 | 同一个 Bearer：`<profile>:<Profile.key>` |
+| 端点 | `GET {remote.url}/api/bashub/config/{project}/server` |
+| 鉴权 | 同一个 Bearer：`<project>:<Project.key>` |
 | 返回 | `application/xml`，即最终下发的 `server.xml`（≤4 MiB，`Cache-Control: no-store`） |
 | 写入 | `basagent pull` 校验后原子替换 `<BAS_HOME>/conf/server.xml` |
 | 时机 | 手工 `bin/bas.sh pull`；`service:start` / `service:restart` 执行前自动拉一次；`stop` 不拉 |
@@ -101,7 +101,7 @@
 | 强制刷新 | `report:now` → `report:os` + `report:bas` | hub | 手工触发（监控页“刷新”按钮，或 `POST .../report`） |
 | 实例动作完成 | 补完整快照（`report:os` + `report:bas`） | agent | 每次 `service:*` 后 |
 | 日志 | `log:read` / `agent:log` | hub | 按需，不轮询 |
-| 配置拉取 | `GET .../config/{profile}/server` | agent | 手工 `pull`，或 `service:start/restart` 前 |
+| 配置拉取 | `GET .../config/{project}/server` | agent | 手工 `pull`，或 `service:start/restart` 前 |
 | 断线重连 | 重新拨号 | agent | 10s 后 |
 | agent 沉默超时 | 收不到 hub 任何消息就重连 | agent | 150s |
 | 拨号超时 | 建连超时 | agent | 20s |
@@ -151,10 +151,10 @@ agent → result + report:os / report:bas
 
 - `report:os` / `report:bas` / `report:health` 都是**整份替换**：重复发、乱序发都安全。
 - `declared` 与 `instances` 分开：停止的实例只出现在 `declared`，控制台按 `id` 合并；标题由 hub 按
-  profile 的 webapp 配置反查后补 `title`。
+  project 的 webapp 配置反查后补 `title`。
 - 遇到不认识的消息：有 `id` 回 `unsupported:<type>`，无 `id` 忽略并记一行日志；任何解析失败都不许
   让 agent/hub 退出。
 - 常见问题：
-  - 没有数据：先看 `[remote]` 三项是否齐全、hub 侧 Profile.key 是否被重置、握手 `ip` 是否命中配置。
+  - 没有数据：先看 `[remote]` 三项是否齐全、hub 侧 Project.key 是否被重置、握手 `ip` 是否命中配置。
   - 没有运行历史：看 `health-interval` 是否为 0、当前是否在 `health-start/end` 窗口内（hub 时区）。
   - 启停无反应：看 `hello.supports` 是否包含对应 `service:*`；老 agent 不申报时 hub 不下发。

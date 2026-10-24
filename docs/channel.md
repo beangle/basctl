@@ -11,7 +11,7 @@ basagent 主动拨一条出站 WebSocket 到控制台（bashub），把**这台�
 
 ## 启用
 
-地址、Profile 和凭证都放在与 `server.xml` 同目录的 `conf/basctl.conf`，与 `pull` 完全共用：
+地址、Project 和凭证都放在与 `server.xml` 同目录的 `conf/basctl.conf`，与 `pull` 完全共用：
 
 > RPM/DEB 会把带注释的模板装到 `/var/lib/bas/conf/basctl.conf`；源码安装或其它目录由
 > `basctl init` 生成。把 `[remote]` 的三项填上即可。
@@ -19,19 +19,19 @@ basagent 主动拨一条出站 WebSocket 到控制台（bashub），把**这台�
 ```ini
 [remote]
 url = https://hub.example.com
-profile = openurp.prod
+project = openurp.prod
 token = 9f8e7d6c5b4a39281706f5e4d3c2b1a0
 ```
 
-- `[remote] url` / `profile` / `token` 三项齐全才启用；`basagent` 拼出
-  `https://hub.example.com/api/bashub/monitor/agents/<profile>/channel` 拨号，并把 `https`
+- `[remote] url` / `project` / `token` 三项齐全才启用；`basagent` 拼出
+  `https://hub.example.com/api/bashub/monitor/agents/<project>/channel` 拨号，并把 `https`
   换成 `wss`。生产地址必须是 `https://`；`http://` 只允许精确的本机回环地址
   （`localhost` / `127.0.0.1` / `[::1]`）用于本地调试。
 - TLS 会按系统 CA 校验证书（优先 `SSL_CERT_FILE` / `CURL_CA_BUNDLE`，其次
   `/etc/ssl/certs/ca-certificates.crt`、`/etc/pki/tls/certs/ca-bundle.crt` 等）。
   自签证书或主机名不匹配会直接握手失败，不会降级为不校验。
-- `token` 同时用于 `pull` 和通道握手，取值是 bashub 的 `Profile.key`。在 bashub 的配置详情里可以查看，
-  发送时拼成 `<profile>:<Profile.key>`；`POST /api/bashub/config/profiles/{id}/reset-key` 可以
+- `token` 同时用于 `pull` 和通道握手，取值是 bashub 的 `Project.key`。在 bashub 的配置详情里可以查看，
+  发送时拼成 `<project>:<Project.key>`；`POST /api/bashub/config/projects/{id}/reset-key` 可以
   重置（重置后旧的拉取与通道连接一起失效）。
 - `server.xml` **不再**保存通道地址或凭证；旧文件里遗留的 `<hub>` 元素会被直接忽略。
 - 不再读取 `bas_remote_url` 等环境变量。
@@ -74,7 +74,7 @@ token = 9f8e7d6c5b4a39281706f5e4d3c2b1a0
 | `no snapshot published: wss://…` | 地址不对 / 控制台不可达 / 网络不通 | 先确认 `bin/bas.sh pull` 能通；地址看 `conf/basctl.conf` |
 | `certificate verify failed` / `no system CA bundle` | 系统没有 CA 包，或服务端证书不被信任 | 安装发行版的 CA 包；不要通过改成 `ws://` 绕过 |
 | 常驻 agent 反复重连 | 同上，或 token 被重置过 | 更新 `basctl.conf` 的 token 后重启 agent |
-| 控制台看不到这台机器 | 通道没连上，或 profile 名不对 | 看 `/var/log/bas/agent/console.out` 的 `channel:` 行；确认路径里的 profile 与 bashub 的配置名一致 |
+| 控制台看不到这台机器 | 通道没连上，或 project 名不对 | 看 `/var/log/bas/agent/console.out` 的 `channel:` 行；确认路径里的 project 与 bashub 的配置名一致 |
 | `service:*` 返回 `start-failed` / `prepare-failed` | 实例启动或依赖解析失败 | 控制台先看结果里的 `detail` / `logTail`；完整内容用 `log:read` 或 `basctl logs` |
 
 ## 常驻 agent 怎么跑
@@ -115,7 +115,7 @@ sudo systemctl restart basagent.service
 `basctl init --force` 只刷新 `bin/*.sh`；`basctl.conf` 与 `server.xml` 仍不会被覆盖。
 
 从旧版 `bas.sh agent-start` 迁移时，先用旧 `BAS_HOME` 里的 `bin/bas.sh agent-stop`
-（或旧 PID 文件）停掉手工启动的 agent，再启动 systemd 服务；同一个 profile 只允许一条
+（或旧 PID 文件）停掉手工启动的 agent，再启动 systemd 服务；同一个 project 只允许一条
 连接，两份 agent 同时在跑会互相踢下线。
 
 ## 与 setline 的分工

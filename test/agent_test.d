@@ -52,7 +52,7 @@ import std.uuid : randomUUID;
   auto hub = new FakeHub();
   write(configFile, "<bas version=\"0.14.0\"/>");
   write(buildPath(home, "conf", "basctl.conf"), "[remote]\nurl = http://127.0.0.1:"
-      ~ hub.port.to!string ~ "\nprofile = demo.prod\ntoken = k1\n");
+      ~ hub.port.to!string ~ "\nproject = demo.prod\ntoken = k1\n");
 
   auto serving = new Thread({ hub.serve(); });
   serving.start();
@@ -94,10 +94,10 @@ import std.uuid : randomUUID;
   auto remoteFile = buildPath(home, "conf", "basctl.conf");
   write(configFile, "<bas version=\"0.14.0\"/>");
   assert(!channelEnabled(loadRemoteConf(remoteFile)), "没有 basctl.conf 就不该拨号");
-  write(remoteFile, "[remote]\nurl = http://127.0.0.1:8080\nprofile = demo\n");
+  write(remoteFile, "[remote]\nurl = http://127.0.0.1:8080\nproject = demo\n");
   assert(!channelEnabled(loadRemoteConf(remoteFile)), "缺 token 不启用");
 
-  write(remoteFile, "[remote]\nurl = http://127.0.0.1:8080\nprofile = demo\ntoken = k1\n");
+  write(remoteFile, "[remote]\nurl = http://127.0.0.1:8080\nproject = demo\ntoken = k1\n");
   assert(channelEnabled(loadRemoteConf(remoteFile)), "三项齐全就是启用");
 }
 

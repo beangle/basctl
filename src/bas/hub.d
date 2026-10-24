@@ -17,7 +17,7 @@
 /**
  * 控制通道（bashub）的拨号地址。
  *
- * 地址与凭证都来自同目录 `conf/basctl.conf` 的 `[remote] url/profile/token`，与 `pull`
+ * 地址与凭证都来自同目录 `conf/basctl.conf` 的 `[remote] url/project/token`，与 `pull`
  * 完全共用一份配置；`server.xml` 不再保存通道地址或凭证。
  */
 module bas.hub;

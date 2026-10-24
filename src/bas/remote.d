@@ -17,19 +17,19 @@
 /**
  * `conf/basctl.conf`：basctl 与控制台之间的远程连接配置。
  *
- * 远程地址、Profile 名与凭证都只从这里读取；`pull` 不再依赖 `ip:` 请求头，也不再
+ * 远程地址、Project 名与凭证都只从这里读取；`pull` 不再依赖 `ip:` 请求头，也不再
  * 从环境变量推断控制台地址。文件格式是简单的 INI：
  *
  *     [remote]
  *     url = https://hub.example.com
- *     profile = openurp.prod
- *     token = <Profile.key>
+ *     project = openurp.prod
+ *     token = <Project.key>
  *
- * `url` 是控制台根地址（含反向代理前缀），不是某个 Profile 的完整地址；Profile 与
- * 凭证分别由 `profile` / `token` 给出。所有端点按 bashub 的能力域拼接：
+ * `url` 是控制台根地址（含反向代理前缀），不是某个 Project 的完整地址；Project 与
+ * 凭证分别由 `project` / `token` 给出。所有端点按 bashub 的能力域拼接：
  *
- *     <url>/api/bashub/config/<profile>/server
- *     <url>/api/bashub/monitor/agents/<profile>/channel
+ *     <url>/api/bashub/config/<name>/server
+ *     <url>/api/bashub/monitor/agents/<name>/channel
  */
 module bas.remote;
 
@@ -53,17 +53,17 @@ class RemoteConfigException : Exception {
 /** `[remote]` 段的三个字段；空字段表示尚未配置。 */
 struct RemoteConfig {
   string url;
-  string profile;
+  string project;
   string token;
 
   /** 是否至少填写了一项；用于区分空模板与填了一半的配置。 */
   bool configured() const {
-    return url.length > 0 || profile.length > 0 || token.length > 0;
+    return url.length > 0 || project.length > 0 || token.length > 0;
   }
 
   /** 三项齐全才允许发起远程请求。 */
   bool complete() const {
-    return url.length > 0 && profile.length > 0 && token.length > 0;
+    return url.length > 0 && project.length > 0 && token.length > 0;
   }
 }
 
@@ -84,7 +84,7 @@ RemoteConfig loadRemoteConf(string path) {
   return parseRemoteConf(readText(path));
 }
 
-/** 解析 INI 文本；只识别 `[remote]` 下的 `url` / `profile` / `token`。 */
+/** 解析 INI 文本；只识别 `[remote]` 下的 `url` / `project` / `token`。 */
 RemoteConfig parseRemoteConf(string text) {
   RemoteConfig result;
   string section;
@@ -108,8 +108,8 @@ RemoteConfig parseRemoteConf(string text) {
     case "url":
       result.url = value;
       break;
-    case "profile":
-      result.profile = value;
+    case "project":
+      result.project = value;
       break;
     case "token":
       result.token = value;
@@ -121,17 +121,17 @@ RemoteConfig parseRemoteConf(string text) {
   return result;
 }
 
-/** 校验三项是否齐全以及基本的 URL / Profile 形态。 */
+/** 校验三项是否齐全以及基本的 URL / Project 形态。 */
 void validateRemoteConf(const RemoteConfig conf, string path) {
   if (!conf.url.length)
     throw new RemoteConfigException("No remote.url in " ~ path);
   if (!isAllowedRemoteUrl(conf.url))
     throw new RemoteConfigException(
         "remote.url must use https:// (http:// is only allowed for localhost) in " ~ path);
-  if (!conf.profile.length)
-    throw new RemoteConfigException("No remote.profile in " ~ path);
-  if (!validProfileName(conf.profile))
-    throw new RemoteConfigException("remote.profile must be org.name in " ~ path);
+  if (!conf.project.length)
+    throw new RemoteConfigException("No remote.project in " ~ path);
+  if (!validProjectName(conf.project))
+    throw new RemoteConfigException("remote.project must be org.name in " ~ path);
   if (!conf.token.length)
     throw new RemoteConfigException("No remote.token in " ~ path);
 }
@@ -148,17 +148,17 @@ string hubApiRoot(const RemoteConfig conf) {
 
 /** `basagent pull` 下载 server.xml 的地址。 */
 string serverConfigUrl(const RemoteConfig conf) {
-  return hubApiRoot(conf) ~ "/config/" ~ conf.profile ~ "/server";
+  return hubApiRoot(conf) ~ "/config/" ~ conf.project ~ "/server";
 }
 
 /** 节点通道的 HTTP(S) 地址；拨号时再转换成 WebSocket scheme。 */
 string agentChannelUrl(const RemoteConfig conf) {
-  return hubApiRoot(conf) ~ "/monitor/agents/" ~ conf.profile ~ "/channel";
+  return hubApiRoot(conf) ~ "/monitor/agents/" ~ conf.project ~ "/channel";
 }
 
-/** `pull` 与通道握手共用的 Bearer 凭证；bashub 会同时校验 Profile 与 key。 */
+/** `pull` 与通道握手共用的 Bearer 凭证；bashub 会同时校验 Project 与 key。 */
 string bearerCredential(const RemoteConfig conf) {
-  return conf.profile ~ ":" ~ conf.token;
+  return conf.project ~ ":" ~ conf.token;
 }
 
 /** 解析绝对 URL 的 scheme 与 host；只接受带 authority 的 http(s)/ws(s)。 */
@@ -260,12 +260,12 @@ private string unquote(string value) {
   return result;
 }
 
-/** Profile 必须是 `org.name`，不能把路径分隔符混进来。 */
-private bool validProfileName(string profile) {
-  auto dot = profile.indexOf('.');
-  if (dot <= 0 || dot >= profile.length - 1)
+/** Project 必须是 `org.name`，不能把路径分隔符混进来。 */
+private bool validProjectName(string name) {
+  auto dot = name.indexOf('.');
+  if (dot <= 0 || dot >= name.length - 1)
     return false;
-  foreach (ch; profile) {
+  foreach (ch; name) {
     if (ch == '/' || ch == '\\' || ch == ' ' || ch == '\t')
       return false;
   }

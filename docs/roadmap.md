@@ -33,7 +33,7 @@ basagent 侧 `src/bas/{channel,agent,agentmain,hub,report,logs}.d`、bashub 侧
   要另配一套鉴权；出站 HTTP 只要机器能访问控制台。
 - **汇报的是事实，不是配置**。主机指标取自本机；实例清单直接来自 `server.info` 的
   `liveInstances`，**不重新解析 `server.xml`**。这与 basagent 内部「意图 / 现状」的分工同构：
-  bashub 是意图的远端权威（`profile` → `server.ftl` → `server.xml`），汇报通道把现状回传。
+  bashub 是意图的远端权威（`project` → `server.ftl` → `server.xml`），汇报通道把现状回传。
   控制台上「配置 vs 实际」的差异，就是这两条线对出来的。
 - **不新增中间格式**：上报体的字段与 `server.info` 同名同义（要报路由时再带上 setline 那格的本机
   读数），控制台不再造一套平行模型（与 features.md 里「不做拓扑中间格式」同一条原则）。
@@ -77,17 +77,17 @@ basagent 侧 `src/bas/{channel,agent,agentmain,hub,report,logs}.d`、bashub 侧
 
 形态：
 
-- 端点：`{remote.url}/api/bashub/monitor/agents/{profile}/channel`，`{remote.url}` 与 Profile 都由 `basctl.conf` 的
-  `[remote] url/profile` 拼出。
-- 鉴权：**握手请求带 `Authorization: Bearer <profile>:<Profile.key>`**——`vibe.http.websockets` 的
+- 端点：`{remote.url}/api/bashub/monitor/agents/{project}/channel`，`{remote.url}` 与 Project 都由 `basctl.conf` 的
+  `[remote] url/project` 拼出。
+- 鉴权：**握手请求带 `Authorization: Bearer <project>:<Project.key>`**——`vibe.http.websockets` 的
   `connectWebSocketEx` 支持在握手前改请求头，所以不必像 `task` 那样先连上再 `/login`；校验不过
   直接 401、连接不建立。（若某条链路上自定义头传不过去，退回 `task` 的首帧 `/login host key`，
   服务端在鉴权完成前不处理其它消息。）
 - 服务端：bashub 挂一个 `@ServerEndpoint`（或 `ServerApplicationConfig`）。它**不走 webmvc 的
-  mvc profile**，所以要先确认 ems 的过滤链 / `WebReconfigModule` 不拦这条路径（拦了就放行，
+  mvc project**，所以要先确认 ems 的过滤链 / `WebReconfigModule` 不拦这条路径（拦了就放行，
   否则 CAS 的 302 会打断握手）；部署的 Tomcat 要带 websocket-api（发行包默认带）。
-- 在线注册表：按 profile 记活连接，同一 profile 重复登录**踢掉旧连接**（`task` 的做法），保证一个
-  `BAS_HOME` 只有一条活连接；连接断了就是这个 profile 离线，控制台据此显示。
+- 在线注册表：按 project 记活连接，同一 project 重复登录**踢掉旧连接**（`task` 的做法），保证一个
+  `BAS_HOME` 只有一条活连接；连接断了就是这个 project 离线，控制台据此显示。
 - 保活与重连：中间设备会把静默连接掐断，所以要有**应用层 ping/pong**（vibe-http 1.3 的
   `WebSocket` 没有公开的 ping 帧 API，用消息做）；断线后固定间隔重连（不做指数退避，少一个要调的
   参数），重连后先发整份快照，不做增量续传。
@@ -127,15 +127,15 @@ OpenSSL 3.x。`pull` 与 war 直链下载仍走宿主 `curl` 子进程。
 - 命令：`basagent report`——连上 WS、发 `hello` + `report`、断开。就是阶段 2 常驻循环的「跑一轮」，
   不是另一套协议。
 - 时机：需要时手工一次；常驻 agent 落地后由周期上报与远程动作后的重报覆盖。
-- 端点：`{remote.url}/api/bashub/monitor/agents/{profile}/channel`——**路径里不带连接 id**，一个 profile 一条连接（重复
+- 端点：`{remote.url}/api/bashub/monitor/agents/{project}/channel`——**路径里不带连接 id**，一个 project 一条连接（重复
   登录踢旧的）。握手前就要可达、按 key 校验，不能挂 security 拦截器（ems 的过滤链放行这一段是
   bashub 侧的验证项，见下面「待定」）。`report` 消息在 bashub 侧落到哪张表由它决定，不新增第三种
   格式。
-- 鉴权：**握手时**带 `Authorization: Bearer <profile>:<token>`（通道认凭证不认地址）。地址、Profile 和 token
+- 鉴权：**握手时**带 `Authorization: Bearer <project>:<token>`（通道认凭证不认地址）。地址、Project 和 token
   都来自 `conf/basctl.conf` 的 `[remote]`；`pull` 本身也用同一个 token 做 Bearer 鉴权，不再依赖
-  `ip:` 头。token 就是 bashub 的 `Profile.key`：**新建配置时随机生成**，另给一个重置入口
-  （`POST /api/bashub/config/profiles/{id}/reset-key`，换 key 即吊销）。
-- bashub 侧（**未开工**）：现在只落在内存登记册（`AgentRegistry`，每个 profile 只留最近一次、
+  `ip:` 头。token 就是 bashub 的 `Project.key`：**新建配置时随机生成**，另给一个重置入口
+  （`POST /api/bashub/config/projects/{id}/reset-key`，换 key 即吊销）。
+- bashub 侧（**未开工**）：现在只落在内存登记册（`AgentRegistry`，每个 project 只留最近一次、
   断连即摘除），够控制台回答「此刻谁在线、上面跑着什么」。要做历史点 / 曲线才需要一张
   「主机 / 实例现状」表 + 迁移脚本；现状数据是**可丢的**——丢了下次汇报就回来，不进配置表。
 
@@ -184,13 +184,13 @@ OpenSSL 3.x。`pull` 与 war 直链下载仍走宿主 `curl` 子进程。
   够控制台判断「这台机器还行吗」为止。
 - **不做 setline 的流量 / 健康监控**：不读它的统计，也不为它新增接口；本特性只看节点与实例。
 - **不做通用命令下发**：不做远程 shell、不做「在某某机器上跑个脚本」，动作就是那几个固定枚举。
-- **不做配置下发**：控制台的配置编辑仍走 `profile` → `server.ftl` → `server.xml` → `bas.sh pull`。
+- **不做配置下发**：控制台的配置编辑仍走 `project` → `server.ftl` → `server.xml` → `bas.sh pull`。
   汇报通道只往回传事实。
 - **不装到非 bas 的服务上**：只覆盖 basctl 管辖的实例。
 
 ### 待定
 
-- **ems 的过滤链要实测放行**：`/api/bashub/monitor/agents/{profile}/channel` 的 **HTTP 升级请求**不能被登录拦截 302 掉。
+- **ems 的过滤链要实测放行**：`/api/bashub/monitor/agents/{project}/channel` 的 **HTTP 升级请求**不能被登录拦截 302 掉。
   静态看是安全的——ems 的登录拦截是 webmvc 的 action 拦截器（不是 servlet `Filter`），而容器里的
   `WsFilter` 比 `Dispatcher` 先拿到升级请求；但**没在 ems 的完整过滤链下实测过**，落地前要跑一次
   （起一个真 bashub，用 `basagent report` 连过去看 `AgentRegistry` 有没有登记上）。

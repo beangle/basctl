@@ -98,7 +98,7 @@ private immutable string[] caBundlePaths = [
 /** 一次会话需要的全部输入。地址与 token 都来自同目录 `conf/basctl.conf`，没有第二处来源。 */
 struct AgentContext {
   string endpoint;
-  /** 握手凭证：`<profile>:<Profile.key>`。 */
+  /** 握手凭证：`<project>:<Project.key>`。 */
   string credential;
   /** 当前配置路径；service:* 动作与 report:bas 都从同一份 server.xml 找实例。 */
   string configFile;
@@ -172,7 +172,7 @@ int runReport(string configFile, string basctlVersion, string[] rest) {
   return code;
 }
 
-/** `[remote] url/profile/token` 齐全即启用通道；文件不存在或字段缺失都静默跳过。 */
+/** `[remote] url/project/token` 齐全即启用通道；文件不存在或字段缺失都静默跳过。 */
 bool channelEnabled(const RemoteConfig remote) {
   return remote.complete;
 }
@@ -182,7 +182,7 @@ private string agentRemotePath(string configFile) {
   return buildPath(dirName(configFile), remoteConfFileName);
 }
 
-/** 组装上下文：地址、Profile 与 token 全部来自同目录 `basctl.conf`。 */
+/** 组装上下文：地址、Project 与 token 全部来自同目录 `basctl.conf`。 */
 AgentContext agentContext(const Container conf, string configFile, string basctlVersion, bool once) {
   auto remotePath = agentRemotePath(configFile);
   auto remote = loadRemoteConf(remotePath);
@@ -225,7 +225,7 @@ private void agentLoop(ref AgentContext ctx) @system nothrow {
   exitEventLoop(true);
 }
 
-/** 拨号、握手（`Authorization: Bearer <profile>:<Profile.key>`），连上后交给 {@link serve}。 */
+/** 拨号、握手（`Authorization: Bearer <project>:<Project.key>`），连上后交给 {@link serve}。 */
 private void connectOnce(ref AgentContext ctx) {
   swallow({ logInfo("channel: connecting to %s", ctx.endpoint); });
   auto settings = new HTTPClientSettings;
@@ -256,10 +256,10 @@ private void connectOnce(ref AgentContext ctx) {
       }
     }
   };
-  // 身份：profile + 本机 IP。hub 用 ip 区分同一 profile 的多台 agent，只顶掉同 IP 的旧连接；
-  // 多网卡时全部上报，由 hub 取与 profile / hosts 配置命中的那个。@safe 闭包里不做系统调用，
+  // 身份：project + 本机 IP。hub 用 ip 区分同一 project 的多台 agent，只顶掉同 IP 的旧连接；
+  // 多网卡时全部上报，由 hub 取与 project / hosts 配置命中的那个。@safe 闭包里不做系统调用，
   // 所以先算好。
-  // 回环地址有意不发：它不构成一台机器的对外身份，留着只会让所有机器都命中 profile 里的
+  // 回环地址有意不发：它不构成一台机器的对外身份，留着只会让所有机器都命中 project 里的
   // 127.0.0.1 配置；只有回环的开发机才如实上报，否则 hub 无从识别。
   auto allIps = localAddresses();
   auto serverIps = allIps.filter!(ip => ip != "127.0.0.1").array;

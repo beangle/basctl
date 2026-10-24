@@ -16,23 +16,23 @@ basagent 与 bashub 之间那条 WebSocket 连接上说什么、怎么说。**�
 
 | 项 | 取值 |
 |---|---|
-| 路径 | `{remote.url}/api/bashub/monitor/agents/{profile}/channel` |
+| 路径 | `{remote.url}/api/bashub/monitor/agents/{project}/channel` |
 | `{remote.url}` | `conf/basctl.conf` 的 `[remote] url`，如 `https://hub.example.com` 或 `https://hub.example.com/bas/hub`；生产必须 HTTPS，连接时换成 `wss`。`http://` 只允许精确的本机回环地址 |
-| 凭证 | `Authorization: Bearer <profile>:<[remote] token>`（握手头），token 取值是 bashub 的 `Profile.key` |
-| 身份 | `ip: <addr>[,<addr>…]`（握手头）：本机地址，多网卡时全部上报（**回环地址不发**，只有回环的开发机例外）；hub 过滤后只保留与 Profile/Host 配置命中的那个作为 `profile + server ip` 身份，只顶掉同一 IP 的旧连接 |
+| 凭证 | `Authorization: Bearer <project>:<[remote] token>`（握手头），token 取值是 bashub 的 `Project.key` |
+| 身份 | `ip: <addr>[,<addr>…]`（握手头）：本机地址，多网卡时全部上报（**回环地址不发**，只有回环的开发机例外）；hub 过滤后只保留与 Host 配置命中的那个作为 `project + server ip` 身份，只顶掉同一 IP 的旧连接 |
 
-- **一个 profile 多台机器**：同一 profile 的不同机器各持一条连接，互不顶替；hub 靠 `ip` 头区分，
-  因此这个头在握手时必填。头里没有合法 IP 时 hub 返回 400；地址合法但不属于该 Profile 的
+- **一个 project 多台机器**：同一 project 的不同机器各持一条连接，互不顶替；hub 靠 `ip` 头区分，
+  因此这个头在握手时必填。头里没有合法 IP 时 hub 返回 400；地址合法但不属于该 Project 的
   `ip` / `hosts.ip` 时返回 403（配置里没有任何 IP 也拒绝，不做“没配置就放行”的兜底）。
 - **谁拨号**：basagent 主动出站。生产机多在 NAT 后面，开入站口要申请、要另配一套鉴权；出站只要
   机器能访问控制台。启用开关、地址与 token 都来自同目录 `conf/basctl.conf` 的 `[remote]`；
   三项齐全才拨号，没有该文件或字段不完整就不发任何外连，也不读取环境变量。
 - **鉴权在握手，不在首帧**：凭证随 `pull` 通道下发，换掉即吊销；未通过鉴权的连接在握手阶段就被
-  关掉，连一个字节的协议都拿不到。`Profile.key` 由 bashub 新建时随机生成，可重置（重置即吊销）。
-  `pull` 本身也用同一个 `<profile>:<Profile.key>` 做 Bearer 鉴权，不再依赖可伪造的 `ip:` 头。
+  关掉，连一个字节的协议都拿不到。`Project.key` 由 bashub 新建时随机生成，可重置（重置即吊销）。
+  `pull` 本身也用同一个 `<project>:<Project.key>` 做 Bearer 鉴权，不再依赖可伪造的 `ip:` 头。
 - **传输完整性**：客户端恢复 `trustedCert` 校验并加载系统 CA；自签书或主机名不匹配必须握手失败。
   控制面和配置下载都不接受非回环地址上的明文 HTTP/WS。
-- **一条连接一个 profile**：同一 profile 再次登录时服务端踢掉旧连接——agent 断线重连常常是「旧的
+- **一条连接一个 project**：同一 project 再次登录时服务端踢掉旧连接——agent 断线重连常常是「旧的
   还没超时、新的已经进来」，留着旧的会让 hub 往一条死连接发指令。所以路径里不带连接 id。
 - **保活**：hub 按期发 `ping`，agent 回 `pong`；agent 那边沉默超时（150s）就重连。不用 WebSocket
   自带的 ping 帧——`vibe` 的客户端没有公开的 ping API，用消息做，协议少一层特例。

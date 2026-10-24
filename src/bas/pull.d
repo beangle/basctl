@@ -17,8 +17,8 @@
 /**
  * `pull`：从控制端拉取 `conf/server.xml`。
  *
- * 地址、Profile 与凭证都取自 `conf/basctl.conf` 的 `[remote]` 段；请求只用
- * `Authorization: Bearer <profile>:<Profile.key>` 鉴权，不再发送可伪造的 `ip:` 头，也不再读取
+ * 地址、Project 与凭证都取自 `conf/basctl.conf` 的 `[remote]` 段；请求只用
+ * `Authorization: Bearer <project>:<Project.key>` 鉴权，不再发送可伪造的 `ip:` 头，也不再读取
  * `bas_remote_*` 环境变量。旧配置备份为 `conf/server_old.xml`；拉取失败时保留
  * 现有配置不动。
  */
@@ -109,8 +109,8 @@ int runPull(string[] args) {
 /** 打印 `pull` 用法到 stderr。 */
 void pullUsage() {
   stderr.writeln("Usage: basagent pull [--file=<basctl.conf>] [--if-configured] [workdir]");
-  stderr.writeln("  Fetch <remote.url>/api/bashub/config/<remote.profile>/server into <workdir>/conf,");
-  stderr.writeln("  authenticating with Bearer <remote.profile>:<remote.token> from");
+  stderr.writeln("  Fetch <remote.url>/api/bashub/config/<remote.project>/server into <workdir>/conf,");
+  stderr.writeln("  authenticating with Bearer <remote.project>:<remote.token> from");
   stderr.writeln("  <workdir>/conf/basctl.conf. The old");
   stderr.writeln("  file is backed up as server_old.xml. <workdir> defaults to $BAS_HOME (or the");
   stderr.writeln("  current directory). --if-configured exits silently when all remote fields");

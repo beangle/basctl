@@ -104,7 +104,7 @@ bas 引擎版本取 basctl 内置默认（`--bas=` 可覆盖），依赖集与 `
 `--remote` / `--snapshot-remote`；空段即该仓库匿名。
 `remote` 里的 `${bas_remote_url}`、`token` 里的 `${bas_remote_token}` 在解析阶段用同目录
 `conf/basctl.conf` 的 `remote.url` / `remote.token` 展开，不读取同名环境变量；bashub 生成的
-`<snapshot-repo token>` 则直接来自 Profile 的 micdn `download-key`。
+`<snapshot-repo token>` 则直接来自 Project 的 micdn `download-key`。
 
 实例身份与停止只归 basctl：jstart 不再写 `app.pid`、也不提供 `stop`，它就是「解析 + 准备 +
 exec」——所以 `run` 是纯前台（Ctrl-C 退出），`start` 起来的是后台进程，两者的运行信息都记在

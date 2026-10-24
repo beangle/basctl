@@ -107,12 +107,12 @@ private string fakeBasagent(string root) {
   assert(text.canFind("# basctl.conf"), text);
   assert(text.canFind("[remote]"), text);
   assert(text.canFind("url ="), text);
-  assert(text.canFind("profile ="), text);
+  assert(text.canFind("project ="), text);
   assert(text.canFind("token ="), text);
 
   auto remote = parseRemoteConf(text);
   assert(!remote.complete);
-  assert(!remote.url.length && !remote.profile.length && !remote.token.length);
+  assert(!remote.url.length && !remote.project.length && !remote.token.length);
 
   version (Posix) {
     import core.sys.posix.sys.stat : lstat, stat_t;

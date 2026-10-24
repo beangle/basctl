@@ -27,11 +27,11 @@ import std.exception : assertThrown;
 ; control plane
 [remote]
 url = https://hub.example.com/bashub/
-profile = openurp.prod
+project = openurp.prod
 token = "secret"
 }");
   assert(conf.url == "https://hub.example.com/bashub/");
-  assert(conf.profile == "openurp.prod");
+  assert(conf.project == "openurp.prod");
   assert(conf.token == "secret");
   assert(conf.configured);
   assert(conf.complete);
@@ -43,16 +43,16 @@ token = "secret"
 }
 
 @("other sections do not leak into remote") unittest {
-  auto conf = parseRemoteConf("[other]\nurl = https://wrong\n[remote]\nprofile = demo.prod");
+  auto conf = parseRemoteConf("[other]\nurl = https://wrong\n[remote]\nproject = demo.prod");
   assert(conf.url == "");
-  assert(conf.profile == "demo.prod");
+  assert(conf.project == "demo.prod");
   assert(conf.token == "");
   assert(conf.configured);
   assert(!conf.complete);
 }
 
 @("an empty template is neither configured nor complete") unittest {
-  auto conf = parseRemoteConf("# template\n[remote]\nurl =\nprofile =\ntoken =\n");
+  auto conf = parseRemoteConf("# template\n[remote]\nurl =\nproject =\ntoken =\n");
   assert(!conf.configured);
   assert(!conf.complete);
 }

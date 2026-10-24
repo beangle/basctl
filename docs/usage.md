@@ -34,7 +34,7 @@ root 运行。
 ### 方式一：接入 bashub（推荐）
 
 bashub 是配置与实例的远端权威：`bas.sh pull` 从它拉取 `conf/server.xml`，常驻 `basagent`
-把本机现状报回去，并接收日志 / 启停指令。先在 bashub 里为这台机器建好 Profile，再填写本地配置：
+把本机现状报回去，并接收日志 / 启停指令。先在 bashub 里为这台机器建好 Project，再填写本地配置：
 
 ```sh
 # 1. 系统包已预置控制脚本与 basctl.conf 模板；源码安装或其它目录执行：
@@ -49,7 +49,7 @@ sudo -u bas -H "${EDITOR:-vi}" /var/lib/bas/conf/basctl.conf
 ```ini
 [remote]
 url = https://hub.example.com
-profile = openurp.prod
+project = openurp.prod
 token = 9f8e7d6c5b4a39281706f5e4d3c2b1a0
 ```
 
@@ -68,8 +68,8 @@ sudo systemctl start basagent.service
 sudo -u bas -H tail -f /var/log/bas/agent/console.out
 ```
 
-把 `url` / `profile` / `token` 换成 bashub 中这台机器对应 Profile 的值：`profile` 必须是
-`org.name`，`token` 就是 `Profile.key`。三项齐全才会启用 `pull` 与汇报通道；缺项时按未接入
+把 `url` / `project` / `token` 换成 bashub 中这台机器对应 Project 的值：`project` 必须是
+`org.name`，`token` 就是 `Project.key`。三项齐全才会启用 `pull` 与汇报通道；缺项时按未接入
 处理，不影响本地 `start` / `stop`。`bin/start.sh` / `bin/restart.sh` 只读本地配置，不会隐式
 拉取；需要更新时显式执行 `bin/bas.sh pull`。字段说明见下方「远程配置」，失败行为见
 [channel.md](channel.md)。
@@ -134,7 +134,7 @@ setline 与 bashub 通道互不依赖，配置、部署与安全边界统一见 
 | `basctl setline --sync` | 同上（显式写法，便于脚本与记忆）；只推一次，推完即退出，没有常驻模式——路由变化的时机就是实例的启停 |
 | `basctl make <type> [options]` | 容器入口（creator）：把 jstart 的 `[engine] init` 协议翻译成容器启动命令 |
 | `basctl firewall [workdir]` | 按配置交互式配置 firewalld 端口 |
-| `bas.sh pull` | 按 `conf/basctl.conf` 的 `[remote]` 拉取 `conf/server.xml`（底层调用 `basagent pull`）：地址为 `<url>/api/bashub/config/<profile>/server`，请求用 `Authorization: Bearer <profile>:<token>`；旧配置备份为 `server_old.xml`。未配置 `[remote]` 时告警并以 0 退出，配置无效或下载失败时非 0 |
+| `bas.sh pull` | 按 `conf/basctl.conf` 的 `[remote]` 拉取 `conf/server.xml`（底层调用 `basagent pull`）：地址为 `<url>/api/bashub/config/<project>/server`，请求用 `Authorization: Bearer <project>:<token>`；旧配置备份为 `server_old.xml`。未配置 `[remote]` 时告警并以 0 退出，配置无效或下载失败时非 0 |
 | `basagent report [server.xml]` | 连一次控制台（bashub）报一次主机与实例现状后退出；地址与凭证都取同目录 `basctl.conf` 的 `[remote]`，报上去了退出码才是 0。见 [channel.md](channel.md) |
 | `basagent [server.xml]` | 常驻：连上控制台后周期上报、回保活、执行固定指令（取日志 / 启停实例），断线自动重连；远程 `service:start` / `service:restart` 执行前会先拉取一次配置，`stop` 不拉取 |
 | `systemctl start/stop/restart basagent.service` | 管理系统级常驻 agent；运行账号固定为 `bas:beangle`。单元设置 `KillMode=process`：停止、重启或升级 agent 只结束 agent 自己，不会停掉实例（包括控制台 `service:start` 拉起的那些） |
@@ -182,8 +182,8 @@ basctl init --dry-run /opt/bas # 只打印将会写入的文件
 | 字段 | 必填 | 说明 |
 |---|---|---|
 | `url` | 是 | bashub 根地址（有反向代理前缀就连前缀一起写，不要带 `/api/bashub`），生产必须使用 `https://`；`http://` 只允许 `localhost` / `127.0.0.1` / `[::1]` |
-| `profile` | 是 | bashub 里的配置名，必须是 `org.name` |
-| `token` | 是 | 该 Profile 的 `key`（bashub 配置详情里可查看/重置） |
+| `project` | 是 | bashub 里的配置名，必须是 `org.name` |
+| `token` | 是 | 该 Project 的 `key`（bashub 配置详情里可查看/重置） |
 
 运行历史采样由 bashub 控制：agent 不保存采样间隔或时间窗口，只在收到 hub 下发的
 `report:health` 时即时返回实例的 `id` / `state`。采样频率与时间窗口配置在 bashub 的
@@ -192,10 +192,10 @@ basctl init --dry-run /opt/bas # 只打印将会写入的文件
 在线页的详细 OS、磁盘和 webapps 信息不参与周期采样：agent 首次连接时发一次完整快照，
 之后由控制台点击“刷新详情”下发 `report:now` 按需获取。
 
-- `pull` 请求 `<url>/api/bashub/config/<profile>/server`，并发送
-  `Authorization: Bearer <profile>:<token>`。token 不对返回 401，Profile 不存在返回 404。
+- `pull` 请求 `<url>/api/bashub/config/<project>/server`，并发送
+  `Authorization: Bearer <project>:<token>`。token 不对返回 401，Project 不存在返回 404。
 - `basagent report` / 常驻 agent 使用同一组地址与 token：拼出
-  `<url>/api/bashub/monitor/agents/<profile>/channel`，再把 `http(s)` 换成 `ws(s)` 建立出站
+  `<url>/api/bashub/monitor/agents/<project>/channel`，再把 `http(s)` 换成 `ws(s)` 建立出站
   WebSocket。只有 `https` 才能换成 `wss`，`http` 只保留给回环调试；TLS 使用系统 CA 校验证书，
   自签或主机名不匹配会直接失败。
 - `start.sh` / `restart.sh` **不会**隐式拉取，只读当前 `conf/server.xml`。需要远端更新时显式执行
@@ -203,7 +203,7 @@ basctl init --dry-run /opt/bas # 只打印将会写入的文件
   则动作失败；`service:stop` 始终按当前运行信息停机，不会被拉取挡住。
 - `server.xml` 里仍可写 `${bas_remote_url}` / `${bas_remote_token}`，解析时会用
   `basctl.conf` 的 `remote.url` / `remote.token` 展开，而不是读取环境变量。SNAPSHOT
-  下载另有自己的 `token`：bashub 会把 Profile 的 micdn `<auth download-key>` 写入
+  下载另有自己的 `token`：bashub 会把 Project 的 micdn `<auth download-key>` 写入
   `<snapshot-repo token="...">`；没有配置 key 时不写 `token`，按匿名下载处理。
   SNAPSHOT 仓库仍会先被检查并尝试下载最新构建，再与 `BAS_HOME/webapps` 下的同名 war
   比较修改时间；仓库暂时不可用（例如返回 401）时静默使用本地文件，不向启动终端输出
