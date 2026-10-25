@@ -463,6 +463,11 @@ private void serveMaster(ref AgentContext ctx, scope WebSocket ws, RelayState st
         auto master = bodyText(msg.body, "master");
         auto port = bodyText(msg.body, "port");
         if (master.length && port.length) {
+          try
+            state.closeAll();
+          catch (Throwable e) {
+            logWarn("channel: close followers failed: %s", e.msg);
+          }
           ctx.masterEndpoint = "ws://" ~ master ~ ":" ~ port ~ "/agent";
           ctx.roleState.role = "follower";
           ctx.followAssigned = true;
