@@ -28,6 +28,8 @@
 - 一个 native server 只允许一个 webapp
 - `exec` 可选；缺省为 artifactId
 - `native-repo` 的地址作为 jstart 的 `--remote`，不传 `--snapshot-remote`
+- farm 的 `<server-options>` 中 `-D...` 会写入 `[args]`；`-X...` 等 JVM 参数不会传给 native
+- native 启动参数同时带 `-Dbas.server` 和 `-Dbas.home`，供进程身份识别
 
 ## 启动
 

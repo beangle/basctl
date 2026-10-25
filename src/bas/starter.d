@@ -853,6 +853,13 @@ private Nullable!string prepareNative(string basHome, Container container, Serve
   if (server.http > 0)
     args ~= "--port=" ~ server.http.to!string;
   args ~= "--path=" ~ (app.contextPath.length ? app.contextPath : "/");
+  // native 没有 JVM 启动器，进程身份和 -D 参数要直接交给可执行文件。
+  args ~= "-Dbas.server=" ~ server.qualifiedName;
+  args ~= "-Dbas.home=" ~ basHome;
+  if (!server.farm.serverOptions.isNull)
+    foreach (opt; splitServerOptions(server.farm.serverOptions.get))
+      if (opt.startsWith("-D"))
+        args ~= opt;
   auto initCommand = basctlExecutable() ~ " make native --name=" ~ shellQuote(artifact.artifactId);
   if (!app.exec.isNull && app.exec.get.length)
     initCommand ~= " --exec=" ~ shellQuote(app.exec.get);
