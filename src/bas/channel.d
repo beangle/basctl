@@ -74,6 +74,8 @@ struct Envelope {
   string id;
   /** 发起方的本机时刻，格式见 {@link nowStamp}。 */
   string at;
+  /** relay master 上的逻辑 agent；直连/未中继时为空。 */
+  string agent;
   /** 该原语的负载；没有负载就是空对象。 */
   JSONValue body;
 
@@ -123,7 +125,7 @@ Envelope parseEnvelope(string text) {
   auto id = textField(root, "id");
   if (id.length && !validRequestId(id))
     throw new Exception("invalid request id");
-  return Envelope(type, id, textField(root, "at"), bodyOf(root));
+  return Envelope(type, id, textField(root, "at"), textField(root, "agent"), bodyOf(root));
 }
 
 /** 请求号只允许有限字符与长度，挡住日志注入和超长缓存键。 */
@@ -158,10 +160,12 @@ bool requestTimestampFresh(string at, SysTime now) {
 }
 
 /** 渲染一条消息：`id` 非空即请求，`at` 由这里补上（发起方时刻）。 */
-string renderEnvelope(string type, string id, JSONValue body) {
+string renderEnvelope(string type, string id, JSONValue body, string agent = "") {
   JSONValue msg = ["type": JSONValue(type), "at": JSONValue(nowStamp())];
   if (id.length)
     msg["id"] = JSONValue(id);
+  if (agent.length)
+    msg["agent"] = JSONValue(agent);
   msg["body"] = body;
   return msg.toString();
 }
@@ -186,6 +190,22 @@ string helloMessage(string host, string basctlVersion, string basHome, string ba
 /** `report:os` / `report:bas` / `report:health`：整份替换语义的通知，不带 `id`。 */
 string reportMessage(string type, JSONValue body) {
   return renderEnvelope(type, "", body);
+}
+
+/** `ping`：master 保活 follower。 */
+string pingMessage() {
+  return renderEnvelope("ping", "", emptyBody());
+}
+
+/** `agent:offline`：master 通知 hub 某 follower 已断开。 */
+string offlineMessage(string agent) {
+  return renderEnvelope("agent:offline", "", emptyBody(), agent);
+}
+
+/** 推荐一个组内 master 候选。 */
+string recommendMessage(string candidate, string group) {
+  JSONValue body = ["candidate": JSONValue(candidate), "group": JSONValue(group)];
+  return renderEnvelope("recommend", "", body);
 }
 
 /** `pong`：保活应答，空 body。 */

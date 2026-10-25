@@ -314,6 +314,7 @@ string[] resolveEngineDeps(Container container, Engine engine, string containerT
 class Host {
   string name;
   string ip;
+  string agentGroup = "default_group";
   /** setline 对外 listen 端口；与 adminPort 同时为空或同时非空。 */
   Nullable!ushort setlineListenPort;
   /** setline 管理口（adminListen）端口；basctl 只拨 127.0.0.1。 */
@@ -593,6 +594,7 @@ private string[] mergeRepos(const(string)[] repos, const(string)[] tokens) {
 /** `server.xml` 根对象：engines / hosts / farms / webapps / resources。 */
 class Container {
   string version_;
+  ushort agentListenPort = 19080;
   /**
    * setline 的路由命名空间。新格式来自根元素 `setline-hostname`；旧格式兼容
    * `<setline hostname="...">`。是否启用由本机 Host 的两个端口决定，不单看该字段。
@@ -737,6 +739,13 @@ Container parseServerXml(string xmlText, RemoteConfig remote = RemoteConfig.init
 
   auto conf = new Container;
   conf.version_ = requireAttr(basElem, "version", "<bas>");
+  auto agentPort = optAttr(basElem, "agent-listen-port");
+  if (!agentPort.isNull && agentPort.get.strip.length > 0) {
+    try
+      conf.agentListenPort = parseSetlinePort(agentPort.get);
+    catch (Exception)
+      throw new ServerXmlException("<bas> has an invalid agent-listen-port");
+  }
   auto rootSetlineHostname = optAttr(basElem, "setline-hostname");
   if (!rootSetlineHostname.isNull)
     conf.setlineHostname = nullable(parseSetlineHostnameText(rootSetlineHostname.get));
@@ -1048,6 +1057,9 @@ Engine parseEngine(XmlElem elem) {
 /** 解析 `<host>`（名称 + 绑定 IP）。 */
 Host parseHost(XmlElem elem) {
   auto host = new Host(requireAttr(elem, "name", "<host>"), requireAttr(elem, "ip", "<host>"));
+  auto group = optAttr(elem, "agent-group");
+  if (!group.isNull && group.get.strip.length > 0)
+    host.agentGroup = group.get.strip;
   auto listen = nonBlankAttr(elem, "setline-listen-port");
   auto admin = nonBlankAttr(elem, "setline-admin-port");
   if (listen.isNull != admin.isNull)

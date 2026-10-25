@@ -34,7 +34,7 @@
 module bas.agent;
 
 import bas.channel;
-import bas.config : Container, parseServerXmlFile;
+import bas.config : Container, Host, parseServerXmlFile;
 import bas.hub : agentUrl;
 import bas.logs : agentLog, consoleLog, countLines, maxLogLines, plainName, readLogWindow;
 import bas.net : hostName, localAddresses;
@@ -45,21 +45,24 @@ import bas.report : basReport, healthReport, osReport;
 import bas.starter : serviceAction;
 
 import vibe.core.core : exitEventLoop, runApplication, runTask, sleep;
+import vibe.core.sync : TaskMutex;
 import vibe.core.log : logInfo, logWarn;
 import vibe.http.client : HTTPClientRequest, HTTPClientSettings;
-import vibe.http.websockets : WebSocket, connectWebSocketEx;
+import vibe.http.router : URLRouter;
+import vibe.http.server : HTTPServerRequest, HTTPServerResponse, HTTPServerSettings, listenHTTP;
+import vibe.http.websockets : WebSocket, connectWebSocketEx, handleWebSockets;
 import vibe.inet.url : URL;
 import vibe.stream.tls : TLSContext, TLSPeerValidationMode;
 
-import core.time : Duration, seconds;
+import core.time : Duration, msecs, seconds;
 import core.stdc.stdlib : abort;
-import std.algorithm : filter;
+import std.algorithm : canFind, filter, sort;
 import std.array : array, join;
 import std.datetime.stopwatch : MonoTime;
 import std.file : exists;
-import std.json : JSONValue;
+import std.json : JSONType, JSONValue;
 import std.path : absolutePath, buildPath, dirName;
-import std.process : environment, spawnShell;
+import std.process : environment, execute, spawnShell;
 import std.stdio : stderr, writeln;
 import std.conv : to;
 import std.string : format, strip;
@@ -95,6 +98,11 @@ private immutable string[] caBundlePaths = [
   "/etc/ssl/ca-bundle.pem"
 ];
 
+/** master listener 与 agent loop 共享的运行时角色。 */
+private final class RoleState {
+  string role = "candidate"; // candidate | master | follower
+}
+
 /** 一次会话需要的全部输入。地址与 token 都来自同目录 `conf/basctl.conf`，没有第二处来源。 */
 struct AgentContext {
   string endpoint;
@@ -106,6 +114,20 @@ struct AgentContext {
   string basHome;
   string basVersion;
   string basctlVersion;
+  RoleState roleState;
+  /** 组网分组与统一监听端口。 */
+  string groupName = "default_group";
+  string[] groupIps;
+  string listenHost;
+  ushort listenPort = 19080;
+  string hubEndpoint;
+  string masterEndpoint;
+  /** follower 上报到 master 的逻辑身份。 */
+  string agentId;
+  /** 本组其他 host 的 IP，用于 follower 连接校验。 */
+  bool[string] followerIps;
+  /** true 表示刚被 hub 指为 follower，下一次连接应去连 master。 */
+  bool followAssigned;
   /** 只跑一轮（`report`）；常驻（`agent`）为 false。 */
   bool once;
   /** 这一轮到底报上去了没有：`report` 据此定退出码。 */
@@ -134,14 +156,15 @@ int runAgent(string configFile, string basctlVersion, string[] rest) {
   }
   AgentContext ctx;
   try {
-    validateRemoteConf(remote, remotePath);
     ctx = agentContext(parseServerXmlFile(configFile), remote, configFile, basctlVersion, false);
   } catch (Exception e) {
     stderr.writeln("basagent: " ~ e.msg);
     return 1;
   }
-  writeln("channel: reporting to " ~ ctx.endpoint);
-  runTask({ agentLoop(ctx); });
+  writeln("channel: candidate for group " ~ ctx.groupName ~ ", hub " ~ ctx.endpoint);
+  auto relayState = new RelayState;
+  runTask({ try { serveMasterListener(ctx, relayState); } catch (Throwable e) { logWarn("channel: master listener stopped: %s", e.msg); } });
+  runTask({ agentLoop(ctx, relayState); });
   return runApplication(null);
 }
 
@@ -190,11 +213,21 @@ AgentContext agentContext(const Container conf, string configFile, string basctl
   return agentContext(conf, remote, configFile, basctlVersion, once);
 }
 
+/** 本机对应的 Host：优先主机名，其次本机 IP。 */
+private const(Host) resolveHost(const Container conf) {
+  auto host = hostName();
+  auto ips = localAddresses();
+  foreach (h; conf.hosts) {
+    if (h.name == host || ips.canFind(h.ip))
+      return h;
+  }
+  return null;
+}
+
 /** 已读取并校验过的远程配置。 */
 private AgentContext agentContext(const Container conf, const RemoteConfig remote, string configFile,
     string basctlVersion, bool once) {
   AgentContext ctx;
-  ctx.endpoint = agentUrl(agentChannelUrl(remote));
   ctx.credential = bearerCredential(remote);
   ctx.configFile = configFile;
   ctx.host = hostName();
@@ -202,7 +235,325 @@ private AgentContext agentContext(const Container conf, const RemoteConfig remot
   ctx.basVersion = conf.version_;
   ctx.basctlVersion = basctlVersion;
   ctx.once = once;
+  ctx.roleState = new RoleState;
+  ctx.listenPort = conf.agentListenPort;
+  ctx.hubEndpoint = agentUrl(agentChannelUrl(remote));
+  ctx.endpoint = ctx.hubEndpoint;
+
+  auto self = resolveHost(conf);
+  if (self !is null) {
+    ctx.groupName = self.agentGroup;
+    ctx.listenHost = self.ip;
+    ctx.agentId = self.ip;
+  } else {
+    ctx.listenHost = "127.0.0.1";
+    ctx.agentId = ctx.host;
+  }
+
+  foreach (h; conf.hosts) {
+    if (h.agentGroup != ctx.groupName)
+      continue;
+    ctx.groupIps ~= h.ip;
+    if (h.ip != ctx.agentId)
+      ctx.followerIps[h.ip] = true;
+  }
   return ctx;
+}
+
+/** master 上的一个 follower 局域网连接。 */
+private final class RelayLink {
+  immutable string id;
+  private string[] outbound;
+  bool closed;
+
+  this(string id) {
+    this.id = id;
+  }
+
+  void offer(string message) {
+    if (!closed && message.length > 0)
+      outbound ~= message;
+  }
+
+  string[] take() {
+    auto messages = outbound;
+    outbound = null;
+    return messages;
+  }
+}
+
+/** master 的 follower 登记册与发往 hub 的转发队列。 */
+private final class RelayState {
+  private RelayLink[string] links;
+  private string[] hubOutbound;
+  private TaskMutex lock;
+
+  this() {
+    lock = new TaskMutex;
+  }
+
+  RelayLink add(string id) {
+    lock.lock();
+    scope (exit) lock.unlock();
+    auto link = new RelayLink(id);
+    links[id] = link;
+    return link;
+  }
+
+  void remove(string id) {
+    lock.lock();
+    scope (exit) lock.unlock();
+    if (auto link = id in links) {
+      (*link).closed = true;
+      links.remove(id);
+    }
+  }
+
+  RelayLink get(string id) {
+    lock.lock();
+    scope (exit) lock.unlock();
+    if (auto link = id in links)
+      return *link;
+    return null;
+  }
+
+  void pushHub(string message) {
+    lock.lock();
+    scope (exit) lock.unlock();
+    hubOutbound ~= message;
+  }
+
+  void closeAll() {
+    lock.lock();
+    scope (exit) lock.unlock();
+    foreach (_, link; links)
+      link.closed = true;
+    links = null;
+  }
+
+  string[] takeHub() {
+    lock.lock();
+    scope (exit) lock.unlock();
+    auto messages = hubOutbound;
+    hubOutbound = null;
+    return messages;
+  }
+}
+
+/** master 在内部地址启动 follower WebSocket 监听。 */
+private void serveMasterListener(const AgentContext ctx, RelayState state) {
+  auto router = new URLRouter;
+  router.get("/health", (HTTPServerRequest req, HTTPServerResponse res) {
+    if (ctx.roleState.role == "follower") {
+      res.statusCode = 503;
+      res.writeBody("follower");
+      return;
+    }
+    res.writeBody("ok");
+  });
+  router.get("/agent", (HTTPServerRequest req, HTTPServerResponse res) {
+    handleFollowerRequest(ctx, state, req, res);
+  });
+  auto settings = new HTTPServerSettings;
+  settings.port = ctx.listenPort;
+  settings.bindAddresses = [ctx.listenHost];
+  logInfo("channel: master listening on %s:%d", ctx.listenHost, ctx.listenPort);
+  listenHTTP(settings, router);
+}
+
+private void handleFollowerRequest(const AgentContext ctx, RelayState state,
+    HTTPServerRequest req, HTTPServerResponse res) {
+  auto auth = req.headers.get("Authorization", "").strip;
+  auto supplied = auth.length > 7 && auth[0 .. 7] == "Bearer " ? auth[7 .. $].strip : "";
+  if (supplied.length == 0 || supplied != ctx.credential) {
+    res.statusCode = 401;
+    res.writeBody("unauthorized");
+    return;
+  }
+  if (ctx.roleState.role != "master") {
+    res.statusCode = 503;
+    res.writeBody("agent is not master yet");
+    return;
+  }
+  auto id = req.headers.get("X-Bas-Agent", "").strip;
+  if (id.length == 0 || id.length > 255) {
+    res.statusCode = 400;
+    res.writeBody("missing x-bas-agent");
+    return;
+  }
+  // 只接受 server.xml（bashub 生成）中分配给本 master 的 follower，并要求来源 IP 与声明一致。
+  if ((id in ctx.followerIps) is null) {
+    logWarn("channel: reject follower %s not assigned to this master", id);
+    res.statusCode = 403;
+    res.writeBody("follower is not assigned to this master");
+    return;
+  }
+  auto peer = req.peer;
+  if (peer != id) {
+    logWarn("channel: reject follower %s from source %s", id, peer);
+    res.statusCode = 403;
+    res.writeBody("source ip does not match follower");
+    return;
+  }
+  auto link = state.add(id);
+  auto handler = handleWebSockets((scope WebSocket ws) nothrow {
+    try {
+      auto lastPing = MonoTime.currTime;
+      while (ws.connected && !link.closed) {
+        if (MonoTime.currTime - lastPing > 60.seconds) {
+          ws.send(pingMessage());
+          lastPing = MonoTime.currTime;
+        }
+        foreach (message; link.take()) {
+          if (ws.connected)
+            ws.send(message);
+        }
+        if (!ws.waitForData(250.msecs))
+          continue;
+        string text;
+        text = ws.receiveText();
+        Envelope msg;
+        try
+          msg = parseEnvelope(text);
+        catch (Exception e) {
+          logWarn("channel: follower %s bad message: %s", id, e.msg);
+          continue;
+        }
+        // follower 消息补上逻辑身份后再交给 hub；master 不解释其中的 body。
+        state.pushHub(renderEnvelope(msg.type, msg.id, msg.body, id));
+      }
+    } catch (Throwable e) {
+      logWarn("channel: follower %s stopped: %s", id, e.msg);
+    }
+    try
+      state.pushHub(offlineMessage(id));
+    catch (Throwable e) {
+      logWarn("channel: follower %s offline notice failed: %s", id, e.msg);
+    }
+    try
+      state.remove(id);
+    catch (Throwable e) {
+      logWarn("channel: follower %s cleanup failed: %s", id, e.msg);
+    }
+  });
+  handler(req, res);
+}
+
+/** master 与 hub 的物理连接：master 自己的命令本地处理，带 `agent` 的转发给 follower。 */
+private void serveMaster(ref AgentContext ctx, scope WebSocket ws, RelayState state) {
+  ws.send(helloMessage(ctx.host, ctx.basctlVersion, ctx.basHome, ctx.basVersion));
+  sendReports(ctx, ws);
+  ctx.served = true;
+  logInfo("channel: connected as relay master %s", ctx.host);
+
+  auto lastTraffic = MonoTime.currTime;
+  while (ws.connected) {
+    foreach (message; state.takeHub())
+      ws.send(message);
+    if (ws.waitForData(tick)) {
+      auto text = ws.receiveText();
+      Envelope msg;
+      try
+        msg = parseEnvelope(text);
+      catch (Exception e) {
+        logWarn("channel: %s", e.msg);
+        continue;
+      }
+      if (msg.type == "become-follower") {
+        auto master = bodyText(msg.body, "master");
+        auto port = bodyText(msg.body, "port");
+        if (master.length && port.length) {
+          ctx.masterEndpoint = "ws://" ~ master ~ ":" ~ port ~ "/agent";
+          ctx.roleState.role = "follower";
+          ctx.followAssigned = true;
+          logInfo("channel: demoted, follow master %s", master);
+          return;
+        }
+      }
+      if (msg.agent.length) {
+        auto link = state.get(msg.agent);
+        if (link !is null)
+          link.offer(text);
+        else
+          logWarn("channel: no follower %s for hub message", msg.agent);
+      } else {
+        handle(ctx, ws, text);
+      }
+      lastTraffic = MonoTime.currTime;
+    } else if (MonoTime.currTime - lastTraffic > silentTimeout) {
+      throw new Exception("no traffic from hub for " ~ silentTimeout.to!string);
+    }
+  }
+}
+
+private string bodyText(JSONValue body, string key) {
+  if (body.type != JSONType.object)
+    return "";
+  auto value = body[key];
+  return value.type == JSONType.string ? value.get!string.strip : "";
+}
+
+/** 探测组内候选的固定端口。 */
+private bool candidateHealthy(string ip, ushort port) {
+  try {
+    auto result = execute(["curl", "-fsS", "--max-time", "1",
+        "http://" ~ ip ~ ":" ~ port.to!string ~ "/health"]);
+    return result.status == 0;
+  } catch (Exception) {
+    return false;
+  }
+}
+
+/** 候选阶段：上报一次、推荐组内可达的最小 host，然后等 hub 分配角色。 */
+private void serveCandidate(ref AgentContext ctx, scope WebSocket ws) {
+  ws.send(helloMessage(ctx.host, ctx.basctlVersion, ctx.basHome, ctx.basVersion));
+  sendReports(ctx, ws);
+  ctx.served = true;
+
+  string candidate;
+  foreach (ip; ctx.groupIps) {
+    if (candidateHealthy(ip, ctx.listenPort)) {
+      candidate = ip;
+      break;
+    }
+  }
+  if (candidate.length == 0)
+    candidate = ctx.agentId;
+  ws.send(recommendMessage(candidate, ctx.groupName));
+
+  auto lastRecommend = MonoTime.currTime;
+  while (ws.connected) {
+    if (ws.waitForData(tick)) {
+      auto text = ws.receiveText();
+      Envelope msg;
+      try
+        msg = parseEnvelope(text);
+      catch (Exception e) {
+        logWarn("channel: %s", e.msg);
+        continue;
+      }
+      if (msg.type == "become-master") {
+        ctx.roleState.role = "master";
+        logInfo("channel: elected master for group %s", ctx.groupName);
+        return;
+      }
+      if (msg.type == "become-follower") {
+        auto master = bodyText(msg.body, "master");
+        auto port = bodyText(msg.body, "port");
+        if (master.length && port.length) {
+          ctx.masterEndpoint = "ws://" ~ master ~ ":" ~ port ~ "/agent";
+          ctx.roleState.role = "follower";
+          ctx.followAssigned = true;
+          logInfo("channel: following master %s", master);
+          return;
+        }
+      }
+      handle(ctx, ws, text);
+    } else if (MonoTime.currTime - lastRecommend > 10.seconds) {
+      ws.send(recommendMessage(candidate, ctx.groupName));
+      lastRecommend = MonoTime.currTime;
+    }
+  }
 }
 
 /**
@@ -211,22 +562,42 @@ private AgentContext agentContext(const Container conf, const RemoteConfig remot
  * 整个循环 `nothrow`（交给 vibe 的 `runTask`）：日志与 `sleep` 自己也可能抛，所以逐段兜住——
  * **agent 退出只发生在收到信号时**，网络与磁盘的毛病都不该让它退出。
  */
-private void agentLoop(ref AgentContext ctx) @system nothrow {
+private void agentLoop(ref AgentContext ctx, RelayState relayState = null) @system nothrow {
   while (true) {
     try {
-      connectOnce(ctx);
+      connectOnce(ctx, relayState);
     } catch (Throwable t) {
       swallow({ logWarn("channel: %s", t.msg); });
     }
     if (ctx.once)
       break;
-    swallow({ sleep(reconnectDelay); });
+    // 连接结束后回到候选状态；follower 的 master 失联后重新回 hub 组网。
+    if (ctx.roleState.role == "master") {
+      if (relayState !is null) {
+        try
+          relayState.closeAll();
+        catch (Throwable e) {
+          swallow({ logWarn("channel: close followers failed: %s", e.msg); });
+        }
+      }
+      ctx.roleState.role = "candidate";
+    } else if (ctx.roleState.role == "follower") {
+      if (ctx.followAssigned)
+        ctx.followAssigned = false;
+      else {
+        ctx.roleState.role = "candidate";
+        ctx.endpoint = ctx.hubEndpoint;
+      }
+    }
+    swallow({ sleep(ctx.roleState.role == "follower" ? 1.seconds : reconnectDelay); });
   }
   exitEventLoop(true);
 }
 
 /** 拨号、握手（`Authorization: Bearer <project>:<Project.key>`），连上后交给 {@link serve}。 */
-private void connectOnce(ref AgentContext ctx) {
+private void connectOnce(ref AgentContext ctx, RelayState relayState = null) {
+  ctx.endpoint = ctx.roleState.role == "follower" && ctx.masterEndpoint.length
+      ? ctx.masterEndpoint : ctx.hubEndpoint;
   swallow({ logInfo("channel: connecting to %s", ctx.endpoint); });
   auto settings = new HTTPClientSettings;
   settings.connectTimeout = connectTimeout;
@@ -268,12 +639,22 @@ private void connectOnce(ref AgentContext ctx) {
       (scope HTTPClientRequest req) @safe {
         req.headers["Authorization"] = "Bearer " ~ ctx.credential;
         req.headers["ip"] = localIps;
+        if (ctx.roleState.role == "follower")
+          req.headers["X-Bas-Agent"] = ctx.agentId;
+        else
+          req.headers["X-Bas-Group"] = ctx.groupName;
       }, settings);
   scope (exit) {
     if (ws.connected)
       ws.close();
   }
-  serve(ctx, ws);
+  if (ctx.once || ctx.roleState.role == "follower")
+    serve(ctx, ws);
+  else {
+    serveCandidate(ctx, ws);
+    if (ctx.roleState.role == "master" && relayState !is null)
+      serveMaster(ctx, ws, relayState);
+  }
 }
 
 /** 优先使用显式环境变量，其次按发行版常见路径查找系统 CA 包。 */
@@ -363,6 +744,9 @@ private void sendHealth(const AgentContext ctx, scope WebSocket ws) {
  * `stop` 不走这里——停机必须按当前运行信息完成，不能被一次配置更新挡住。
  */
 private bool refreshBeforeService(ref AgentContext ctx) {
+  // follower 不直连 hub；配置由 master 负责刷新，服务动作前不自行 pull。
+  if (ctx.roleState.role == "follower")
+    return true;
   auto remotePath = agentRemotePath(ctx.configFile);
   try {
     auto remote = loadRemoteConf(remotePath);

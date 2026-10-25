@@ -67,6 +67,11 @@
             容器版本在 &lt;engine version&gt; 上声明，二者互相独立。</xs:documentation>
         </xs:annotation>
       </xs:attribute>
+      <xs:attribute name="agent-listen-port" type="xs:string" use="optional">
+        <xs:annotation>
+          <xs:documentation>项目内所有 agent 共用的组网监听端口，缺省 19080。</xs:documentation>
+        </xs:annotation>
+      </xs:attribute>
       <xs:attribute name="setline-hostname" type="xs:string" use="optional">
         <xs:annotation>
           <xs:documentation>setline 路由命名空间。bashub 仅在 Profile.proxyByHostname
@@ -194,6 +199,11 @@
   <xs:complexType name="hostType">
     <xs:attribute name="name" type="xs:string" use="required"/>
     <xs:attribute name="ip" type="xs:string" use="required"/>
+    <xs:attribute name="agent-group" type="xs:string" use="optional">
+      <xs:annotation>
+        <xs:documentation>agent 组网分组，缺省 default；同组 agent 通过固定端口互相连接并自动选主。</xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
     <xs:attribute name="setline-listen-port" type="xs:string" use="optional">
       <xs:annotation>
         <xs:documentation>setline 数据面 listen 端口（1-65535）。与 setline-admin-port

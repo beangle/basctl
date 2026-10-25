@@ -34,6 +34,10 @@ basagent 与 bashub 之间那条 WebSocket 连接上说什么、怎么说。**�
   控制面和配置下载都不接受非回环地址上的明文 HTTP/WS。
 - **一条连接一个 project**：同一 project 再次登录时服务端踢掉旧连接——agent 断线重连常常是「旧的
   还没超时、新的已经进来」，留着旧的会让 hub 往一条死连接发指令。所以路径里不带连接 id。
+- **自动组网**：所有 agent 先以候选身份连 hub，带 `X-Bas-Group`；探测同组固定端口后发送
+  `recommend`。hub 按 `(project, group)` 原子选出一个 master，发送 `become-master` /
+  `become-follower`。master 保持 hub 并在内网接受 follower；follower 断开 hub，消息由 master
+  加上 `agent`（follower 的 Host.ip）转发。
 - **保活**：hub 按期发 `ping`，agent 回 `pong`；agent 那边沉默超时（150s）就重连。不用 WebSocket
   自带的 ping 帧——`vibe` 的客户端没有公开的 ping API，用消息做，协议少一层特例。
 - **都不许退出**：任何一条消息、任何一次解析失败都不许让 agent 退出或断连；hub 侧同理（见下面
@@ -48,6 +52,7 @@ basagent 与 bashub 之间那条 WebSocket 连接上说什么、怎么说。**�
 | `type` | 是 | 原语名，`动作:对象` 形状（`report:os`、`service:start`），取本文的名单 |
 | `id` | 否 | 请求号。**有 = 需要应答**（收到方必须回一条 `result`），无 = 通知，不等回执；最多 64 字符，只允许字母、数字和 `-_.:` |
 | `at` | 是 | 产生时刻，`yyyy-MM-ddTHH:mm:ss±HH:MM`（本机时区，与 `server.info` 的 `started` 同格式）；`service:*` 只接受前后 10 分钟内的时刻 |
+| `agent` | 否 | relay master 上的逻辑 agent（follower 的 IP）；直连或 master 自身消息不带 |
 | `body` | 是 | 该原语的负载；没有负载就是 `{}` |
 
 `id` 与 `at` 由**发起方**填。应答一律是 `result`，靠 `id` 配对。
@@ -62,6 +67,8 @@ basagent 与 bashub 之间那条 WebSocket 连接上说什么、怎么说。**�
 | `report:health` | 通知 | `{servers:[{id,state}]}`：响应 hub 的 `report:health`，只报本机声明实例的 `running` / `stopped`（hub 也接受 `error` 以便扩展）；不带 OS、内存、磁盘与 webapps 明细 |
 | `pong` | 通知 | `{}`：保活应答 |
 | `result` | 应答 | `{ok:bool, data?, error?}`：对所有带 `id` 请求的应答；失败时也可带限长后的 `data` 供排错 |
+| `recommend` | 通知 | `{candidate, group}`：推荐组内 master 候选，由 hub 原子决定 |
+| `agent:offline` | 通知 | `{}`：master 告知 hub 某个 relay follower 已断开（`agent` 字段给出 IP） |
 
 - 容量与水位同处一个对象（`cpu.cores` 是配置、`cpu.load1` 是水位；`mem.total` 是配置、
   `mem.available` 是水位），控制台一次拿到「家底 + 现状」。
@@ -85,6 +92,8 @@ basagent 与 bashub 之间那条 WebSocket 连接上说什么、怎么说。**�
 | `service:start` | 请求 | `{instance}` | 起一个实例 |
 | `service:stop` | 请求 | `{instance}` | 停一个实例 |
 | `service:restart` | 请求 | `{instance}` | 重启一个实例 |
+| `become-master` | 通知 | `{master, port, term}` | hub 指定本 agent 为组内 master |
+| `become-follower` | 通知 | `{master, port, term}` | hub 指定本 agent 跟随 master，随即断开 hub |
 
 - 动作用**三个原语**而不是一个 `service:control{action}`：白名单落在 `type` 上，信封层就能拒掉不认的
   动作，不必解析 body；将来加动作 = 加一个原语，审计时也一眼看得出干了什么。

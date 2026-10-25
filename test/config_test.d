@@ -476,3 +476,11 @@ import std.format : format;
   assert(cfg.snapshotRepo.remote.get == "https://hub.example.com/bashub/maven");
   assert(cfg.farms[0].serverOptions.get == "-Dhub=https://hub.example.com/bashub");
 }
+
+@("agent group and listen port parse from server.xml") unittest {
+  auto cfg = parseServerXml(`<bas version="0.14.0" agent-listen-port="19081">
+      <hosts><host name="app1" ip="10.0.0.10" agent-group="site-a"/></hosts>
+    </bas>`);
+  assert(cfg.agentListenPort == 19081);
+  assert(cfg.hosts[0].agentGroup == "site-a");
+}
