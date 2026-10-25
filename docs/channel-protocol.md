@@ -94,6 +94,7 @@ basagent 与 bashub 之间那条 WebSocket 连接上说什么、怎么说。**�
 | `service:restart` | 请求 | `{instance}` | 重启一个实例 |
 | `become-master` | 通知 | `{master, port, term}` | hub 指定本 agent 为组内 master |
 | `become-follower` | 通知 | `{master, port, term}` | hub 指定本 agent 跟随 master，随即断开 hub |
+| `config:refresh` | 通知 | `{}` | hub 配置变更后，agent 重新拉取 server.xml 并重报实例清单 |
 
 - 动作用**三个原语**而不是一个 `service:control{action}`：白名单落在 `type` 上，信封层就能拒掉不认的
   动作，不必解析 body；将来加动作 = 加一个原语，审计时也一眼看得出干了什么。

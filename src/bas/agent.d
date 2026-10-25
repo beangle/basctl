@@ -154,6 +154,10 @@ int runAgent(string configFile, string basctlVersion, string[] rest) {
         ~ "; agent not started.");
     return 0;
   }
+  // 启动时先对齐 hub 的 server.xml；拉取失败才使用本地旧配置。
+  auto bootHome = dirName(dirName(absolutePath(configFile)));
+  if (runPull([bootHome]) != 0)
+    logWarn("channel: startup pull failed, using local server.xml");
   AgentContext ctx;
   try {
     ctx = agentContext(parseServerXmlFile(configFile), remote, configFile, basctlVersion, false);
@@ -775,6 +779,19 @@ private bool refreshBeforeService(ref AgentContext ctx) {
   return true;
 }
 
+/** hub 配置变更：先拉 server.xml，再整份重报；拉取失败保留旧配置并记录。 */
+private void refreshConfig(ref AgentContext ctx, scope WebSocket ws) {
+  if (runPull([ctx.basHome]) != 0) {
+    logWarn("channel: config refresh failed, keeping local server.xml");
+    return;
+  }
+  try
+    ctx.basVersion = parseServerXmlFile(ctx.configFile).version_;
+  catch (Exception e)
+    logWarn("channel: refreshed server.xml is invalid: %s", e.msg);
+  sendReports(ctx, ws);
+}
+
 /** 处理一条来自 hub 的消息：白名单分支 + 认不出就拒绝（既不执行，也不退出）。 */
 private void handle(ref AgentContext ctx, scope WebSocket ws, string text) {
   Envelope msg;
@@ -796,6 +813,9 @@ private void handle(ref AgentContext ctx, scope WebSocket ws, string text) {
   switch (msg.type) {
   case "ping":
     ws.send(pongMessage());
+    break;
+  case "config:refresh":
+    refreshConfig(ctx, ws);
     break;
   case "report:now":
     sendReports(ctx, ws);
