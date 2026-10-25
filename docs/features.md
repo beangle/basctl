@@ -10,7 +10,7 @@
 |---|---|---|---|
 | 组件目录初始化 | `basctl init` | 把 `env.sh` / `bas.sh` / `start.sh` / `stop.sh` / `restart.sh` 铺到 `<workdir>/bin` 并建 `conf/`；缺少 `conf/basctl.conf` 时生成带注释、字段留空的 `0600` 模板，已存在则不覆盖。脚本内嵌在 basctl 里，随版本发布，是脚本唯一的安装/升级途径 | [usage.md](usage.md) |
 | 解析与预取 | `basctl make [server.xml] <pattern>`、`basctl resolve` | 解析 webapp（`gav://` / `http(s)://` / 本地路径），生成实例目录与 jstart launch spec，再 `jstart resolve` 预取依赖，不起进程 | [start.md](start.md) |
-| 起停 | `basctl start` / `basctl stop` | 定端口、写 `server.info`、后台 `jstart run`；停止时按 pid 优雅退出（`--timeout` / `--force`） | [start.md](start.md)、[server-info.md](server-info.md) |
+| 起停 | `basctl start` / `basctl stop` | 非运行实例先删除整个实例目录再定端口、写 `server.info`、后台 `jstart run`；停止时按 pid 优雅退出（`--timeout` / `--force`） | [start.md](start.md)、[server-info.md](server-info.md) |
 | 状态 | `basctl status` | 读 `servers/<name>/server.info` 列出运行中的实例；配了 `<setline>` 时另报命名空间、管理口通不通与 route 列 | [server-info.md](server-info.md)、[setline.md](setline.md) |
 | 看实例日志 | `basctl logs <farm.server>` | 读 `logs/<实例>/console.out` 的尾部（`-n` 缺省 50 行，上限 2000），`-f` 持续跟随（含日志滚动后的新文件）；通道的 `log:read` 与它共用同一份读法（`bas.logs`） | [usage.md](usage.md)、[channel.md](channel.md) |
 | 嵌入式跑单应用 | `basctl run --engine=<type>-<version> <app>` | 一个参数给出容器类型与版本，生成单应用 spec 后前台 `jstart run`；纯前台，Ctrl-C 退出 | [run.md](run.md) |

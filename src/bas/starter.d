@@ -48,7 +48,7 @@ module bas.starter;
 import bas.artifact : isMavenCoord, parseArtifact;
 import bas.config;
 import bas.endpoint : adminAddress;
-import bas.fsutil : linkIfMissing, mkdirPrivate;
+import bas.fsutil : linkIfMissing, mkdirPrivate, removeTree;
 import bas.jstart : jstartCommand;
 import bas.logs : consoleLog, plainName, readTail;
 import bas.net : canBindPort, localAddresses;
@@ -95,6 +95,7 @@ enum defaultStopTimeoutSec = 15;
  * `basctl start [server.xml] <farm|server|all> [--port-range=<from>-<to>]`：分配端口、写运行
  * 信息、生成 spec、resolve，然后后台启动。
  *
+ * 每个未运行的实例启动前都会删除 `servers/<name>`，从引擎到 webapps 全部重新生成；
  * 任一实例准备失败只跳过该实例（写 `servers/<name>/error`，并撤销它的端口预留），其余照常启动。
  */
 /** 本机 Host 是否启用了 setline。 */
@@ -200,6 +201,17 @@ private int startServers(Container container, string basHome, Server[] servers,
       alreadyRunning++;
       continue;
     }
+    auto serverDir = buildPath(basHome, "servers", server.qualifiedName);
+    // server.info 可能丢了但进程还在；先按命令行找残留进程，避免删除正在使用的目录。
+    auto stale = instanceProcessIds(server.qualifiedName, serverDir);
+    if (stale.length) {
+      writeln(server.qualifiedName ~ " still has process(es) "
+          ~ stale.map!(p => p.to!string).join(", ") ~ ". Start skipped.");
+      alreadyRunning++;
+      continue;
+    }
+    // 每次真正启动都从空的实例目录重建：引擎、webapps、运行信息全部重新生成。
+    removeTree(serverDir);
     auto info = reserveInstance(basHome, container, server, range, startedAt);
     if (info.isNull) {
       failed++;
@@ -521,9 +533,8 @@ struct ServiceResult {
  * 执行控制通道的 `service:start|stop|restart`。
  *
  * 实例名来自控制台，只接受 `server.xml` 里本机声明的 `farm.server`；动作走固定的三个分支，
- * 不拼命令行、不把实例名交给 shell。`restart` 先在停机前准备一遍（与 `restart.sh` 的
- * resolve-before-stop 同构），避免依赖解析失败时已经停了服务；动态端口取停机前的运行信息，
- * 重启后保持原端口。
+ * 不拼命令行、不把实例名交给 shell。`restart` 先停止，再删除实例目录并重新准备/启动；
+ * 动态端口每次都重新分配。
  */
 ServiceResult serviceAction(string configFile, string action, string instance) {
   if (action != "start" && action != "stop" && action != "restart")
@@ -549,17 +560,6 @@ ServiceResult serviceAction(string configFile, string action, string instance) {
     return ServiceResult(false, "", 0, "no-instance");
   applyEngineDefaults(container, [target]);
 
-  auto previous = readInstanceInfo(basHome, instance);
-  if (action == "restart" && !previous.isNull && target.http == 0)
-    target.http = previous.get.httpPort;
-
-  // 与 restart.sh 同序：准备失败就停在原处，不先停服务。
-  if (action == "restart" && prepareServer(basHome, container, target).isNull) {
-    auto result = ServiceResult(false, "", 0, "prepare-failed");
-    attachFailureDetail(basHome, instance, result);
-    return result;
-  }
-
   if (action == "stop" || action == "restart") {
     final switch (stopInstance(basHome, target, false, defaultStopTimeoutSec)) {
     case StopOutcome.failed: {
@@ -576,13 +576,13 @@ ServiceResult serviceAction(string configFile, string action, string instance) {
       return ServiceResult(true, "stopped", 0, "");
   }
 
+  // start/restart 都由 startServers 删除旧实例目录后重建；restart 此时已经停止成功。
   if (startServers(container, basHome, [target], defaultPortRange, false) != 0) {
     auto result = ServiceResult(false, "", 0, "start-failed");
     attachFailureDetail(basHome, instance, result);
     return result;
   }
-  // start 可能因「已按命令行找回本实例」而跳过，此时 server.info 里的旧 pid 可能是死的：
-  // 以 liveInstancePid 为准，避免把已经运行着的实例回报成 start-failed。
+  // start 可能因实例已在运行而跳过；此时以 server.info 里的 live pid 为准。
   auto info = readInstanceInfo(basHome, instance);
   auto pid = liveInstancePid(basHome, instance);
   if (info.isNull || pid.isNull) {
@@ -717,9 +717,8 @@ private Nullable!ServerInfo reserveInstance(string basHome, Container container,
     return nullable(info);
   }
 
-  // 上次记录的端口（可能是崩溃残留）：重启后优先复用它，端口稳定，书签与路由都不用重记
-  auto previous = readInstanceInfo(basHome, name);
-  auto reservation = reservePort(basHome, name, range, previous.isNull ? 0 : previous.get.httpPort,
+  // start/restart 已删除实例目录，动态端口每次重新分配。
+  auto reservation = reservePort(basHome, name, range, 0,
       (port) {
         auto reserved = info;
         reserved.httpPort = port;

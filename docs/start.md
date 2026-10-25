@@ -19,7 +19,8 @@ basctl start all --no-setline                # 临时不把这批实例的路由
 
 1. **选实例**：从 `<farms>` 中挑出匹配 pattern（farm 名 / `farm.server` / `all`）、且
    `<server>` 所属 host 在本机的实例；
-2. **定端口并写运行信息**：`<server http>` 有值就用它（启动前先确认该端口没人监听；
+2. **重建实例目录并定端口**：对未运行的实例先删除整个 `servers/<farm.server>/`
+   （引擎、webapps、运行信息全部重新生成），再定端口。`<server http>` 有值就用它（启动前先确认该端口没人监听；
    被占用时写 `servers/<farm.server>/error` 并跳过，不会拉起一个绑定失败、却因进程存活被误记为
    running 的实例），为 `0`（或缺省）时在 `--port-range` 区间内分配一个空闲端口（缺省
    `20000-29999`）；随后写 `servers/<farm.server>/server.info` 的第一段——不含 `pid`，同时兼作
@@ -45,6 +46,31 @@ basctl start all --no-setline                # 临时不把这批实例的路由
 配了 `<setline>` 时，最后还会按 `servers/*/server.info` 对账一次路由——把存活的实例推给 setline
 （管理口端口取 `<setline port>`，进程由 systemd / 容器入口负责，basctl 不拉起），没起来的实例
 不进路由。对账失败**只警告**，不影响退出码；`--no-setline` 跳过。详见 [setline.md](setline.md)。
+
+## 实例目录重建
+
+`start` 在确认实例未运行后，会先删除整个 `servers/<farm.server>/`，再从空目录重建：
+
+```text
+servers/<farm.server>/
+  bin/ conf/ lib/    # basctl 解压并精简 Tomcat
+  webapps/           # basctl 展开 war（不是 Tomcat 自动部署）
+  work/ temp/        # 本次启动重新生成
+  logs -> ../../logs/<farm.server>
+  server.info
+  launch.jstart
+```
+
+要点：
+
+- 已在运行的实例不会被删除或重启，`start` 直接跳过。
+- `server.info` 丢失但仍有 `-Dbas.server` 进程时，也会跳过删除。
+- `restart` 先停止，停止成功后才删除并重建；停止失败不会删除。
+- 动态端口每次重新分配；不接受上次 `server.info` 的端口复用。
+- `webapps/<context>` 由 basctl 的 `prepareWebapp` 解压 war 得到；Tomcat 的
+  `autoDeploy` / `deployOnStartup` 都是关闭的，不会自行重建应用。
+- `logs/<farm.server>` 的实际日志在共享日志目录，删除的只是实例目录里的软链。
+- `work` / `temp` 也会在这次重建中消失；其中 Tomcat 会在启动后重新创建。
 
 ## 停止
 
@@ -159,9 +185,10 @@ org.beangle.bas:beangle-bas-engine:0.14.0
   含空格时会加引号）；`jstart` 仍用 `beangle_jstart` 指定；
 - 实例目录靠 `[app] instance` 显式命名（`servers/<farm.server>`），与 `make`/`status`/`logs`
   的布局一致；
-- 生成物是派生物：改配置后重跑 `basctl start` 会覆盖 spec；
+- 生成物是派生物：未运行的实例每次 `basctl start` 都会删除整个 `servers/<farm.server>/` 后重建；
+  改配置后重跑 `basctl start` 会覆盖 spec；
 - `<server http="0">` 的实例在 spec 里拿到的仍是 `--port=<n>`——端口由 basctl 启动前分配，
-  引擎侧看不出差别；同一实例重启时优先复用上次的端口（区间没变的话）；
+  引擎侧看不出差别；普通 `start` / `restart` 会删除实例目录，动态端口每次重新分配；
 - 实例身份与停止归 basctl：pid 记在 `servers/<farm.server>/server.info`，运行信息是 `status`
   与 setline 对账共用的「现状」（见 [server-info.md](server-info.md)）；jstart 已不写
   `app.pid`、也不再提供 `stop`。

@@ -173,8 +173,8 @@ OpenSSL 3.x。`pull` 与 war 直链下载仍走宿主 `curl` 子进程。
 - 复用同一条连接：控制台下发这三个原语（带 `id`），basagent 执行完以 `result` 回执。**指令通道的
   前置条件是常驻 agent（阶段 2）**——没有连接就没人来取指令。
 - 已落地：agent 申报 `service:start|stop|restart`，按实例调用本地 start / stop 分支；`restart`
-  先准备再停，动态端口沿用停机前的值；start / restart 前先显式拉取配置，stop 不拉取；动作后立即
-  重报 `report:bas`。
+  先停止，再删除实例目录并重建，动态端口每次重新分配；start / restart 前先显式拉取配置，stop
+  不拉取；动作后立即重报 `report:bas`。
 - 控制台侧还要记审计：谁点的、什么时候、结果如何；停止 / 重启这类破坏性动作前端已经二次确认。
 
 ### 非目标
