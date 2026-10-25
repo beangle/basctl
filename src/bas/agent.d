@@ -753,9 +753,8 @@ private void sendHealth(const AgentContext ctx, scope WebSocket ws) {
  * `stop` 不走这里——停机必须按当前运行信息完成，不能被一次配置更新挡住。
  */
 private bool refreshBeforeService(ref AgentContext ctx) {
-  // follower 不直连 hub；配置由 master 负责刷新，服务动作前不自行 pull。
-  if (ctx.roleState.role == "follower")
-    return true;
+  // start/restart 一律先拉 hub 的 server.xml；follower 也一样，
+  // 否则 master 侧的新配置不会反映到本机实例动作上。
   auto remotePath = agentRemotePath(ctx.configFile);
   try {
     auto remote = loadRemoteConf(remotePath);
