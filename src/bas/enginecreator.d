@@ -41,10 +41,10 @@ import bas.fsutil : removeTree;
 import bas.render : catalinaProperties;
 
 import std.algorithm : canFind;
-import std.array : appender, join, split;
+import std.array : appender, array, join, split;
 import std.conv : to;
 import std.file : SpanMode, copy, dirEntries, exists, getSize, isDir, isFile, mkdirRecurse,
-  read, readText, remove, write;
+  read, readText, remove, rename, write;
 import std.path : absolutePath, baseName, buildNormalizedPath, buildPath, dirName, dirSeparator,
   pathSeparator;
 import std.process : environment;
@@ -70,7 +70,7 @@ bool isContainerType(string type) @safe nothrow {
 }
 
 /** 精简规则变更时递增，令旧的解压目录重新解压。 */
-private enum slimVersion = "slim1";
+private enum slimVersion = "slim2";
 
 /** 最终命令参数总长超过该值时改用 `java @argfile`，避免 `E2BIG`。 */
 private enum argFileLimit = 4000;
@@ -550,7 +550,7 @@ void createEmbed(string mainClass, EngineOptions o) {
 }
 
 /**
- * 全量 tomcat 发行包入口：解压并精简发行包到 `<base>/engines`，把引擎 jar 复制进
+ * 全量 tomcat 发行包入口：解压并精简发行包到 `<base>`，把引擎 jar 复制进
  * `lib/`，生成 `conf/{catalina.properties,web.xml,server.xml}`，写出标准 catalina
  * 启动命令 `java ... -cp <bin/bootstrap.jar> org.apache.catalina.startup.Bootstrap start`。
  */
@@ -637,32 +637,60 @@ private string resolveDist(EngineOptions o, string engineClasspath) {
 }
 
 /**
- * 解压发行包到 `<base>/engines` 并返回 tomcat home。已按同一个 zip 解压过则直接复用
- * （用 `.dist` 记录来源 zip 名 + 精简规则版本）；换包或规则变更时先清空再解压。
+ * 解压发行包并**扁平安装**到组件目录 `<base>`：`bin/`、`conf/`、`lib/` 与 `webapps/`、`work/`、
+ * `temp/`、`logs/` 同级，不再保留 `<base>/engines/tomcat-x/` 这一层。
+ *
+ * 已按同一个 zip/精简规则安装过则直接复用（标记在 `<base>/.dist`）；换包或规则变更时
+ * 在 `<base>/.engine` 中重新解压，再合并到 `<base>`。合并时保留应用的 `webapps/`、日志软链
+ * 与运行信息，只替换引擎自己的目录。每次准备都会清空 `<base>/temp` 与 `<base>/work`。
+ * 旧的 `<base>/engines/` 不主动删除，由运维确认后自行清理。
  */
 private string prepareDist(string base, string zip, bool jspSupport, string engineClasspath) {
-  auto enginesDir = buildPath(base, "engines");
-  auto marker = buildPath(enginesDir, ".dist");
-  auto existing = findTomcatHome(enginesDir);
+  auto marker = buildPath(base, ".dist");
   auto hasJuli = engineClasspathProvidesJuli(engineClasspath);
   // 精简结果随 zip、精简规则、JSP 开关与 juli 来源而变，任一不同都要重新解压
   auto stamp = baseName(zip) ~ ":" ~ getSize(zip).to!string ~ ":" ~ slimVersion
     ~ ":" ~ (jspSupport ? "jsp" : "nojsp") ~ ":" ~ (hasJuli ? "juli" : "nojuli");
-  if (existing.length && fileHere(marker)) {
+  if (fileHere(marker) && fileHere(buildPath(base, "bin", "bootstrap.jar"))) {
     auto recorded = strip(readText(marker));
-    if (stamp == recorded)
-      return existing;
+    if (stamp == recorded) {
+      clearRuntimeDirs(base);
+      return base;
+    }
   }
-  mkdirRecurse(enginesDir);
-  removeTree(enginesDir);
-  mkdirRecurse(enginesDir);
-  explodeZip(zip, enginesDir);
-  auto home = findTomcatHome(enginesDir);
+
+  auto staging = buildPath(base, ".engine");
+  scope (exit) removeTree(staging);
+  removeTree(staging);
+  mkdirRecurse(staging);
+  explodeZip(zip, staging);
+  auto home = findTomcatHome(staging);
   if (home.length == 0)
     throw new Exception("No tomcat home found in " ~ zip ~ " (expected a dir with bin/bootstrap.jar)");
   slim(home, jspSupport, hasJuli);
+  installFlat(base, home);
+  clearRuntimeDirs(base);
   write(marker, stamp);
-  return home;
+  return base;
+}
+
+/** 清空 Tomcat 的临时区；work 与 temp 每次启动都重新生成。 */
+private void clearRuntimeDirs(string base) {
+  removeTree(buildPath(base, "temp"));
+  removeTree(buildPath(base, "work"));
+}
+
+/** 把解压后的 Tomcat 目录合并到组件目录；应用 webapps、日志软链、运行信息保持不动。 */
+private void installFlat(string base, string home) {
+  foreach (entry; dirEntries(home, SpanMode.shallow).array) {
+    auto name = baseName(entry.name);
+    if (name == "webapps" || name == "logs" || name == "temp" || name == "work")
+      continue;
+    auto dest = buildPath(base, name);
+    if (exists(dest))
+      removeTree(dest);
+    rename(entry.name, dest);
+  }
 }
 
 /** 在解压后的目录里定位 tomcat home（含 `bin/bootstrap.jar` 的那层）。 */

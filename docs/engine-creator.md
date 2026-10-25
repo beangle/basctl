@@ -32,7 +32,7 @@ creator 只写启动命令，容器运行时入口仍在 Java 侧：`tomcat` / `
        --local-repo=<dir> --entry-out=<file> [--app-jvm-arg=<opt>]... [args...]
 ```
 
-- `--base`：组件 base（pid、`webapps/`、`engines/` 都在其下），jstart 必传；
+- `--base`：组件 base（pid、`webapps/`、`bin/conf/lib` 都在其下），jstart 必传；
 - `--entry`：war 文件或已解压 webapp 目录；
 - `--engine-classpath-file`：jstart 写出的引擎依赖 classpath 文件（避免命令行过长）；
   `tomcat-server` 据此找发行包 zip，并把引擎 jar 复制进 `lib/`（提供 juli 实现的
@@ -117,7 +117,7 @@ jstart 单 webapp 时按此调用（多 webapp 见《多 webapp》一节，没�
 
 | 参数 | 必填 | 由谁提供 | 说明 |
 |---|---|---|---|
-| `--base=<dir>` | 是 | jstart | 组件 base（`webapps/`、`engines/`、pid 都在其下）；creator 转成 `-Dbas.home=` |
+| `--base=<dir>` | 是 | jstart | 组件 base（`webapps/`、`bin/conf/lib`、pid 都在其下）；creator 转成 `-Dbas.home=` |
 | `--entry=<war\|dir>` | 单应用必填 | jstart | war 文件或已解压目录；多 webapp 不传 |
 | `--entry-out=<file>` | 是 | jstart | 最终 argv（NUL 分隔）的写出文件，jstart 读到后 exec |
 | `--engine-classpath-file=<file>` | 是 | jstart | 引擎 jar 清单（`[engine]` 段除 init 外）的解析结果；`tomcat-server` 也用它找发行包 zip、把 jar 复制进 `lib/` |
@@ -213,10 +213,11 @@ sed 's/\x00/\n/g' /tmp/entry.argv     # 查看写出的最终启动命令
 | `tomcat-server` | `--dist=<tomcat.zip>` 或引擎 classpath 上的 `.zip` | `java ... -Dcatalina.base=... -cp <bin/bootstrap.jar[:juli]> org.apache.catalina.startup.Bootstrap start` |
 
 - 嵌入式模式（`tomcat` / `undertow` / `jetty`）一个实例跑一个 webapp；容器入口类可用 `--main=` 覆盖。
-- `tomcat-server` 解压并**精简**发行包到 `<base>/engines/`（`.dist` 记录 zip 名 + 精简规则，
-  未变则复用），把引擎 jar 复制进 `lib/`（`beangle-bas-juli` 除外：它上系统 classpath 并
+- `tomcat-server` 解压并**精简**发行包后**扁平安装**到 `<base>`（`.dist` 记录 zip 名 + 精简规则，
+  未变则复用；`bin/conf/lib` 与 `webapps/work/temp` 同级），把引擎 jar 复制进 `lib/`（`beangle-bas-juli` 除外：它上系统 classpath 并
   让发行包自带的 `bin/tomcat-juli.jar` 被删），生成
   `conf/{catalina.properties,web.xml,server.xml}`，再输出标准 catalina 启动命令。
+  每次启动准备都会清空 `<base>/temp` 与 `<base>/work`；`webapps`、`logs` 与运行信息不会被覆盖。旧的 `<base>/engines/` 不自动删除，需手工清理。
   `--jsp=true|false` 控制 jasper/ecj 的保留，`--listener=class[:k=v;...]` 追加 Server 级
   Listener。
 

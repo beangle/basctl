@@ -53,9 +53,8 @@
 $BAS_HOME/
   conf/server.xml
   conf/setline.json             # setline 自己的配置（listen / adminListen / 运行期路由；归拉起 setline 的那个进程所有）
-  engines/<name>-<version>/     # 解压并按需裁剪后的 Tomcat
-  servers/<farm>.<server>/      # 单个实例的 catalina.base（server.info 记运行信息：pid / 端口 / webapp / url）
-  webapps/                      # http 直链与 SNAPSHOT 覆盖的落地目录
+  servers/<farm>.<server>/      # catalina.base：bin/conf/lib 与 webapps/logs 同级；work/temp 每次启动清空
+  webapps/                      # http 直链与 SNAPSHOT 覆盖的落地目录（共享仓库）
   logs/
 ```
 
@@ -70,8 +69,8 @@ $BAS_HOME/
 
 | 调用 | 驱动与输入 | 产物 | 用途 |
 |---|---|---|---|
-| `make [server.xml] <pattern>` | `conf/server.xml`，批量选 Server | **持久**布局：`engines/<name>-<ver>/` + `servers/<name>/` + 按 server 生成一份 launch spec | 面向运维与启动前预取：只写 spec 并 `jstart resolve`，不起进程；随后 `basctl start` |
-| `make <type> [options]` | jstart 的 `[engine] init` 协议，单次运行计划 | jstart base 下的 `engines/`、各 webapp 的 docBase，以及 `--entry-out` 里的**容器启动命令** | `start` / jstart 运行时的回调，用户一般不直接调用 |
+| `make [server.xml] <pattern>` | `conf/server.xml`，批量选 Server | **持久**布局：每个 `servers/<name>/` 内扁平存放 `bin/conf/lib/webapps/work/temp/logs`，并生成一份 launch spec | 面向运维与启动前预取：只写 spec 并 `jstart resolve`，不起进程；随后 `basctl start` |
+| `make <type> [options]` | jstart 的 `[engine] init` 协议，单次运行计划 | jstart base 下扁平的 Tomcat 布局、各 webapp 的 docBase，以及 `--entry-out` 里的**容器启动命令** | `start` / jstart 运行时的回调，用户一般不直接调用 |
 
 `<type>` 取 `tomcat-server`、`tomcat`、`undertow` 或 `jetty`，分别对应全量 Tomcat 发行包与
 三种嵌入式容器。
