@@ -58,6 +58,7 @@ enum containerTypeTomcatServer = "tomcat-server";
 enum containerTypeTomcat = "tomcat";
 enum containerTypeUndertow = "undertow";
 enum containerTypeJetty = "jetty";
+enum containerTypeNative = "native";
 
 /**
  * setline 的缺省命名空间：`*` 匹配任意 Host，用 IP 或任意域名访问都能命中。
@@ -66,7 +67,8 @@ enum containerTypeJetty = "jetty";
 enum defaultSetlineHostname = "*";
 
 /** 支持的引擎类型。`tomcat-server` 与 `tomcat` 是前缀关系，解析时按最长类型匹配。 */
-enum supportedEngineTypes = [containerTypeTomcatServer, containerTypeTomcat, containerTypeUndertow, containerTypeJetty];
+enum supportedEngineTypes = [containerTypeTomcatServer, containerTypeTomcat, containerTypeUndertow,
+  containerTypeJetty, containerTypeNative];
 
 /** 是否 tomcat 系（JSP/SCI 等 tomcat 专有处理只对它们生效）。 */
 bool isTomcatType(string typ) {
@@ -445,6 +447,8 @@ class Webapp {
   string[] urls;
   Nullable!bool unpack;
   Nullable!string libs;
+  /** 仅 native engine：可执行文件相对路径；缺省用 artifactId。 */
+  Nullable!string exec;
 
   this(string uri) {
     this.uri = uri;
@@ -612,6 +616,7 @@ class Container {
 
   Repository repository;
   SnapshotRepo snapshotRepo;
+  Repository nativeRepo;
   Engine[] engines;
   Host[] hosts;
   Farm[] farms;
@@ -757,9 +762,13 @@ Container parseServerXml(string xmlText, RemoteConfig remote = RemoteConfig.init
       conf.repository = parseRepository(c, remote);
     else if (c.name == "snapshot-repo")
       conf.snapshotRepo = parseSnapshotRepo(c, remote);
+    else if (c.name == "native-repo")
+      conf.nativeRepo = parseNativeRepo(c, remote);
   }
   if (conf.snapshotRepo is null)
     conf.snapshotRepo = new SnapshotRepo;
+  if (conf.nativeRepo is null)
+    conf.nativeRepo = new Repository;
 
   // 2. engines
   foreach (section; elementChildren(basElem)) {
@@ -966,6 +975,13 @@ Nullable!string nonBlankAttr(XmlElem elem, string name) {
 }
 
 /** 解析正式版 `<repository>`：本地目录、远端地址与可选令牌。 */
+Repository parseNativeRepo(XmlElem elem, RemoteConfig remoteConf) {
+  auto local = nonBlankAttr(elem, "local");
+  auto url = expandBasRemoteUrl(nonBlankAttr(elem, "remote"), remoteConf.url);
+  auto token = resolveToken(optAttr(elem, "token"), remoteConf.token);
+  return new Repository(local, url, token);
+}
+
 Repository parseRepository(XmlElem elem, RemoteConfig remoteConf) {
   auto local = nonBlankAttr(elem, "local");
   auto remote = nonBlankAttr(elem, "remote");
@@ -1209,6 +1225,10 @@ Webapp parseWebapp(Container conf, XmlElem elem) {
       }
     }
   }
+
+  auto exec = nonBlankAttr(elem, "exec");
+  if (!exec.isNull)
+    w.exec = nullable(strip(exec.get));
 
   auto unpack = optAttr(elem, "unpack");
   if (!unpack.isNull && !strip(unpack.get).empty)

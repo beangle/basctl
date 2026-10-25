@@ -156,7 +156,7 @@ void printUsage() {
 /**
  * `make`：两种输入，同一种「准备」语义——
  *
- *  - `make <tomcat-server|tomcat|undertow|jetty> [协议参数]`：jstart `[engine] init`
+ *  - `make <tomcat-server|tomcat|undertow|jetty|native> [协议参数]`：jstart `[engine] init`
  *    的回调（creator），准备容器环境并写出最终启动命令；
  *  - `make [server.xml] <farm|server|all>`：按配置只准备不启动，生成 spec 并
  *    `jstart resolve`（预取依赖）。
@@ -178,7 +178,7 @@ private int cmdMake(string[] args) {
 
 /** `make` 的用法（creator 模式与只准备模式）。 */
 private void makeUsage() {
-  stderr.writeln("Usage: basctl make <tomcat-server|tomcat|undertow|jetty> [options]");
+  stderr.writeln("Usage: basctl make <tomcat-server|tomcat|undertow|jetty|native> [options]");
   stderr.writeln("       basctl make [server.xml] <farm|server|all>");
   stderr.writeln("  <type> mode is the jstart `[engine] init` callback; the <pattern> mode only");
   stderr.writeln("  generates specs and resolves dependencies, start them with `basctl start`.");

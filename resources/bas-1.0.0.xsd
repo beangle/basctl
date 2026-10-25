@@ -48,12 +48,13 @@
 
   <xs:element name="bas">
     <xs:annotation>
-      <xs:documentation>配置根；各段顺序不限、各自至多一次（repository 与 snapshot-repo 可同时出现）。</xs:documentation>
+      <xs:documentation>配置根；各段顺序不限、各自至多一次（repository、snapshot-repo 与 native-repo 可同时出现）。</xs:documentation>
     </xs:annotation>
     <xs:complexType>
       <xs:all>
         <xs:element name="repository" type="repositoryType" minOccurs="0"/>
         <xs:element name="snapshot-repo" type="repositoryType" minOccurs="0"/>
+        <xs:element name="native-repo" type="repositoryType" minOccurs="0"/>
         <xs:element name="engines" type="enginesType" minOccurs="0"/>
         <xs:element name="hosts" type="hostsType" minOccurs="0"/>
         <xs:element name="resources" type="resourcesType" minOccurs="0"/>
@@ -343,6 +344,11 @@ accept-count/connection-timeout；Undertow 只用 accept-count/connection-timeou
     <xs:attribute name="path" type="xs:string">
       <xs:annotation>
         <xs:documentation>context path；/ 或空视为 ROOT。仅描述部署上下文，路由用的对外路径见 &lt;url&gt;。</xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+    <xs:attribute name="exec" type="xs:string">
+      <xs:annotation>
+        <xs:documentation>仅 native engine：可执行文件相对路径；缺省使用 artifactId。</xs:documentation>
       </xs:annotation>
     </xs:attribute>
     <xs:attribute name="run-at" type="xs:string">

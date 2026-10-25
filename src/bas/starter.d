@@ -45,7 +45,7 @@
  */
 module bas.starter;
 
-import bas.artifact : isMavenCoord, parseArtifact;
+import bas.artifact : isMavenCoord, parseArtifact, toArtifact;
 import bas.config;
 import bas.endpoint : adminAddress;
 import bas.fsutil : linkIfMissing, mkdirPrivate, removeTree;
@@ -60,7 +60,7 @@ import bas.serverstatus : instanceProcessIds, listeningProcessIds, pidLooksLikeI
   rollLog, signalProcess;
 import bas.setline : SetlineConflict, conflictLines, runningPlan, serverContextConflicts;
 import bas.setlineproc : syncRoutesToSetline;
-import bas.spec : SubappSpec, engineInitCommand, renderLaunchSpec, shellQuote;
+import bas.spec : SubappSpec, basctlExecutable, engineInitCommand, renderLaunchSpec, shellQuote;
 
 import core.thread : Thread;
 import core.time : msecs;
@@ -238,7 +238,7 @@ private int startServers(Container container, string basHome, Server[] servers,
   int[] pids;
   foreach (ref p; prepared) {
     prepareLog(basHome, p.server);
-    pids ~= launchBackground(p.spec, consoleLog(basHome, p.server), repoArgs(container));
+    pids ~= launchBackground(p.spec, consoleLog(basHome, p.server), repoArgsFor(container, p.server));
   }
 
   Thread.sleep(msecs(startupProbeMs));
@@ -777,6 +777,9 @@ private Nullable!string prepareServer(string basHome, Container container, Serve
     stderr.writeln(server.qualifiedName ~ ": " ~ e.msg);
     return Nullable!string.init;
   }
+  if (containerType == containerTypeNative)
+    return prepareNative(basHome, container, server, webapps);
+
   bool standalone = containerType != containerTypeTomcatServer;
   auto standaloneError = standaloneWebappError(containerType, engine.name, webapps.length);
   if (standaloneError.length) {
@@ -821,7 +824,42 @@ private Nullable!string prepareServer(string basHome, Container container, Serve
   if (exists(legacySpec))
     remove(legacySpec);
   writeln(server.qualifiedName ~ ": wrote " ~ spec);
-  if (!resolveSpec(spec, repoArgs(container)))
+  if (!resolveSpec(spec, repoArgsFor(container, server)))
+    return Nullable!string.init;
+  return nullable(spec);
+}
+
+/** native engine 的 spec：取 tar.gz 后由 `basctl make native` 解压并 exec。 */
+private Nullable!string prepareNative(string basHome, Container container, Server server, Webapp[] webapps) {
+  if (webapps.length != 1) {
+    stderr.writeln(server.qualifiedName ~ ": native engine requires exactly one webapp, got "
+        ~ webapps.length.to!string);
+    return Nullable!string.init;
+  }
+  auto app = webapps[0];
+  auto artifact = toArtifact(app.uri);
+  if (artifact.packaging != "tar.gz" && artifact.packaging != "tgz") {
+    stderr.writeln(server.qualifiedName ~ ": native engine requires a tar.gz artifact: " ~ app.uri);
+    return Nullable!string.init;
+  }
+  auto serverDir = buildPath(basHome, "servers", server.qualifiedName);
+  mkdirPrivate(serverDir);
+  auto errorFile = buildPath(serverDir, "error");
+  if (exists(errorFile))
+    remove(errorFile);
+  auto spec = instanceLaunchSpec(basHome, server.qualifiedName);
+  mkdirRecurse(dirName(spec));
+  string[] args;
+  if (server.http > 0)
+    args ~= "--port=" ~ server.http.to!string;
+  args ~= "--path=" ~ (app.contextPath.length ? app.contextPath : "/");
+  auto initCommand = basctlExecutable() ~ " make native --name=" ~ shellQuote(artifact.artifactId);
+  if (!app.exec.isNull && app.exec.get.length)
+    initCommand ~= " --exec=" ~ shellQuote(app.exec.get);
+  write(spec, renderLaunchSpec(buildPath(basHome, "servers"), server.qualifiedName, basHome,
+      initCommand, [], [], args, null, app.uri));
+  writeln(server.qualifiedName ~ ": wrote " ~ spec);
+  if (!resolveSpec(spec, repoArgsFor(container, server)))
     return Nullable!string.init;
   return nullable(spec);
 }
@@ -1003,6 +1041,24 @@ string[] repoArgs(Container container) {
   if (container.snapshotRepo.repoSpecs.length)
     args ~= "--snapshot-remote=" ~ container.snapshotRepo.repoSpecs.join(",");
   return args;
+}
+
+/** native target 的 jstart 参数：--remote 指向 /native，不再传 snapshot-remote。 */
+private string[] nativeRepoArgs(Container container) {
+  string[] args;
+  auto local = container.repository.local;
+  if ((local.isNull || !strip(local.get).length) && !container.nativeRepo.local.isNull)
+    local = container.nativeRepo.local;
+  if (!local.isNull && strip(local.get).length)
+    args ~= "--local=" ~ strip(local.get);
+  if (container.nativeRepo.repoSpecs.length)
+    args ~= "--remote=" ~ container.nativeRepo.repoSpecs.join(",");
+  return args;
+}
+
+private string[] repoArgsFor(Container container, Server server) {
+  return server.farm.engine.typ == containerTypeNative
+      ? nativeRepoArgs(container) : repoArgs(container);
 }
 
 /** `jstart [repo] resolve <spec>`：校验 spec 与各 webapp 的依赖是否齐备。 */

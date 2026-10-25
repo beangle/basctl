@@ -32,22 +32,22 @@
  * entry/path/libs 写进 `<base>/engine-subapps.jstart`；`tomcat-server` 逐段准备 docBase 并
  * 在同一 JVM 里建多个 `<Context>`（各 Context 用自己的 `DependencyClassLoader` 解析依赖）。
  *
- * 支持的类型见 {@link runEngineCreator}：嵌入式 tomcat / undertow / jetty，以及全量
- * tomcat 发行包（tomcat-server）。docBase 布局与 war 解压归入口负责（jstart 不镜像容器布局）。
+ * 支持的类型见 {@link runEngineCreator}：嵌入式 tomcat / undertow / jetty、全量
+ * tomcat 发行包（tomcat-server）与 native tar.gz（native）。docBase 布局与解压归入口负责。
  */
 module bas.enginecreator;
 
 import bas.fsutil : removeTree;
 import bas.render : catalinaProperties;
 
-import std.algorithm : canFind;
+import std.algorithm : canFind, filter, map;
 import std.array : appender, array, join, split;
 import std.conv : to;
 import std.file : SpanMode, copy, dirEntries, exists, getSize, isDir, isFile, mkdirRecurse,
   read, readText, remove, rename, write;
 import std.path : absolutePath, baseName, buildNormalizedPath, buildPath, dirName, dirSeparator,
   pathSeparator;
-import std.process : environment;
+import std.process : environment, execute;
 import std.stdio : stderr;
 import std.string : endsWith, indexOf, lastIndexOf, replace, startsWith, strip, toLower;
 import std.zip : ZipArchive;
@@ -66,7 +66,8 @@ enum tomcatDistMain = "org.apache.catalina.startup.Bootstrap";
 
 /** jstart `[engine] init` 支持的容器类型（`make` 的 creator 模式）。 */
 bool isContainerType(string type) @safe nothrow {
-  return type == "tomcat-server" || type == "tomcat" || type == "undertow" || type == "jetty";
+  return type == "tomcat-server" || type == "tomcat" || type == "undertow" || type == "jetty"
+    || type == "native";
 }
 
 /** 精简规则变更时递增，令旧的解压目录重新解压。 */
@@ -88,6 +89,8 @@ struct EngineProperty {
 struct EngineOptions {
   string base;
   string entry;
+  string name;
+  string exec;
   string path = "";
   string engineClasspathFile;
   string appClasspathFile;
@@ -165,6 +168,10 @@ EngineOptions parseEngineArgs(string[] args) {
       o.jspSupport = strip(valueOf(a)).toLower == "true";
     else if (a.startsWith("--docBase="))
       o.docBase = strip(valueOf(a));
+    else if (a.startsWith("--name="))
+      o.name = strip(valueOf(a));
+    else if (a.startsWith("--exec="))
+      o.exec = strip(valueOf(a));
     else if (a.startsWith("--dist="))
       o.dist = valueOf(a);
     else if (a.startsWith("--main="))
@@ -1117,12 +1124,84 @@ private int freePort() {
 }
 
 /**
- * `basctl make <tomcat-server|tomcat|undertow|jetty> [协议参数...]`：
+ * `basctl make <tomcat-server|tomcat|undertow|jetty|native> [协议参数...]`：
  * 容器入口（creator），供 jstart 的 `[engine] init` 委托。
  */
+/**
+ * native engine：把 tar.gz 解压到组件目录（剥离唯一顶层目录），定位可执行文件，
+ * 写出最终 argv。没有 JVM、Tomcat 或容器配置文件。
+ */
+void createNative(EngineOptions o) {
+  o.requireSingle("basctl make native --base=<dir> --entry=<tar.gz> --entry-out=<file> "
+    ~ "--name=<artifactId> [--exec=<relative>] [--port=<n>] [--path=<ctx>] [args...]");
+  auto base = absolutePath(o.base);
+  mkdirRecurse(base);
+  extractNative(o.entry, base);
+  auto exe = locateNativeExecutable(base, o);
+  if (exe.length == 0)
+    throw new Exception("Cannot find native executable under " ~ base);
+  string[] argv = [exe];
+  if (o.port.length)
+    argv ~= "--port=" ~ o.port;
+  if (o.path.length)
+    argv ~= "--path=" ~ o.path;
+  argv ~= o.others;
+  writeLaunchArgv(o.entryOut, argv);
+  stderr.writeln("Native entry ready: " ~ exe ~ " -> " ~ o.entryOut);
+}
+
+/** 解压 tar.gz；若只有一个顶层目录，把它下面的内容提升到 base。 */
+private void extractNative(string archive, string base) {
+  auto staging = buildPath(base, ".native");
+  scope (exit) removeTree(staging);
+  removeTree(staging);
+  mkdirRecurse(staging);
+  auto res = execute(["tar", "-xzf", archive, "-C", staging]);
+  if (res.status != 0)
+    throw new Exception("Cannot extract native archive " ~ archive ~ ": " ~ strip(res.output));
+  auto top = dirEntries(staging, SpanMode.shallow).array;
+  string root = staging;
+  if (top.length == 1 && top[0].isDir)
+    root = top[0].name;
+  foreach (entry; dirEntries(root, SpanMode.shallow).array) {
+    auto name = baseName(entry.name);
+    if (name == "launch.jstart" || name == "server.info" || name == "error"
+        || name == "logs" || name == ".dist" || name == "jstart.argv" || name == "jstart.args")
+      continue;
+    auto dest = buildPath(base, name);
+    if (exists(dest))
+      removeTree(dest);
+    rename(entry.name, dest);
+  }
+}
+
+/** exec 优先；否则按 artifactId 找根目录或 bin/，再退回唯一可执行文件。 */
+private string locateNativeExecutable(string base, const EngineOptions o) {
+  if (o.exec.length) {
+    auto explicit = buildPath(base, o.exec);
+    return fileHere(explicit) ? explicit : "";
+  }
+  if (o.name.length) {
+    foreach (candidate; [buildPath(base, o.name), buildPath(base, "bin", o.name)])
+      if (fileHere(candidate))
+        return candidate;
+  }
+  auto bin = buildPath(base, "bin");
+  auto files = dirEntries(bin, SpanMode.shallow).array
+    .filter!(e => e.isFile).array;
+  if (files.length == 1)
+    return files[0].name;
+  auto roots = dirEntries(base, SpanMode.shallow).array
+    .filter!(e => e.isFile && !["launch.jstart", "server.info", "error", "jstart.argv", "jstart.args"].canFind(baseName(e.name))).array;
+  if (roots.length == 1)
+    return roots[0].name;
+  stderr.writeln("Native candidates: " ~ (files ~ roots).map!(e => e.name).join(", "));
+  return "";
+}
+
 int runEngineCreator(string[] args) {
   if (args.length == 0) {
-    stderr.writeln("Usage: basctl make <tomcat-server|tomcat|undertow|jetty> [options]");
+    stderr.writeln("Usage: basctl make <tomcat-server|tomcat|undertow|jetty|native> [options]");
     return 1;
   }
   auto type = args[0];
@@ -1136,6 +1215,9 @@ int runEngineCreator(string[] args) {
     case "undertow":
       rejectMultiApp(type, o);
       createEmbed(o.mainClass.length ? o.mainClass : undertowEmbedMain, o);
+      return 0;
+    case "native":
+      createNative(o);
       return 0;
     case "jetty":
       rejectMultiApp(type, o);

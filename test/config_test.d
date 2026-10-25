@@ -484,3 +484,18 @@ import std.format : format;
   assert(cfg.agentListenPort == 19081);
   assert(cfg.hosts[0].agentGroup == "site-a");
 }
+
+@("native engine, repo and webapp exec parse from server.xml") unittest {
+  auto cfg = parseServerXml(`<bas version="1">
+      <native-repo remote="https://repo.example/native" token="k"/>
+      <engines><engine name="n" type="native" version="1"/></engines>
+      <hosts><host name="h" ip="127.0.0.1"/></hosts>
+      <farms><farm name="f" engine="n"><server name="s" http="8080"/></farm></farms>
+      <webapps>
+        <webapp uri="gav://a:b:tar.gz:linux-amd64:1.0" path="/" exec="b/bin/b" run-at="f.s"/>
+      </webapps>
+    </bas>`);
+  assert(cfg.nativeRepo.repoSpecs == ["k@https://repo.example/native"]);
+  assert(containerTypeOf(cfg.engines[0]) == "native");
+  assert(cfg.webapps[0].exec.get == "b/bin/b");
+}
