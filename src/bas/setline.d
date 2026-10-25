@@ -112,6 +112,25 @@ SetlinePlan setlinePlan(Container conf) {
 }
 
 /**
+ * 单个 server 的 context 冲突：Tomcat 的同一实例内不能有两个 webapp 使用同一个 context。
+ * setline 是本机代理，跨主机的同名 context 不构成冲突。
+ */
+SetlineConflict[] serverContextConflicts(Container conf, Server server) {
+  string[][string] owners;
+  foreach (app; conf.getWebapps(server)) {
+    auto context = app.contextPath.length ? app.contextPath : "/";
+    owners[context] ~= app.uri;
+  }
+  string[] paths = owners.keys;
+  paths.sort;
+  SetlineConflict[] result;
+  foreach (path; paths)
+    if (owners[path].length > 1)
+      result ~= SetlineConflict(path, owners[path]);
+  return result;
+}
+
+/**
  * 从**实例运行信息**（`servers/<name>/server.info`）算路由，也就是「现状」：只有 pid 存活、端口
  * 已定的实例参与，每个 webapp 按它的 `url`（未声明回退 context）认领端口。
  *

@@ -267,3 +267,27 @@ private ServerInfo runningInfo(string id, int port, WebappInfo[] webapps) {
   info.webapps = webapps;
   return info;
 }
+
+@("serverContextConflicts only reports duplicate contexts on one server") unittest {
+  auto conf = parseServerXml(`
+<bas version="0.14.0">
+  <engines>
+    <engine name="tomcat" type="tomcat" version="11.0.26"/>
+  </engines>
+  <farms>
+    <farm name="a" engine="tomcat">
+      <server name="s1" http="9001"/>
+      <server name="s2" http="9002"/>
+    </farm>
+  </farms>
+  <webapps>
+    <webapp uri="gav://a:one:1" run-at="a.s1" path="/"/>
+    <webapp uri="gav://a:two:1" run-at="a.s2" path="/"/>
+    <webapp uri="gav://a:three:1" run-at="a.s1" path="/base"/>
+    <webapp uri="gav://a:four:1" run-at="a.s1" path="/base"/>
+  </webapps>
+</bas>`);
+  // 两个 server 都可以有 /；只有同一 server 上的 /base 重复。
+  assert(serverContextConflicts(conf, conf.farms[0].servers[0]).length == 1);
+  assert(serverContextConflicts(conf, conf.farms[0].servers[1]).length == 0);
+}

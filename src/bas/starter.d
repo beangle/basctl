@@ -58,7 +58,7 @@ import bas.serverinfo : ServerInfo, WebappInfo, instancePid, liveInstancePid, li
   localIsoTimestamp, readInstanceInfo, removeInstanceInfo, writeInstanceInfo;
 import bas.serverstatus : instanceProcessIds, listeningProcessIds, pidLooksLikeInstance, processRunning,
   rollLog, signalProcess;
-import bas.setline : SetlineConflict, conflictLines, runningPlan, setlinePlan;
+import bas.setline : SetlineConflict, conflictLines, runningPlan, serverContextConflicts;
 import bas.setlineproc : syncRoutesToSetline;
 import bas.spec : SubappSpec, engineInitCommand, renderLaunchSpec, shellQuote;
 
@@ -165,13 +165,26 @@ private int startServers(Container container, string basHome, Server[] servers,
     PortRange range, bool noSetline) {
   applyEngineDefaults(container, servers);
   auto startedAt = localIsoTimestamp(Clock.currTime());
+  // 上一次准备的 error 文件不能留到这一次失败时展示，否则会把旧版本/旧依赖误报成当前错误。
+  foreach (server; servers) {
+    auto errorFile = buildPath(basHome, "servers", server.qualifiedName, "error");
+    if (exists(errorFile))
+      remove(errorFile);
+  }
 
-  // setline 启用时先把静态拓扑的冲突挡在启动前：同一条对外路径被端口集合不同的 webapp 认领，
-  // 起来之后无法判定归属，与其起完再报错，不如一个都别起（动态端口要等分配完才知道，见尾部对账）。
+  // setline 是每台机器自己的代理，只校验本次启动 server 的 context；
+  // 其他主机上的同名 context 与这台机器无关。
   if (setlineEnabled(container) && !noSetline) {
-    auto plan = setlinePlan(container);
-    if (plan.conflicts.length) {
-      printRouteConflicts(plan.conflicts);
+    bool conflicts;
+    foreach (server; servers) {
+      foreach (conflict; serverContextConflicts(container, server)) {
+        stderr.writeln(server.qualifiedName ~ ": duplicate context " ~ conflict.path
+            ~ ": declared by " ~ conflict.webapps.join(", "));
+        conflicts = true;
+      }
+    }
+    if (conflicts) {
+      stderr.writeln("Give each webapp on the same server its own `path`.");
       return 1;
     }
   }
@@ -773,16 +786,16 @@ private Nullable!string prepareServer(string basHome, Container container, Serve
   }
 
   auto serverDir = buildPath(basHome, "servers", server.qualifiedName);
-  auto errorFile = buildPath(serverDir, "error");
-  auto missings = resolveWebapps(basHome, container.repository, container.snapshotRepo, webapps);
   mkdirPrivate(serverDir);
+  auto errorFile = buildPath(serverDir, "error");
+  if (exists(errorFile))
+    remove(errorFile);
+  auto missings = resolveWebapps(basHome, container.repository, container.snapshotRepo, webapps);
   if (missings.length) {
     write(errorFile, missings.join("\n"));
     stderr.writeln("Cannot resolve " ~ server.qualifiedName ~ ", see details: " ~ errorFile);
     return Nullable!string.init;
   }
-  if (exists(errorFile))
-    remove(errorFile);
 
   string[] engineDeps;
   if (!collectEngineDeps(container, engine, containerType, container.repository, container.snapshotRepo,
