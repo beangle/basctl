@@ -760,7 +760,8 @@ private void slim(string home, bool jspSupport, bool hasJuli) {
 
   auto bin = buildPath(home, "bin");
   deleteNames(bin, ["startup.sh", "shutdown.sh", "configtest.sh", "version.sh", "migrate.sh",
-      "digest.sh", "tool-wrapper.sh", "catalina.sh", "setclasspath.sh", "makebase.sh"]);
+      "digest.sh", "tool-wrapper.sh", "catalina.sh", "setclasspath.sh", "makebase.sh",
+      "ciphers.sh"]);
   if (hasJuli)
     deleteNames(bin, ["tomcat-juli.jar"]);
   removeMatching(bin, name => name.endsWith(".xml") || name.endsWith(".bat")
