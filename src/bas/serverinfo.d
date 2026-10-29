@@ -69,6 +69,8 @@ struct ServerInfo {
   /** 实例进程 pid；启动完成前（进程还没起来）为 0。 */
   int pid;
   WebappInfo[] webapps;
+  /** 实例所在主机的内网 IP；setline 冲突按它区分机器。 */
+  string host;
 }
 
 /**
@@ -85,6 +87,8 @@ string renderServerInfo(const ServerInfo info) {
   if (info.engine.length)
     sb.put("engine = " ~ oneLine(info.engine) ~ "\n");
   sb.put("http.port = " ~ info.httpPort.to!string ~ "\n");
+  if (info.host.length)
+    sb.put("host = " ~ oneLine(info.host) ~ "\n");
   if (info.started.length)
     sb.put("started = " ~ oneLine(info.started) ~ "\n");
   if (info.pid > 0)
@@ -148,6 +152,7 @@ ServerInfo parseServerInfo(string text) {
       case "id": info.id = value; break;
       case "engine": info.engine = value; break;
       case "http.port": info.httpPort = parsePort(value); break;
+      case "host": info.host = value; break;
       case "started": info.started = value; break;
       case "pid": info.pid = parsePid(value); break;
       default: break;

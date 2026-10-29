@@ -754,6 +754,7 @@ ServerInfo describeInstance(Container container, Server server, string startedAt
   info.id = server.qualifiedName;
   info.engine = engineRefText(server.farm.engine);
   info.httpPort = server.http > 0 ? cast(ushort) server.http : 0;
+  info.host = server.host is null ? "" : server.host.ip;
   info.started = startedAt;
   string[] used;
   foreach (app; container.getWebapps(server)) {

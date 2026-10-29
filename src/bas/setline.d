@@ -324,7 +324,8 @@ SetlineGroupPlan[] runningGroupPlans(const(ServerInfo)[] infos,
         foreach (path; webappRoutes(app)) {
           if ((path in claimsByGroup[group]) is null)
             claimsByGroup[group][path] = [];
-          claimsByGroup[group][path] ~= GroupClaim(info.id, app.uri, [cast(int) info.httpPort]);
+          claimsByGroup[group][path] ~= GroupClaim(info.host.length ? info.host : info.id,
+              app.uri, [cast(int) info.httpPort]);
         }
       }
     }
