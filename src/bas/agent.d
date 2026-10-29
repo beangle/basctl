@@ -76,6 +76,12 @@ private enum silentTimeout = 150.seconds;
 /** 断线后的重连间隔：固定值，不做指数退避——少一个要调的参数。 */
 private enum reconnectDelay = 10.seconds;
 
+/** master 周期性扫描组内候选的间隔。 */
+private enum rebalanceInterval = 300.seconds;
+
+/** 迁移/探测响应在内存中的保留时间；过期响应不再复用。 */
+private enum responseTtl = 30.seconds;
+
 /** 一条 WebSocket 消息的上限；日志窗口与上报都远小于这个值。 */
 private enum size_t maxChannelPayloadBytes = 256 * 1024;
 
@@ -100,7 +106,10 @@ private immutable string[] caBundlePaths = [
 
 /** master listener 与 agent loop 共享的运行时角色。 */
 private final class RoleState {
-  string role = "candidate"; // candidate | master | follower
+  string role = "master"; // master | follower
+  bool hubConnected;
+  bool migrating;
+  bool stopHub;
 }
 
 /** 一次会话需要的全部输入。地址与 token 都来自同目录 `conf/basctl.conf`，没有第二处来源。 */
@@ -165,7 +174,7 @@ int runAgent(string configFile, string basctlVersion, string[] rest) {
     stderr.writeln("basagent: " ~ e.msg);
     return 1;
   }
-  writeln("channel: candidate for group " ~ ctx.groupName ~ ", hub " ~ ctx.endpoint);
+  writeln("channel: master for group " ~ ctx.groupName ~ ", hub " ~ ctx.endpoint);
   auto relayState = new RelayState;
   runTask({ try { serveMasterListener(ctx, relayState); } catch (Throwable e) { logWarn("channel: master listener stopped: %s", e.msg); } });
   runTask({ agentLoop(ctx, relayState); });
@@ -286,10 +295,17 @@ private final class RelayLink {
   }
 }
 
+/** 等待迁移结果的响应及到达时间。 */
+private struct PendingResponse {
+  string body;
+  MonoTime at;
+}
+
 /** master 的 follower 登记册与发往 hub 的转发队列。 */
 private final class RelayState {
   private RelayLink[string] links;
   private string[] hubOutbound;
+  private PendingResponse[string] responses;
   private TaskMutex lock;
 
   this() {
@@ -321,6 +337,36 @@ private final class RelayState {
     return null;
   }
 
+  void complete(string id, string message) {
+    lock.lock();
+    scope (exit) lock.unlock();
+    cleanResponses();
+    responses[id] = PendingResponse(message, MonoTime.currTime);
+  }
+
+  string takeResponse(string id) {
+    lock.lock();
+    scope (exit) lock.unlock();
+    cleanResponses();
+    if (auto response = id in responses) {
+      auto value = (*response).body;
+      responses.remove(id);
+      return value;
+    }
+    return "";
+  }
+
+  /// 清理超时无人领取的响应，避免迟到消息污染下一轮迁移。
+  private void cleanResponses() {
+    auto now = MonoTime.currTime;
+    string[] expired;
+    foreach (id, response; responses)
+      if (now - response.at > responseTtl)
+        expired ~= id;
+    foreach (id; expired)
+      responses.remove(id);
+  }
+
   void pushHub(string message) {
     lock.lock();
     scope (exit) lock.unlock();
@@ -348,9 +394,35 @@ private final class RelayState {
 private void serveMasterListener(const AgentContext ctx, RelayState state) {
   auto router = new URLRouter;
   router.get("/health", (HTTPServerRequest req, HTTPServerResponse res) {
-    if (ctx.roleState.role == "follower") {
+    if (ctx.roleState.role != "master" || !ctx.roleState.hubConnected || ctx.roleState.migrating) {
       res.statusCode = 503;
-      res.writeBody("follower");
+      res.writeBody("not an available hub-connected master");
+      return;
+    }
+    res.writeBody("ok");
+  });
+  router.get("/probe", (HTTPServerRequest req, HTTPServerResponse res) {
+    auto auth = req.headers.get("Authorization", "").strip;
+    auto supplied = auth.length > 7 && auth[0 .. 7] == "Bearer " ? auth[7 .. $].strip : "";
+    if (supplied.length == 0 || supplied != ctx.credential) {
+      res.statusCode = 401;
+      res.writeBody("unauthorized");
+      return;
+    }
+    if (ctx.roleState.role != "master" || !ctx.roleState.hubConnected || ctx.roleState.migrating) {
+      res.statusCode = 503;
+      res.writeBody("not an available hub-connected master");
+      return;
+    }
+    auto id = req.headers.get("X-Bas-Agent", "").strip;
+    if (id.length == 0 || id.length > 255) {
+      res.statusCode = 400;
+      res.writeBody("missing x-bas-agent");
+      return;
+    }
+    if ((id in ctx.followerIps) is null || req.peer != id) {
+      res.statusCode = 403;
+      res.writeBody("follower is not assigned to this master");
       return;
     }
     res.writeBody("ok");
@@ -374,9 +446,14 @@ private void handleFollowerRequest(const AgentContext ctx, RelayState state,
     res.writeBody("unauthorized");
     return;
   }
-  if (ctx.roleState.role != "master") {
+  if (ctx.roleState.role != "master" || !ctx.roleState.hubConnected) {
     res.statusCode = 503;
-    res.writeBody("agent is not master yet");
+    res.writeBody("agent is not a hub-connected master");
+    return;
+  }
+  if (ctx.roleState.migrating) {
+    res.statusCode = 503;
+    res.writeBody("agent is migrating");
     return;
   }
   auto id = req.headers.get("X-Bas-Agent", "").strip;
@@ -423,7 +500,11 @@ private void handleFollowerRequest(const AgentContext ctx, RelayState state,
           logWarn("channel: follower %s bad message: %s", id, e.msg);
           continue;
         }
-        // follower 消息补上逻辑身份后再交给 hub；master 不解释其中的 body。
+        // 迁移探测/切换的 result 留给 master 的周期任务，其余补上逻辑身份后转发 hub。
+        if (msg.type == "result" && msg.id.length >= 8 && msg.id[0 .. 8] == "migrate:") {
+          state.complete(msg.id, text);
+          continue;
+        }
         state.pushHub(renderEnvelope(msg.type, msg.id, msg.body, id));
       }
     } catch (Throwable e) {
@@ -451,9 +532,25 @@ private void serveMaster(ref AgentContext ctx, scope WebSocket ws, RelayState st
   logInfo("channel: connected as relay master %s", ctx.host);
 
   auto lastTraffic = MonoTime.currTime;
+  auto lastRebalance = MonoTime.currTime;
   while (ws.connected) {
+    if (ctx.roleState.stopHub)
+      return;
     foreach (message; state.takeHub())
       ws.send(message);
+    if (!ctx.roleState.migrating && MonoTime.currTime - lastRebalance > rebalanceInterval) {
+      lastRebalance = MonoTime.currTime;
+      ctx.roleState.migrating = true;
+      runTask({
+        try {
+          maybeMigrate(ctx, state);
+        } catch (Throwable e) {
+          swallow({ logWarn("channel: migration failed: %s", e.msg); });
+        } finally {
+          ctx.roleState.migrating = false;
+        }
+      });
+    }
     if (ws.waitForData(tick)) {
       auto text = ws.receiveText();
       Envelope msg;
@@ -461,6 +558,11 @@ private void serveMaster(ref AgentContext ctx, scope WebSocket ws, RelayState st
         msg = parseEnvelope(text);
       catch (Exception e) {
         logWarn("channel: %s", e.msg);
+        continue;
+      }
+      if (msg.type == "result" && msg.id.length >= 8 && msg.id[0 .. 8] == "migrate:") {
+        state.complete(msg.id, text);
+        lastTraffic = MonoTime.currTime;
         continue;
       }
       if (msg.type == "become-follower") {
@@ -502,36 +604,56 @@ private string bodyText(JSONValue body, string key) {
   return value.type == JSONType.string ? value.get!string.strip : "";
 }
 
-/** 探测组内候选的固定端口。 */
-private bool candidateHealthy(string ip, ushort port) {
+/** 带 token/follower 身份探测目标 master；会验证 /agent 的准入条件。 */
+private bool probeTarget(const AgentContext ctx, string ip, ushort port) {
   try {
-    auto result = execute(["curl", "-fsS", "--max-time", "1",
-        "http://" ~ ip ~ ":" ~ port.to!string ~ "/health"]);
+    auto result = execute(["curl", "-fsS", "--max-time", "2",
+        "-H", "Authorization: Bearer " ~ ctx.credential,
+        "-H", "X-Bas-Agent: " ~ ctx.agentId,
+        "http://" ~ ip ~ ":" ~ port.to!string ~ "/probe"]);
     return result.status == 0;
   } catch (Exception) {
     return false;
   }
 }
 
-/** 候选阶段：上报一次、推荐组内可达的最小 host，然后等 hub 分配角色。 */
+/** 自己看本地角色；其他 master 探 /probe（含 follower 白名单和鉴权）。 */
+private bool targetReachable(const AgentContext ctx, string ip, ushort port) {
+  if (ip == ctx.agentId)
+    return ctx.roleState.role == "master" && ctx.roleState.hubConnected;
+  return probeTarget(ctx, ip, port);
+}
+
+/** LinkMutex TTL 随组内 agent 数量线性增长，给探测和逐个迁移留足时间。 */
+private int linkTtlSeconds(const AgentContext ctx) {
+  auto value = 60 + 5 * cast(int) ctx.groupIps.length;
+  return value > 300 ? 300 : value;
+}
+
+/** 连上 hub 的 master：探到最小可达 target，申请 LinkMutex 后决定留下还是跟随。 */
 private void serveCandidate(ref AgentContext ctx, scope WebSocket ws) {
   ws.send(helloMessage(ctx.host, ctx.basctlVersion, ctx.basHome, ctx.basVersion));
   sendReports(ctx, ws);
   ctx.served = true;
 
-  string candidate;
+  string target;
   foreach (ip; ctx.groupIps) {
-    if (candidateHealthy(ip, ctx.listenPort)) {
-      candidate = ip;
+    if (targetReachable(ctx, ip, ctx.listenPort)) {
+      target = ip;
       break;
     }
   }
-  if (candidate.length == 0)
-    candidate = ctx.agentId;
-  ws.send(recommendMessage(candidate, ctx.groupName));
+  if (target.length == 0 || target == ctx.agentId) {
+    // 自己就是最小可达 target：保持 master 即可，不需要写 LinkMutex。
+    logInfo("channel: stay master as target %s", ctx.agentId);
+    return;
+  }
 
-  auto lastRecommend = MonoTime.currTime;
-  while (ws.connected) {
+  auto claimId = "link-" ~ ctx.agentId;
+  ws.send(linkClaimMessage(claimId, target, ctx.groupName, linkTtlSeconds(ctx)));
+  auto claimAt = MonoTime.currTime;
+  bool decided;
+  while (ws.connected && !decided) {
     if (ws.waitForData(tick)) {
       auto text = ws.receiveText();
       Envelope msg;
@@ -541,9 +663,27 @@ private void serveCandidate(ref AgentContext ctx, scope WebSocket ws) {
         logWarn("channel: %s", e.msg);
         continue;
       }
+      if (msg.type == "result" && msg.id == claimId) {
+        decided = true;
+        auto granted = bodyBool(msg.body, "granted");
+        auto grantedTarget = bodyText(msg.body, "target");
+        if (!granted) {
+          logInfo("channel: target %s is owned by another agent, stay master", grantedTarget);
+          return;
+        }
+        if (grantedTarget.length == 0) {
+          logWarn("channel: hub granted an empty target, stay master");
+          return;
+        }
+        ctx.masterEndpoint = "ws://" ~ grantedTarget ~ ":" ~ ctx.listenPort.to!string ~ "/agent";
+        ctx.roleState.role = "follower";
+        ctx.followAssigned = true;
+        logInfo("channel: following target %s", grantedTarget);
+        return;
+      }
+      // 旧版 hub 的兼容路径
       if (msg.type == "become-master") {
         ctx.roleState.role = "master";
-        logInfo("channel: elected master for group %s", ctx.groupName);
         return;
       }
       if (msg.type == "become-follower") {
@@ -553,16 +693,161 @@ private void serveCandidate(ref AgentContext ctx, scope WebSocket ws) {
           ctx.masterEndpoint = "ws://" ~ master ~ ":" ~ port ~ "/agent";
           ctx.roleState.role = "follower";
           ctx.followAssigned = true;
-          logInfo("channel: following master %s", master);
           return;
         }
       }
       handle(ctx, ws, text);
-    } else if (MonoTime.currTime - lastRecommend > 10.seconds) {
-      ws.send(recommendMessage(candidate, ctx.groupName));
-      lastRecommend = MonoTime.currTime;
+    } else if (MonoTime.currTime - claimAt > 10.seconds) {
+      // 没有响应时继续作为 master；mutex 由 hub 的 TTL/owner 断开兜底。
+      logWarn("channel: link claim timeout for group %s", ctx.groupName);
+      return;
     }
   }
+}
+
+/** body 里的布尔值。 */
+private bool bodyBool(JSONValue body, string key) {
+  if (body.type != JSONType.object)
+    return false;
+  auto value = body[key];
+  if (value.type == JSONType.true_)
+    return true;
+  if (value.type == JSONType.false_)
+    return false;
+  return false;
+}
+
+/** 构造 follower 迁移命令。 */
+private string migrationMessage(string type, string id, string target, ushort port) {
+  JSONValue body = ["target": JSONValue(target), "port": JSONValue(port)];
+  return renderEnvelope(type, id, body);
+}
+
+/** 在 follower 侧处理迁移探测/切换命令；返回 true 表示已消费。 */
+private bool handleMigrationCommand(ref AgentContext ctx, scope WebSocket ws, string text) {
+  Envelope msg;
+  try
+    msg = parseEnvelope(text);
+  catch (Exception)
+    return false;
+  if (msg.type != "migrate:probe" && msg.type != "migrate:to")
+    return false;
+  auto target = bodyText(msg.body, "target");
+  auto portText = bodyText(msg.body, "port");
+  ushort port = ctx.listenPort;
+  try
+    if (portText.length)
+      port = portText.to!ushort;
+  catch (Exception)
+    port = ctx.listenPort;
+  auto ok = target.length > 0 && targetReachable(ctx, target, port);
+  ws.send(resultMessage(msg.id, ok, JSONValue(null), ok ? "" : "target unreachable"));
+  if (msg.type == "migrate:to" && ok) {
+    ctx.masterEndpoint = "ws://" ~ target ~ ":" ~ port.to!string ~ "/agent";
+    ctx.roleState.role = "follower";
+    ctx.followAssigned = true;
+    logInfo("channel: migrating to target %s", target);
+  }
+  return true;
+}
+
+/** 等待 follower 的迁移结果；超时返回空串。 */
+private string waitFollowerResult(RelayState state, string id, Duration timeout) {
+  auto started = MonoTime.currTime;
+  while (MonoTime.currTime - started < timeout) {
+    auto response = state.takeResponse(id);
+    if (response.length)
+      return response;
+    sleep(50.msecs);
+  }
+  return "";
+}
+
+private bool resultOk(string text) {
+  Envelope msg;
+  try
+    msg = parseEnvelope(text);
+  catch (Exception)
+    return false;
+  return msg.type == "result" && bodyBool(msg.body, "ok");
+}
+
+/** master 周期任务：所有 follower 可达更小 target 后，串行迁移，再迁移自己。 */
+private bool maybeMigrate(ref AgentContext ctx, RelayState state) {
+  string target;
+  foreach (ip; ctx.groupIps) {
+    if (targetReachable(ctx, ip, ctx.listenPort)) {
+      target = ip;
+      break;
+    }
+  }
+  if (target.length == 0 || target == ctx.agentId)
+    return false;
+
+  string[] followers;
+  foreach (ip, _; ctx.followerIps) {
+    if (state.get(ip) !is null)
+      followers ~= ip;
+  }
+
+  // 先验证所有当前 follower 都能到达 target。
+  foreach (ip; followers) {
+    auto id = "migrate:" ~ target ~ ":" ~ ip ~ ":probe";
+    auto link = state.get(ip);
+    if (link is null)
+      return false;
+    link.offer(migrationMessage("migrate:probe", id, target, ctx.listenPort));
+    if (!resultOk(waitFollowerResult(state, id, 2.seconds))) {
+      logWarn("channel: follower %s cannot reach target %s", ip, target);
+      return false;
+    }
+  }
+
+  // 申请 LinkMutex，避免其他 master 同时向同一个 target 迁移。
+  auto claimId = "migrate:" ~ target ~ ":" ~ ctx.agentId ~ ":claim";
+  state.pushHub(linkClaimMessage(claimId, target, ctx.groupName, linkTtlSeconds(ctx)));
+  auto claimResult = waitFollowerResult(state, claimId, 5.seconds);
+  Envelope claimMsg;
+  bool granted;
+  try
+    claimMsg = parseEnvelope(claimResult);
+  catch (Exception)
+    claimMsg = Envelope.init;
+  if (claimMsg.type == "result" && claimMsg.id == claimId)
+    granted = bodyBool(claimMsg.body, "granted") && bodyText(claimMsg.body, "target") == target;
+  if (!granted) {
+    logWarn("channel: cannot claim LinkMutex for target %s", target);
+    return false;
+  }
+
+  // claim 后无论后续成功还是异常，都不能把锁留给下一轮；成功时由断开 hub 清理。
+  bool claimed = true;
+  bool migrated;
+  scope (exit) {
+    if (claimed && !migrated)
+      state.pushHub(linkReleaseMessage("migrate:" ~ target ~ ":" ~ ctx.agentId ~ ":release", ctx.groupName));
+  }
+
+  // 逐个迁移 follower；任何一个失败就释放锁，当前 master 保留。
+  foreach (ip; followers) {
+    auto id = "migrate:" ~ target ~ ":" ~ ip ~ ":go";
+    auto link = state.get(ip);
+    if (link is null)
+      continue;
+    link.offer(migrationMessage("migrate:to", id, target, ctx.listenPort));
+    if (!resultOk(waitFollowerResult(state, id, 3.seconds))) {
+      logWarn("channel: follower %s failed to migrate to %s", ip, target);
+      return false;
+    }
+  }
+
+  ctx.masterEndpoint = "ws://" ~ target ~ ":" ~ ctx.listenPort.to!string ~ "/agent";
+  ctx.roleState.role = "follower";
+  ctx.followAssigned = true;
+  ctx.roleState.stopHub = true;
+  migrated = true;
+  logInfo("channel: migrating master to target %s", target);
+  return true;
 }
 
 /**
@@ -589,12 +874,12 @@ private void agentLoop(ref AgentContext ctx, RelayState relayState = null) @syst
           swallow({ logWarn("channel: close followers failed: %s", e.msg); });
         }
       }
-      ctx.roleState.role = "candidate";
+      ctx.roleState.role = "master";
     } else if (ctx.roleState.role == "follower") {
       if (ctx.followAssigned)
         ctx.followAssigned = false;
       else {
-        ctx.roleState.role = "candidate";
+        ctx.roleState.role = "master";
         ctx.endpoint = ctx.hubEndpoint;
       }
     }
@@ -653,7 +938,11 @@ private void connectOnce(ref AgentContext ctx, RelayState relayState = null) {
         else
           req.headers["X-Bas-Group"] = ctx.groupName;
       }, settings);
+  if (ctx.roleState.role == "master")
+    ctx.roleState.stopHub = false;
+  ctx.roleState.hubConnected = ctx.roleState.role != "follower";
   scope (exit) {
+    ctx.roleState.hubConnected = false;
     if (ws.connected)
       ws.close();
   }
@@ -716,7 +1005,14 @@ private void serve(ref AgentContext ctx, scope WebSocket ws) {
   auto lastTraffic = MonoTime.currTime;
   while (ws.connected) {
     if (ws.waitForData(tick)) {
-      handle(ctx, ws, ws.receiveText());
+      auto text = ws.receiveText();
+      if (handleMigrationCommand(ctx, ws, text)) {
+        if (ctx.masterEndpoint.length && ctx.followAssigned)
+          return;
+        lastTraffic = MonoTime.currTime;
+        continue;
+      }
+      handle(ctx, ws, text);
       lastTraffic = MonoTime.currTime;
     } else if (MonoTime.currTime - lastTraffic > silentTimeout) {
       throw new Exception("no traffic from hub for " ~ silentTimeout.to!string);

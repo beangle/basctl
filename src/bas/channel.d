@@ -202,6 +202,19 @@ string offlineMessage(string agent) {
   return renderEnvelope("agent:offline", "", emptyBody(), agent);
 }
 
+/** 向 hub 申请 LinkMutex；ttl 由 agent 按组规模计算。 */
+string linkClaimMessage(string id, string target, string group, int ttlSeconds = 60) {
+  JSONValue body = ["target": JSONValue(target), "group": JSONValue(group),
+    "ttl": JSONValue(ttlSeconds)];
+  return renderEnvelope("link:claim", id, body);
+}
+
+/** 释放自己持有的 LinkMutex。 */
+string linkReleaseMessage(string id, string group) {
+  JSONValue body = ["group": JSONValue(group)];
+  return renderEnvelope("link:release", id, body);
+}
+
 /** 推荐一个组内 master 候选。 */
 string recommendMessage(string candidate, string group) {
   JSONValue body = ["candidate": JSONValue(candidate), "group": JSONValue(group)];

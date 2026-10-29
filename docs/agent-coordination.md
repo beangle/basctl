@@ -79,6 +79,7 @@ owner 正在尝试连接 target
 - 非 owner 不能删除
 - owner 断开 hub 后，hub 兜底清理
 - `expires` 用于 owner 写入后异常失联的兜底
+- TTL 由 agent 按组规模计算：`60 + 5 * groupIps.length` 秒，hub 限制在 60–300 秒
 - target 不可达时，owner 应释放或断开，不能长期占用
 - follower 没有 hub 连接，不参与 LinkMutex 竞争
 
@@ -88,47 +89,45 @@ owner 正在尝试连接 target
 连接 hub
   → role = master
   → 上报自身状态
-  → 启动 master 周期任务
+  → 探测组内候选
 ```
 
-master 周期任务：
+选择 target：
 
 ```text
-查询 LinkMutex
+target 是自己（或没有更小的可达 master）：
+  直接保持 master
+  不写 LinkMutex
+  不需要“首次选主”
 
-没有 mutex：
-  写入 owner=自己, target=选择的最小 rank master
-  探测 target
-  连接 target
-  删除 mutex 或断开 hub
-
-有 mutex 且 owner=自己：
-  继续自己的连接流程
-
-有 mutex 且 owner=别人：
-  放弃自己的推荐
-  退避等待
-  不能使用这个 target
-  不能删除这个 mutex
+target 是其他 master：
+  申请 LinkMutex(owner=自己, target=B)
+  granted：
+    连接 B
+    断开 hub
+    role = follower
+  denied：
+    保持 master
+    等待下一个周期
 ```
+
+LinkMutex 只用于“主动跟随某个 target”的连接动作，不是首次注册，也不是当前 master 的登记。
 
 如果连接 target 成功：
 
 ```text
-删除 LinkMutex
 断开 hub
+由 hub 清理 owner 的 LinkMutex
 role = follower
 ```
 
 如果 target 不可达：
 
 ```text
-owner 删除 mutex
+owner 释放或断开
 回到 master
 退避后重新尝试
 ```
-
-这样即使所有 agent 几乎同时启动，也只有 LinkMutex 的 owner 会建立到 target 的连接。
 
 ## 5. Master 的选择
 
@@ -157,6 +156,7 @@ A 是当前 master，N 个 follower。A 想迁移到 B。
 
 - B 必须连着 hub
 - B 必须是 master
+- B 必须与 A 属于同一个 group；hub 的 LinkMutex 会拒绝跨组 target
 - B 能接受连接
 - A 能探测到 B
 - 每个 follower 都能探测到 B
@@ -173,7 +173,8 @@ A probe B
 
 ```text
 A → follower：probe target=B
-follower：探测 B 的 /health 和 /agent 握手
+follower：带 token 和 X-Bas-Agent 请求 B 的 /probe
+B：校验 role=master、hubConnected、!migrating、followerIps、来源 IP
 follower → A：成功/失败
 ```
 
@@ -184,6 +185,9 @@ follower → A：成功/失败
 A 保持 hub 连接和 master 身份，暂停接受新 follower，然后一次只迁移一个 follower。
 
 ```text
+A 对所有 follower 发送 probe target=B
+A 确认全部 follower 可达 B
+A 写 LinkMutex(owner=A, target=B)
 A 通知 follower1：migrate-to B
 follower1 探测 B
 follower1 连接 B
@@ -193,9 +197,12 @@ A 再通知 follower2
 ...
 ```
 
+先写 LinkMutex 是为了在 A 仍持锁时阻止其他 master 同时向 B 迁移。
+A 不需要等所有 follower 完成后才申请锁；锁在 A 断开 hub 时由 hub 清理。
+
 **follower 不需要获取 hub 上的 LinkMutex。**
 
-它们已经断开 hub，没有能力写或删除 LinkMutex。  
+它们已经断开 hub，没有能力写或删除 LinkMutex。
 “一次只连接一个”由 A 的迁移队列保证，而不是 follower 抢锁。
 
 ### A 自己迁移
@@ -233,7 +240,7 @@ A 连接 B
 | 场景 | 行为 |
 |---|---|
 | follower 探测 B 失败 | A 不迁移，保持 master |
-| follower 迁移中失败 | 停止后续迁移；成功者留在 B，失败者回 hub |
+| follower 迁移中失败 | 停止后续迁移；成功者留在 B，失败者留在 A，下个周期重试 |
 | A 断开 hub 后连不上 B | A 回 hub，重新成为 master |
 | owner 写完 mutex 后失联 | hub 清理或 expires 兜底 |
 | 非 owner 看到 mutex | 等待，不覆盖、不删除 |
@@ -274,8 +281,9 @@ A 连接 B
 ### 启动顺序无关
 
 - 任意 agent 先启动都可以成为 master
-- 第一个写入 LinkMutex 的 owner 发起连接
-- 后启动的 agent 看到 owner 不是自己就等待
+- 第一个启动的 agent 直接保持 master，不写 LinkMutex
+- 后启动的 agent 探测到它后，把 target 指向它，再申请 LinkMutex
+- 并发申请时只有 owner 能建立连接，其他 agent 等待
 - 不需要预选固定 master
 
 ### 网络拓扑无关
@@ -293,13 +301,27 @@ A 连接 B
 
 ## 10. 实现状态
 
-本文是目标模型。
+已实现：
 
-当前实现仍有 `candidate` 内部角色，以及以 `GroupMaster` 为中心的推荐逻辑；后续需要按本文改为：
+- 本地角色只有 `master` / `follower`
+- hub-connected master 才接受连接
+- hub 上的 `LinkMutex(owner, target, expires)` 与 owner 清理
+- 新 agent 跟随其他 target 时通过 `link:claim` 串行连接
+- master 每 300 秒扫描组内候选
+- A 对 follower 到候选 master 的 `migrate:probe`
+- A 写 LinkMutex 后串行 `migrate:to` 每个 follower
+- 全部完成后 A 断开 hub、连接新 target
+- 更小 rank 后加入由下一个 master 周期任务自然发现，不需要事件监听
 
-- 移除 candidate
-- 增加 `hubConnected` 独立状态
-- 将 `GroupMaster` 改为 `LinkMutex(owner, target, expires)`
-- listener 只接受 hubConnected master
-- master 周期任务增加 follower 探测与串行迁移
-- follower 不获取 LinkMutex
+已知限制：
+
+- follower 迁移到一半失败时不做回滚；已迁移者留在新 target，未迁移者留在 A，A 释放 LinkMutex 并保持 master，下个周期重试
+- 迁移探测超时为 2 秒，迁移执行超时为 3 秒
+- 迁移任务在独立 fiber 中运行，不再阻塞 master 的 hub 消息循环
+- 迁移/探测 result 在内存中保留 30 秒，过期后丢弃
+- LinkMutex TTL 随组内 agent 数量线性增长，避免 follower 多时迁移期间锁提前过期
+- LinkMutex claim 成功后异常退出会自动 release，避免锁一直占着到 TTL
+- `/probe` 已覆盖鉴权、follower 分配、来源 IP、master/hubConnected 和 `migrating`；尚未真正执行 WebSocket `/agent` Upgrade
+- 没有强一致的全局拓扑视图
+
+当前周期为 300 秒，实现中固定在 `rebalanceInterval`。
