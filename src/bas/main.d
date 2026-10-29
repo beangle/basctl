@@ -40,7 +40,7 @@ import bas.shellenv : readContainer;
 import bas.resolver;
 import bas.serverinfo : ServerInfo, liveInstancePid, liveInstances, readInstanceInfo;
 import bas.serverstatus;
-import bas.setline : SetlineConflict, conflictLines, groupConflictLines, parseRouteTable, routeDriftLines, runningGroupPlans, runningPlan;
+import bas.setline : SetlineConflict, SetlineGroupPlan, conflictLines, groupConflictLines, parseRouteTable, routeDriftLines, runningGroupPlans;
 import bas.setlineproc : RouteRead, fetchRouteTable, syncRoutesToSetline;
 import bas.starter;
 import bas.versioninfo : basctlVersion;
@@ -399,40 +399,44 @@ public string[] setlineStatusLines(const Container container, const(ServerInfo)[
   if (portFree(port))
     return [format!"host=%s port=%s (down)"(hostname, port)];
 
-  auto lines = [format!"host=%s port=%s (up)"(hostname, port)];
-  auto plan = runningPlan(live);
-  if (plan.conflicts.length) {
-    // 实例之间就冲突（同一路径被端口集合不同的 webapp 认领）：这时候没有"该有的路由"可对账
-    foreach (line; conflictLines(plan.conflicts))
-      lines ~= "  " ~ line;
-    lines ~= "  routes not reconciled; fix the conflict, then `basctl setline --sync`";
-    return lines;
-  }
+  auto plans = runningGroupPlans(live, hostname);
+  if (!plans.length)
+    plans ~= SetlineGroupPlan(hostname, [], []);
 
   string json;
-  final switch (fetchRouteTable(port, json)) {
-  case RouteRead.ok:
-    try {
-      auto table = parseRouteTable(json);
-      lines ~= routeDriftLines(plan.routes,
-          hostname in table ? table[hostname] : (int[][string]).init);
-    } catch (Exception e) {
-      lines ~= "  cannot read routes: " ~ e.msg;
-    }
-    break;
-  case RouteRead.denied:
-    // 拨的是本机的管理口，被拒只可能是那台 setline 不认这个来源：要么端口指的是别的机器上的
-    // setline，要么本机地址没写在它的 peerReaders 里——basctl 不持有凭据，也不会为一次 status
-    // 去配一个。
-    lines ~= "  routes: " ~ adminAddress(port)
+  auto readResult = fetchRouteTable(port, json);
+  int[][string][string] table;
+  string readError;
+  if (readResult == RouteRead.ok) {
+    try
+      table = parseRouteTable(json);
+    catch (Exception e)
+      readError = "cannot read routes: " ~ e.msg;
+  } else if (readResult == RouteRead.denied)
+    readError = "routes: " ~ adminAddress(port)
         ~ " refuses reads from this host (setline allows localhost and its peerReaders list)";
-    break;
-  case RouteRead.unexpected:
-    lines ~= "  routes: " ~ adminAddress(port) ~ " answers HTTP but is not the setline we expect";
-    break;
-  case RouteRead.unreachable:
-    lines ~= "  routes: cannot reach setline at " ~ adminAddress(port);
-    break;
+  else if (readResult == RouteRead.unexpected)
+    readError = "routes: " ~ adminAddress(port) ~ " answers HTTP but is not the setline we expect";
+  else
+    readError = "routes: cannot reach setline at " ~ adminAddress(port);
+
+  string[] lines;
+  foreach (plan; plans) {
+    if (lines.length)
+      lines ~= "";
+    lines ~= format!"host=%s port=%s (up)"(plan.group, port);
+    if (plan.conflicts.length) {
+      foreach (line; groupConflictLines(plan.conflicts))
+        lines ~= "  " ~ line;
+      lines ~= "  routes not reconciled; fix the conflict, then `basctl setline --sync`";
+      continue;
+    }
+    if (readError.length) {
+      lines ~= "  " ~ readError;
+      continue;
+    }
+    lines ~= routeDriftLines(plan.routes,
+        plan.group in table ? table[plan.group] : (int[][string]).init);
   }
   return lines;
 }
