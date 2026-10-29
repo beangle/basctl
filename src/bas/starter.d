@@ -58,7 +58,7 @@ import bas.serverinfo : ServerInfo, WebappInfo, instancePid, liveInstancePid, li
   localIsoTimestamp, readInstanceInfo, removeInstanceInfo, writeInstanceInfo;
 import bas.serverstatus : instanceProcessIds, listeningProcessIds, pidLooksLikeInstance, processRunning,
   rollLog, signalProcess;
-import bas.setline : SetlineConflict, conflictLines, runningPlan, serverContextConflicts;
+import bas.setline : SetlineConflict, conflictLines, groupConflictLines, runningGroupPlans, serverContextConflicts;
 import bas.setlineproc : syncRoutesToSetline;
 import bas.spec : SubappSpec, basctlExecutable, engineInitCommand, renderLaunchSpec, shellQuote;
 
@@ -128,15 +128,22 @@ private void reconcileRoutes(const Container container, string basHome, bool noS
   }
   if (!setline.enabled)
     return;
-  auto plan = runningPlan(liveInstances(basHome));
-  if (plan.conflicts.length) {
-    printRouteConflicts(plan.conflicts);
-    stderr.writeln("Routes not updated; fix the conflict and run `basctl setline --sync`.");
-    return;
+  auto plans = runningGroupPlans(liveInstances(basHome), setline.hostname);
+  bool failed;
+  foreach (plan; plans) {
+    if (plan.conflicts.length) {
+      foreach (line; groupConflictLines(plan.conflicts))
+        stderr.writeln(line);
+      failed = true;
+      continue;
+    }
+    if (syncRoutesToSetline(plan.routes, setline.adminPort, plan.group, true) != 0)
+      failed = true;
   }
-  if (syncRoutesToSetline(plan.routes, setline.adminPort, setline.hostname, true) != 0)
-    stderr.writeln("setline routes not synced (" ~ adminAddress(setline.adminPort)
-        ~ "); retrying on next start/stop.");
+  if (failed) {
+    stderr.writeln("Routes not updated; fix the conflict and run `basctl setline --sync`.");
+    stderr.writeln("setline admin: " ~ adminAddress(setline.adminPort) ~ "; retrying on next start/stop.");
+  }
 }
 
 int runStart(string configFile, string[] rest) {
@@ -753,7 +760,7 @@ ServerInfo describeInstance(Container container, Server server, string startedAt
     auto id = subappId(app.contextPath, used);
     used ~= id;
     info.webapps ~= WebappInfo(id, app.uri, app.contextPath.length ? app.contextPath : "/",
-        app.urls.dup);
+        app.urls.dup, app.routeGroups(container));
   }
   return info;
 }

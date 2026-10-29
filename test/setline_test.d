@@ -21,7 +21,7 @@ import bas.config;
 import bas.serverinfo : ServerInfo, WebappInfo;
 import bas.setline;
 
-import std.algorithm : canFind;
+import std.algorithm : canFind, find;
 import std.conv : to;
 import std.file : readText;
 
@@ -290,4 +290,69 @@ private ServerInfo runningInfo(string id, int port, WebappInfo[] webapps) {
   // 两个 server 都可以有 /；只有同一 server 上的 /base 重复。
   assert(serverContextConflicts(conf, conf.farms[0].servers[0]).length == 1);
   assert(serverContextConflicts(conf, conf.farms[0].servers[1]).length == 0);
+}
+
+@("setlinePlans groups domain and no-domain endpoints") unittest {
+  auto conf = parseServerXml(`<bas version="1">
+    <proxies>
+      <proxy name="web" ip="10.0.0.20" domain="www.example.com"/>
+      <proxy name="ip" ip="10.0.0.30"/>
+    </proxies>
+    <hosts>
+      <host name="h1" ip="10.0.0.10"/>
+      <host name="h2" ip="10.0.0.11"/>
+    </hosts>
+    <engines><engine name="e" type="native" version="1"/></engines>
+    <farms>
+      <farm name="f" engine="e">
+        <server name="s1" host="h1" http="8080"/>
+        <server name="s2" host="h2" http="8081"/>
+      </farm>
+    </farms>
+    <webapps>
+      <webapp uri="gav://x:a:1" run-at="f.s1" endpoints="web"><url path="/a"/></webapp>
+      <webapp uri="gav://x:b:1" run-at="f.s1" endpoints="ip"><url path="/b"/></webapp>
+    </webapps>
+  </bas>`);
+  auto plans = setlinePlans(conf);
+  assert(plans.length == 2);
+  SetlineGroupPlan web;
+  SetlineGroupPlan ip;
+  foreach (plan; plans) {
+    if (plan.group == "www.example.com") web = plan;
+    if (plan.group == "10.0.0.30") ip = plan;
+  }
+  assert(web.group == "www.example.com");
+  assert(web.routes.length == 1 && web.routes[0].path == "/a");
+  assert(web.routes[0].ports == [8080]);
+  assert(ip.group == "10.0.0.30");
+  assert(ip.routes.length == 1 && ip.routes[0].path == "/b");
+}
+
+@("setlinePlans rejects duplicate machine group path") unittest {
+  auto conf = parseServerXml(`<bas version="1">
+    <proxies><proxy name="web" ip="10.0.0.20" domain="www.example.com"/></proxies>
+    <hosts><host name="h1" ip="10.0.0.10"/></hosts>
+    <engines><engine name="e" type="native" version="1"/></engines>
+    <farms><farm name="f" engine="e"><server name="s1" host="h1" http="8080"/></farm></farms>
+    <webapps>
+      <webapp uri="gav://x:a:1" run-at="f.s1" endpoints="web"><url path="/a"/></webapp>
+      <webapp uri="gav://x:b:1" run-at="f.s1" endpoints="web"><url path="/a"/></webapp>
+    </webapps>
+  </bas>`);
+  auto plans = setlinePlans(conf);
+  assert(plans.length == 1);
+  assert(plans[0].conflicts.length == 1);
+  assert(plans[0].conflicts[0].machine == "10.0.0.10");
+}
+
+@("runningGroupPlans keeps groups recorded in server.info") unittest {
+  ServerInfo info;
+  info.id = "f.s1";
+  info.httpPort = 8080;
+  info.webapps = [WebappInfo("a", "gav://x:a:1", "/a", [], ["www.example.com"])];
+  auto plans = runningGroupPlans([info]);
+  assert(plans.length == 1);
+  assert(plans[0].group == "www.example.com");
+  assert(plans[0].routes[0].path == "/a");
 }

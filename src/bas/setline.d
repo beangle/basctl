@@ -64,6 +64,28 @@ struct SetlinePlan {
   SetlineConflict[] conflicts;
 }
 
+/** 同一个 group 内的路由冲突（机器 + group + path）。 */
+struct SetlineGroupConflict {
+  string group;
+  string machine;
+  string path;
+  string[] webapps;
+}
+
+/** 一个 setline group 的完整计划。 */
+struct SetlineGroupPlan {
+  string group;
+  SetlineRoute[] routes;
+  SetlineGroupConflict[] conflicts;
+}
+
+/** 一条路径在 group 内的认领记录。 */
+private struct GroupClaim {
+  string machine;
+  string owner;
+  int[] ports;
+}
+
 /** 一条路径的认领记录：声明者与其端口集合。 */
 private struct PathClaim {
   string owner;
@@ -109,6 +131,71 @@ SetlinePlan setlinePlan(Container conf) {
   }
   paths.sort();
   return mergeClaims(paths, claimsByPath);
+}
+
+/**
+ * 按 endpoint group 计算 setline 路由。
+ *
+ * group 来源：webapp 的 endpoint.domain；无 domain 用 server.host.ip；没有 endpoints 用
+ * 根级 setline-hostname（缺省 *）。同一 `(machine, group, path)` 出现多次即冲突，即使
+ * 声明者是同一个 webapp。
+ */
+SetlineGroupPlan[] setlinePlans(Container conf) {
+  GroupClaim[][string][string] claimsByGroup;
+  string[] groups;
+  foreach (app; conf.webapps) {
+    foreach (server; app.runAt) {
+      if (server.http <= 0)
+        continue;
+      foreach (group; app.routeGroups(conf)) {
+        if ((group in claimsByGroup) is null) {
+          groups ~= group;
+          claimsByGroup[group] = (GroupClaim[][string]).init;
+        }
+        foreach (path; app.routePaths()) {
+          if ((path in claimsByGroup[group]) is null)
+            claimsByGroup[group][path] = [];
+          claimsByGroup[group][path] ~= GroupClaim(server.host.ip, app.uri, [server.http]);
+        }
+      }
+    }
+  }
+  groups.sort;
+  SetlineGroupPlan[] result;
+  foreach (group; groups) {
+    auto paths = claimsByGroup[group].keys;
+    paths.sort;
+    SetlineGroupPlan plan;
+    plan.group = group;
+    foreach (path; paths) {
+      auto claims = claimsByGroup[group][path];
+      string[string] byMachine;
+      int[] ports;
+      foreach (claim; claims) {
+        if (auto previous = claim.machine in byMachine) {
+          plan.conflicts ~= SetlineGroupConflict(group, claim.machine, path,
+              [*previous, claim.owner]);
+        } else
+          byMachine[claim.machine] = claim.owner;
+        foreach (port; claim.ports)
+          if (!ports.canFind(port))
+            ports ~= port;
+      }
+      ports.sort;
+      plan.routes ~= SetlineRoute(path, ports);
+    }
+    result ~= plan;
+  }
+  return result;
+}
+
+/** group 冲突的展示行。 */
+string[] groupConflictLines(const(SetlineGroupConflict)[] conflicts) {
+  string[] lines;
+  foreach (c; conflicts)
+    lines ~= "Route conflict on " ~ c.path ~ " (group " ~ c.group ~ ", machine "
+        ~ c.machine ~ "): declared by " ~ c.webapps.join(", ");
+  return lines;
 }
 
 /**
@@ -217,6 +304,58 @@ private ptrdiff_t ownerIndex(const(string)[] owners, string owner) {
     if (candidate == owner)
       return cast(ptrdiff_t) i;
   return -1;
+}
+
+/** 从运行信息按 group 计算路由；旧 server.info 没记 group 时回退到 `*`。 */
+SetlineGroupPlan[] runningGroupPlans(const(ServerInfo)[] infos,
+    string defaultGroup = defaultSetlineHostname) {
+  GroupClaim[][string][string] claimsByGroup;
+  string[] groups;
+  foreach (info; infos) {
+    if (info.httpPort <= 0)
+      continue;
+    foreach (app; info.webapps) {
+      auto appGroups = app.groups.length ? app.groups : [defaultGroup];
+      foreach (group; appGroups) {
+        if ((group in claimsByGroup) is null) {
+          groups ~= group;
+          claimsByGroup[group] = (GroupClaim[][string]).init;
+        }
+        foreach (path; webappRoutes(app)) {
+          if ((path in claimsByGroup[group]) is null)
+            claimsByGroup[group][path] = [];
+          claimsByGroup[group][path] ~= GroupClaim(info.id, app.uri, [cast(int) info.httpPort]);
+        }
+      }
+    }
+  }
+  groups.sort;
+  SetlineGroupPlan[] result;
+  foreach (group; groups) {
+    auto paths = claimsByGroup[group].keys;
+    paths.sort;
+    SetlineGroupPlan plan;
+    plan.group = group;
+    foreach (path; paths) {
+      auto claims = claimsByGroup[group][path];
+      string[string] byMachine;
+      int[] ports;
+      foreach (claim; claims) {
+        if (auto previous = claim.machine in byMachine)
+          plan.conflicts ~= SetlineGroupConflict(group, claim.machine, path,
+              [*previous, claim.owner]);
+        else
+          byMachine[claim.machine] = claim.owner;
+        foreach (port; claim.ports)
+          if (!ports.canFind(port))
+            ports ~= port;
+      }
+      ports.sort;
+      plan.routes ~= SetlineRoute(path, ports);
+    }
+    result ~= plan;
+  }
+  return result;
 }
 
 /** 渲染 `path -> port|[ports]` 的映射对象，即 setline 路由表里一个 host 分组的内容，也就是

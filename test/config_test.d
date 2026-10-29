@@ -22,6 +22,7 @@ import bas.remote : RemoteConfig;
 import std.algorithm.searching : canFind;
 import std.file : readText;
 import std.format : format;
+import std.exception : assertThrown;
 
 @("parse repo server.xml sample") unittest {
   auto cfg = parseServerXml(readText("server.xml"));
@@ -498,4 +499,43 @@ import std.format : format;
   assert(cfg.nativeRepo.repoSpecs == ["k@https://repo.example/native"]);
   assert(containerTypeOf(cfg.engines[0]) == "native");
   assert(cfg.webapps[0].exec.get == "b/bin/b");
+}
+
+@("proxy endpoints parse and resolve webapp groups") unittest {
+  auto conf = parseServerXml(`<bas version="1">
+    <proxies>
+      <proxy name="edge-web" ip="10.0.0.20,10.0.0.21" domain="WWW.Example.com"/>
+      <proxy name="edge-ip" ip="10.0.0.30"/>
+    </proxies>
+    <hosts><host name="h1" ip="10.0.0.10"/></hosts>
+    <webapps>
+      <webapp uri="gav://x:y:1" endpoints="edge-web,edge-ip"/>
+    </webapps>
+  </bas>`);
+  assert(conf.endpoints.length == 2);
+  assert(conf.endpoints[0].domain == "www.example.com");
+  assert(conf.endpoints[1].ips == ["10.0.0.30"]);
+  auto host = conf.getHost("h1");
+  assert(conf.webapps[0].routeGroups(conf) == ["www.example.com", "10.0.0.30"]);
+}
+
+@("proxy endpoint names, domains, and no-domain ips are unique") unittest {
+  assertThrown!ServerXmlException(parseServerXml(`<bas version="1">
+    <proxies><proxy name="a" ip="10.0.0.1"/><proxy name="a" ip="10.0.0.2"/></proxies>
+  </bas>`));
+  assertThrown!ServerXmlException(parseServerXml(`<bas version="1">
+    <proxies>
+      <proxy name="a" ip="10.0.0.1" domain="x.example.com"/>
+      <proxy name="b" ip="10.0.0.2" domain="x.example.com"/>
+    </proxies>
+  </bas>`));
+  assertThrown!ServerXmlException(parseServerXml(`<bas version="1">
+    <proxies>
+      <proxy name="a" ip="10.0.0.1"/>
+      <proxy name="b" ip="10.0.0.1,10.0.0.2"/>
+    </proxies>
+  </bas>`));
+  assertThrown!ServerXmlException(parseServerXml(`<bas version="1">
+    <webapps><webapp uri="gav://x:y:1" endpoints="missing"/></webapps>
+  </bas>`));
 }

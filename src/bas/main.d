@@ -40,7 +40,7 @@ import bas.shellenv : readContainer;
 import bas.resolver;
 import bas.serverinfo : ServerInfo, liveInstancePid, liveInstances, readInstanceInfo;
 import bas.serverstatus;
-import bas.setline : SetlineConflict, conflictLines, parseRouteTable, routeDriftLines, runningPlan;
+import bas.setline : SetlineConflict, conflictLines, groupConflictLines, parseRouteTable, routeDriftLines, runningGroupPlans, runningPlan;
 import bas.setlineproc : RouteRead, fetchRouteTable, syncRoutesToSetline;
 import bas.starter;
 import bas.versioninfo : basctlVersion;
@@ -326,12 +326,19 @@ int cmdSetline(string[] args) {
 
   // 对的是「现状」（servers/<name>/server.info），不是 server.xml：配置改了但实例没重启时路由
   // 不该跟着变，动态端口也只有运行信息里才有。
-  auto running = runningPlan(liveInstances(basHome));
-  if (running.conflicts.length) {
-    printConflicts(running.conflicts);
-    return 1;
+  auto plans = runningGroupPlans(liveInstances(basHome), setline.hostname);
+  int code;
+  foreach (plan; plans) {
+    if (plan.conflicts.length) {
+      foreach (line; groupConflictLines(plan.conflicts))
+        stderr.writeln(line);
+      code = 1;
+      continue;
+    }
+    if (syncRoutesToSetline(plan.routes, setline.adminPort, plan.group) != 0)
+      code = 1;
   }
-  return syncRoutesToSetline(running.routes, setline.adminPort, setline.hostname);
+  return code;
 }
 
 /** 打印路由冲突并给出修法。 */

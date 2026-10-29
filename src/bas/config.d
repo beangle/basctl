@@ -15,7 +15,7 @@
  */
 
 /**
- * `server.xml`（`<bas>`）的配置模型与解析（不含 Proxy）。格式定义见 `resources/bas-1.0.0.xsd`。
+ * `server.xml`（`<bas>`）的配置模型与解析（含 proxy endpoint 声明）。格式定义见 `resources/bas-1.0.0.xsd`。
  *
  * 解析结果是一个可直接遍历的对象图：`Container` 持有 engines / hosts / farms /
  * webapps / resources 与可选的 setline 配置，`Farm` 引用 `Engine`，`Server` 引用
@@ -312,6 +312,18 @@ string[] resolveEngineDeps(Container container, Engine engine, string containerT
   return deps;
 }
 
+/** A proxy endpoint（`<proxies><proxy>`）。 */
+class ProxyEndpoint {
+  string name;
+  string[] ips;
+  string domain;
+
+  this(string name) {
+    this.name = name;
+  }
+
+}
+
 /** A named host mapping（`<hosts><host>`）。 */
 class Host {
   string name;
@@ -443,6 +455,8 @@ class Webapp {
   string docBase;
   bool jspSupport;
   Server[] runAt;
+  /** proxy endpoint name 列表；空表示不做负载代理。 */
+  string[] endpointNames;
   string contextPath;
   string[] urls;
   Nullable!bool unpack;
@@ -464,6 +478,28 @@ class Webapp {
     if (urls.length)
       return urls.dup;
     return [contextPath.length ? contextPath : "/"];
+  }
+
+  /** webapp 在某个 host 上占用的 setline group。 */
+  string[] routeGroups(const Container conf) const {
+    if (!endpointNames.length)
+      return [conf.setlineHostnameText()];
+    string[] groups;
+    foreach (name; endpointNames) {
+      auto endpoint = conf.findEndpoint(name);
+      if (endpoint !is null) {
+        // 有域名用域名；无域名时 endpoint 的每个代理 IP 各自成为一个 group。
+        if (endpoint.domain.length) {
+          if (!groups.canFind(endpoint.domain))
+            groups ~= endpoint.domain;
+        } else {
+          foreach (ip; endpoint.ips)
+            if (!groups.canFind(ip))
+              groups ~= ip;
+        }
+      }
+    }
+    return groups;
   }
 
   /** Tomcat SCI filter：禁用 JSP 时需要屏蔽 JasperInitializer。 */
@@ -617,6 +653,7 @@ class Container {
   Repository repository;
   SnapshotRepo snapshotRepo;
   Repository nativeRepo;
+  ProxyEndpoint[] endpoints;
   Engine[] engines;
   Host[] hosts;
   Farm[] farms;
@@ -690,6 +727,14 @@ class Container {
         return h;
     }
     throw new ServerXmlException("Cannot find host " ~ name);
+  }
+
+  /// 按 name 查找 endpoint。
+  const(ProxyEndpoint) findEndpoint(string name) const {
+    foreach (endpoint; endpoints)
+      if (endpoint.name == name)
+        return endpoint;
+    return null;
   }
 
   /** Webapps deployed to the given server, in declaration order. */
@@ -779,6 +824,12 @@ Container parseServerXml(string xmlText, RemoteConfig remote = RemoteConfig.init
           conf.engines ~= parseEngine(e);
       }
       break;
+    case "proxies":
+      foreach (p; elementChildren(section)) {
+        if (p.name == "proxy")
+          conf.endpoints ~= parseProxy(p);
+      }
+      break;
     case "hosts":
       foreach (h; elementChildren(section)) {
         if (h.name == "host")
@@ -825,6 +876,8 @@ Container parseServerXml(string xmlText, RemoteConfig remote = RemoteConfig.init
 
   if (!conf.hosts.length)
     conf.hosts ~= Host.localhost();
+
+  validateEndpoints(conf);
 
   if (!conf.setlinePort.isNull && conf.hasHostSetline())
     throw new ServerXmlException("legacy <setline port> cannot be combined with host setline ports");
@@ -1177,11 +1230,63 @@ void readHttpConnector(XmlElem elem, HttpConnector http) {
     http.connectionTimeout = ct.get;
 }
 
+/** 解析 `<proxy name ip domain>`。 */
+private ProxyEndpoint parseProxy(XmlElem elem) {
+  auto name = requireAttr(elem, "name", "<proxy>").strip;
+  enforce!ServerXmlException(name.length > 0, "<proxy name> cannot be empty");
+  auto endpoint = new ProxyEndpoint(name);
+
+  auto ips = requireAttr(elem, "ip", "<proxy>").strip;
+  foreach (part; ips.split(",")) {
+    auto ip = strip(part);
+    if (ip.length == 0)
+      throw new ServerXmlException("proxy " ~ name ~ " has an empty ip");
+    if (endpoint.ips.canFind(ip))
+      throw new ServerXmlException("proxy " ~ name ~ " repeats ip " ~ ip);
+    endpoint.ips ~= ip;
+  }
+  enforce!ServerXmlException(endpoint.ips.length > 0, "proxy " ~ name ~ " requires ip");
+
+  auto domain = optAttr(elem, "domain");
+  if (!domain.isNull)
+    endpoint.domain = strip(domain.get).toLower;
+  return endpoint;
+}
+
+/** 校验 endpoint 名称/域名唯一、无域名 IP 不重叠、webapp 引用存在。 */
+private void validateEndpoints(Container conf) {
+  bool[string] names;
+  string[string] domains;
+  string[string] noDomainIp;
+  foreach (endpoint; conf.endpoints) {
+    if ((endpoint.name in names) !is null)
+      throw new ServerXmlException("duplicate proxy name " ~ endpoint.name);
+    names[endpoint.name] = true;
+    if (endpoint.domain.length) {
+      if (auto previous = endpoint.domain in domains)
+        throw new ServerXmlException("duplicate proxy domain " ~ endpoint.domain
+            ~ " (" ~ *previous ~ ", " ~ endpoint.name ~ ")");
+      domains[endpoint.domain] = endpoint.name;
+    } else {
+      foreach (ip; endpoint.ips) {
+        if (auto previous = ip in noDomainIp)
+          throw new ServerXmlException("ip " ~ ip ~ " is shared by no-domain proxies "
+              ~ *previous ~ " and " ~ endpoint.name);
+        noDomainIp[ip] = endpoint.name;
+      }
+    }
+  }
+  foreach (app; conf.webapps)
+    foreach (name; app.endpointNames)
+      if (conf.findEndpoint(name) is null)
+        throw new ServerXmlException("webapp " ~ app.uri ~ " references unknown endpoint " ~ name);
+}
+
 Webapp parseWebapp(Container conf, XmlElem elem) {
   auto w = new Webapp(requireAttr(elem, "uri", "<webapp>"));
 
-  static immutable reserved = ["name", "uri", "reloadable", "path", "run-at", "doc-base", "libs",
-    "jsp-support", "resolve-support"];
+  static immutable reserved = ["name", "uri", "reloadable", "path", "run-at", "endpoints",
+    "doc-base", "libs", "jsp-support", "resolve-support"];
   w.properties = attrsExcept(elem, reserved);
 
   auto jsp = optAttr(elem, "jsp-support");
@@ -1205,6 +1310,15 @@ Webapp parseWebapp(Container conf, XmlElem elem) {
   }
 
   w.updatePath(nonBlankAttr(elem, "path").isNull ? "" : nonBlankAttr(elem, "path").get);
+
+  auto endpointAttr = nonBlankAttr(elem, "endpoints");
+  if (!endpointAttr.isNull) {
+    foreach (token; splitRunTokens(endpointAttr.get)) {
+      enforce!ServerXmlException(!w.endpointNames.canFind(token),
+          "webapp " ~ w.uri ~ " repeats endpoint " ~ token);
+      w.endpointNames ~= token;
+    }
+  }
 
   auto runAt = optAttr(elem, "run-at");
   if (!runAt.isNull) {

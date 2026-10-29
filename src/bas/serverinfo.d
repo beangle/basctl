@@ -53,6 +53,8 @@ struct WebappInfo {
   string context;
   /** 对外暴露的 URL 前缀（对应 `<webapp><url path>`）；空表示回退 `context`。 */
   string[] urls;
+  /** setline group；空表示旧版 server.info 未记录。 */
+  string[] groups;
 }
 
 /** 一个实例的运行信息（`server.info`）。 */
@@ -93,6 +95,8 @@ string renderServerInfo(const ServerInfo info) {
     sb.put("context = " ~ oneLine(app.context) ~ "\n");
     foreach (url; app.urls)
       sb.put("url = " ~ oneLine(url) ~ "\n");
+    foreach (group; app.groups)
+      sb.put("group = " ~ oneLine(group) ~ "\n");
   }
   return sb.data;
 }
@@ -153,6 +157,7 @@ ServerInfo parseServerInfo(string text) {
       case "uri": webapp.uri = value; break;
       case "context": webapp.context = value; break;
       case "url": if (value.length && !webapp.urls.canFind(value)) webapp.urls ~= value; break;
+      case "group": if (value.length && !webapp.groups.canFind(value)) webapp.groups ~= value; break;
       default: break;
       }
     }

@@ -15,6 +15,7 @@
 | 看实例日志 | `basctl logs <farm.server>` | 读 `logs/<实例>/console.out` 的尾部（`-n` 缺省 50 行，上限 2000），`-f` 持续跟随（含日志滚动后的新文件）；通道的 `log:read` 与它共用同一份读法（`bas.logs`） | [usage.md](usage.md)、[channel.md](channel.md) |
 | 嵌入式跑单应用 | `basctl run --engine=<type>-<version> <app>` | 一个参数给出容器类型与版本，生成单应用 spec 后前台 `jstart run`；纯前台，Ctrl-C 退出 | [run.md](run.md) |
 | Agent 协调模型 | `master` / `follower` 与 LinkMutex | 启动顺序/拓扑无关，master 串行迁移 follower，最终收敛 | [agent-coordination.md](agent-coordination.md) |
+| Proxy endpoints | `server.xml` 多代理点与 webapp `endpoints` | 每台代理机一个 setline agent，按 project + IP 查询；无域名 group 使用本机 IP | [endpoints.md](endpoints.md) |
 | native 可执行包 | `engine type="native"` | 通过 `basctl make native` 解压 tar.gz 到 `servers/<name>` 并 exec；没有 Tomcat 目录 | [native.md](native.md) |
 | 本地代理与对账 | `basctl setline` | 按运行中的实例把路由推给已经在跑的 setline（推一次即退出，只推，不生成 setline 的配置、不拉起它） | [setline.md](setline.md) |
 | 容器入口（creator） | `basctl make <type>` | jstart `[engine] init` 协议的回调，把容器启动命令写回 spec | [engine-creator.md](engine-creator.md) |

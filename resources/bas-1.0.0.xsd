@@ -55,6 +55,7 @@
         <xs:element name="repository" type="repositoryType" minOccurs="0"/>
         <xs:element name="snapshot-repo" type="repositoryType" minOccurs="0"/>
         <xs:element name="native-repo" type="repositoryType" minOccurs="0"/>
+        <xs:element name="proxies" type="proxiesType" minOccurs="0"/>
         <xs:element name="engines" type="enginesType" minOccurs="0"/>
         <xs:element name="hosts" type="hostsType" minOccurs="0"/>
         <xs:element name="resources" type="resourcesType" minOccurs="0"/>
@@ -190,6 +191,54 @@
   </xs:complexType>
 
   <!-- ================= 主机 ================= -->
+
+  <xs:complexType name="proxiesType">
+    <xs:sequence>
+      <xs:element name="proxy" type="proxyType" minOccurs="0" maxOccurs="unbounded"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="proxyType">
+    <xs:attribute name="name" type="xs:string" use="required">
+      <xs:annotation>
+        <xs:documentation>endpoint 唯一名称，webapp endpoints 引用它。</xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+    <xs:attribute name="ip" type="xs:string" use="required">
+      <xs:annotation>
+        <xs:documentation>代理机内网地址，逗号分隔；不是域名对应的公网地址。</xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+    <xs:attribute name="domain" type="xs:string">
+      <xs:annotation>
+        <xs:documentation>可选，非空时唯一；setline group 默认使用该域名。</xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+  </xs:complexType>
+
+  <xs:complexType name="proxiesType">
+    <xs:sequence>
+      <xs:element name="proxy" type="proxyType" minOccurs="0" maxOccurs="unbounded"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="proxyType">
+    <xs:attribute name="name" type="xs:string" use="required">
+      <xs:annotation>
+        <xs:documentation>endpoint 唯一名称，webapp endpoints 引用它。</xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+    <xs:attribute name="ip" type="xs:string" use="required">
+      <xs:annotation>
+        <xs:documentation>代理机内网地址，逗号分隔；不是域名对应的公网地址。</xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+    <xs:attribute name="domain" type="xs:string">
+      <xs:annotation>
+        <xs:documentation>可选，非空时唯一；setline group 默认使用该域名。</xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+  </xs:complexType>
 
   <xs:complexType name="hostsType">
     <xs:sequence>
@@ -354,6 +403,16 @@ accept-count/connection-timeout；Undertow 只用 accept-count/connection-timeou
     <xs:attribute name="run-at" type="xs:string">
       <xs:annotation>
         <xs:documentation>部署目标，逗号分隔的 farm 名或 `farm.server` 限定名。</xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+    <xs:attribute name="endpoints" type="xs:string">
+      <xs:annotation>
+        <xs:documentation>逗号分隔的 proxy name；空表示不做负载代理。</xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+    <xs:attribute name="endpoints" type="xs:string">
+      <xs:annotation>
+        <xs:documentation>逗号分隔的 proxy name；空表示不做负载代理。</xs:documentation>
       </xs:annotation>
     </xs:attribute>
     <xs:attribute name="doc-base" type="xs:string">
