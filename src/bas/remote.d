@@ -122,12 +122,12 @@ RemoteConfig parseRemoteConf(string text) {
 }
 
 /** 校验三项是否齐全以及基本的 URL / Project 形态。 */
-void validateRemoteConf(const RemoteConfig conf, string path) {
+void validateRemoteConf(const RemoteConfig conf, string path, bool allowHttp = false) {
   if (!conf.url.length)
     throw new RemoteConfigException("No remote.url in " ~ path);
-  if (!isAllowedRemoteUrl(conf.url))
+  if (!isAllowedRemoteUrl(conf.url, allowHttp))
     throw new RemoteConfigException(
-        "remote.url must use https:// (http:// is only allowed for localhost) in " ~ path);
+        "remote.url must use http:// or https:// in " ~ path);
   if (!conf.project.length)
     throw new RemoteConfigException("No remote.project in " ~ path);
   if (!validProjectName(conf.project))
@@ -224,22 +224,22 @@ private bool isLoopbackHost(string host) {
   return host == "localhost" || host == "127.0.0.1" || host == "::1";
 }
 
-/** `remote.url` 只允许 HTTPS；明文 HTTP 仅保留给精确的本机回环调试。 */
-bool isAllowedRemoteUrl(string url) {
+/** `remote.url` 允许 HTTP/HTTPS；TLS 由部署方按网络边界决定。 */
+bool isAllowedRemoteUrl(string url, bool allowHttp = false) {
   string scheme;
   string host;
   if (!parseControlUrl(url, scheme, host))
     return false;
-  return scheme == "https" || (scheme == "http" && isLoopbackHost(host));
+  return scheme == "https" || (allowHttp && scheme == "http") || (scheme == "http" && isLoopbackHost(host));
 }
 
-/** WebSocket 地址只允许 WSS；明文 WS 仅保留给精确的本机回环调试。 */
+/** WebSocket 地址允许 WS/WSS；TLS 由部署方按网络边界决定。 */
 bool isAllowedWebSocketUrl(string url) {
   string scheme;
   string host;
   if (!parseControlUrl(url, scheme, host))
     return false;
-  return scheme == "wss" || (scheme == "ws" && isLoopbackHost(host));
+  return scheme == "wss" || scheme == "ws";
 }
 
 /** 去掉尾斜杠，但不破坏 `https://` 这类只有 scheme 的写法。 */

@@ -17,7 +17,7 @@ basagent 与 bashub 之间那条 WebSocket 连接上说什么、怎么说。**�
 | 项 | 取值 |
 |---|---|
 | 路径 | `{remote.url}/api/bashub/monitor/agents/{project}/channel` |
-| `{remote.url}` | `conf/basctl.conf` 的 `[remote] url`，如 `https://hub.example.com` 或 `https://hub.example.com/bas/hub`；生产必须 HTTPS，连接时换成 `wss`。`http://` 只允许精确的本机回环地址 |
+| `{remote.url}` | `conf/basctl.conf` 的 `[remote] url`，如 `https://hub.example.com` 或 `https://hub.example.com/bas/hub`；`basagent` 允许 HTTP/HTTPS（连接时换成 WS/WSS），`basctl pull` 仍要求 HTTPS（回环地址可用 HTTP） |
 | 凭证 | `Authorization: Bearer <project>:<[remote] token>`（握手头），token 取值是 bashub 的 `Project.key` |
 | 身份 | `ip: <addr>[,<addr>…]`（握手头）：本机地址，多网卡时全部上报（**回环地址不发**，只有回环的开发机例外）；hub 过滤后只保留与 Host 配置命中的那个作为 `project + server ip` 身份，只顶掉同一 IP 的旧连接 |
 

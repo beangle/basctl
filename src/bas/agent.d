@@ -165,7 +165,7 @@ int runAgent(string configFile, string basctlVersion, string[] rest) {
   }
   // 启动时先对齐 hub 的 server.xml；拉取失败才使用本地旧配置。
   auto bootHome = dirName(dirName(absolutePath(configFile)));
-  if (runPull([bootHome]) != 0)
+  if (runPull([bootHome], true) != 0)
     logWarn("channel: startup pull failed, using local server.xml");
   AgentContext ctx;
   try {
@@ -222,7 +222,7 @@ private string agentRemotePath(string configFile) {
 AgentContext agentContext(const Container conf, string configFile, string basctlVersion, bool once) {
   auto remotePath = agentRemotePath(configFile);
   auto remote = loadRemoteConf(remotePath);
-  validateRemoteConf(remote, remotePath);
+  validateRemoteConf(remote, remotePath, true);
   return agentContext(conf, remote, configFile, basctlVersion, once);
 }
 
@@ -1054,14 +1054,14 @@ private bool refreshBeforeService(ref AgentContext ctx) {
   auto remotePath = agentRemotePath(ctx.configFile);
   try {
     auto remote = loadRemoteConf(remotePath);
-    validateRemoteConf(remote, remotePath);
+    validateRemoteConf(remote, remotePath, true);
   } catch (Exception e) {
     logWarn("channel: service postponed, remote config is not usable: %s", e.msg);
     return false;
   }
 
   auto basHome = dirName(dirName(absolutePath(ctx.configFile)));
-  if (runPull([basHome]) != 0) {
+  if (runPull([basHome], true) != 0) {
     logWarn("channel: service postponed, pull failed");
     return false;
   }
@@ -1076,7 +1076,7 @@ private bool refreshBeforeService(ref AgentContext ctx) {
 
 /** hub 配置变更：先拉 server.xml，再整份重报；拉取失败保留旧配置并记录。 */
 private void refreshConfig(ref AgentContext ctx, scope WebSocket ws) {
-  if (runPull([ctx.basHome]) != 0) {
+  if (runPull([ctx.basHome], true) != 0) {
     logWarn("channel: config refresh failed, keeping local server.xml");
     return;
   }

@@ -25,8 +25,8 @@ token = 9f8e7d6c5b4a39281706f5e4d3c2b1a0
 
 - `[remote] url` / `project` / `token` 三项齐全才启用；`basagent` 拼出
   `https://hub.example.com/api/bashub/monitor/agents/<project>/channel` 拨号，并把 `https`
-  换成 `wss`。生产地址必须是 `https://`；`http://` 只允许精确的本机回环地址
-  （`localhost` / `127.0.0.1` / `[::1]`）用于本地调试。
+  换成 `wss`。`basagent` 允许 `http://` 或 `https://`；`basctl pull` 仍要求 HTTPS，
+  `http://` 只允许精确的本机回环地址（`localhost` / `127.0.0.1` / `[::1]`）。
 - TLS 会按系统 CA 校验证书（优先 `SSL_CERT_FILE` / `CURL_CA_BUNDLE`，其次
   `/etc/ssl/certs/ca-certificates.crt`、`/etc/pki/tls/certs/ca-bundle.crt` 等）。
   自签证书或主机名不匹配会直接握手失败，不会降级为不校验。

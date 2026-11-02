@@ -181,7 +181,7 @@ basctl init --dry-run /opt/bas # 只打印将会写入的文件
 
 | 字段 | 必填 | 说明 |
 |---|---|---|
-| `url` | 是 | bashub 根地址（有反向代理前缀就连前缀一起写，不要带 `/api/bashub`），生产必须使用 `https://`；`http://` 只允许 `localhost` / `127.0.0.1` / `[::1]` |
+| `url` | 是 | bashub 根地址（有反向代理前缀就连前缀一起写，不要带 `/api/bashub`）。`basagent` 允许 `http://` 或 `https://`；`basctl pull` 仍要求 HTTPS（回环地址可用 HTTP） |
 | `project` | 是 | bashub 里的配置名，必须是 `org.name` |
 | `token` | 是 | 该 Project 的 `key`（bashub 配置详情里可查看/重置） |
 

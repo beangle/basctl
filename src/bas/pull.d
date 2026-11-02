@@ -35,7 +35,7 @@ import std.stdio : stderr, stdout, write, writeln;
 import std.string : startsWith, strip;
 
 /** `pull [--file=<basctl.conf>] [--if-configured] [workdir]`：下载并替换 `<workdir>/conf/server.xml`。 */
-int runPull(string[] args) {
+int runPull(string[] args, bool allowHttp = false) {
   string confFile;
   string workdir;
   bool ifConfigured;
@@ -78,7 +78,7 @@ int runPull(string[] args) {
           ~ "; server.xml was not refreshed.");
       return 0;
     }
-    validateRemoteConf(remote, confFile);
+    validateRemoteConf(remote, confFile, allowHttp);
   } catch (Exception e) {
     stderr.writeln("basagent pull: " ~ e.msg);
     return 1;

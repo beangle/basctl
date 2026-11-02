@@ -39,7 +39,7 @@ version (unittest) {
     }
     switch (args[1]) {
     case "pull":
-      return runPull(args[2 .. $]);
+      return runPull(args[2 .. $], true);
     case "report": {
       auto rest = args[2 .. $];
       return runReport(takeConfigFile(rest), basctlVersion, rest);
