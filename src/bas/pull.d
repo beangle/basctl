@@ -92,7 +92,7 @@ int runPull(string[] args, bool allowHttp = true) {
   mkdirRecurse(confDir);
   auto newer = buildPath(confDir, "server_newer.xml");
   if (!curlDownload(url, newer, ["Authorization: Bearer " ~ bearerCredential(remote)],
-      true, 4 * 1024 * 1024)) {
+      !allowHttp, 4 * 1024 * 1024)) {
     writeln(" failed");
     return 1;
   }
