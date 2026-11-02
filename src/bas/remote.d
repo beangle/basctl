@@ -122,7 +122,7 @@ RemoteConfig parseRemoteConf(string text) {
 }
 
 /** 校验三项是否齐全以及基本的 URL / Project 形态。 */
-void validateRemoteConf(const RemoteConfig conf, string path, bool allowHttp = false) {
+void validateRemoteConf(const RemoteConfig conf, string path, bool allowHttp = true) {
   if (!conf.url.length)
     throw new RemoteConfigException("No remote.url in " ~ path);
   if (!isAllowedRemoteUrl(conf.url, allowHttp))
@@ -225,7 +225,7 @@ private bool isLoopbackHost(string host) {
 }
 
 /** `remote.url` 允许 HTTP/HTTPS；TLS 由部署方按网络边界决定。 */
-bool isAllowedRemoteUrl(string url, bool allowHttp = false) {
+bool isAllowedRemoteUrl(string url, bool allowHttp = true) {
   string scheme;
   string host;
   if (!parseControlUrl(url, scheme, host))

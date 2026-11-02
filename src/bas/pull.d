@@ -35,7 +35,7 @@ import std.stdio : stderr, stdout, write, writeln;
 import std.string : startsWith, strip;
 
 /** `pull [--file=<basctl.conf>] [--if-configured] [workdir]`：下载并替换 `<workdir>/conf/server.xml`。 */
-int runPull(string[] args, bool allowHttp = false) {
+int runPull(string[] args, bool allowHttp = true) {
   string confFile;
   string workdir;
   bool ifConfigured;
