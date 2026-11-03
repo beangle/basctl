@@ -9,7 +9,6 @@ basctl start conf/server.xml platform   # 启动 platform farm 在本机的实�
 basctl start platform                   # 简写：用 $BAS_HOME/conf/server.xml
 basctl start all
 basctl start all --port-range=21000-21999   # <server http="0"> 的实例改在这个区间里取端口
-basctl start all --no-setline                # 临时不把这批实例的路由推给 setline
 ```
 
 单应用、不起 `conf/server.xml` 的快速运行用 [`basctl run`](run.md)：一个
@@ -43,9 +42,7 @@ basctl start all --no-setline                # 临时不把这批实例的路由
 准备失败（端口没得挑、webapp 解析不出来、依赖缺件）或启动失败（进程没起来）的实例不留运行信息，
 端口预留随之撤销；同一批里其余实例照常启动，此时退出码非 0。
 
-配了 `<setline>` 时，最后还会按 `servers/*/server.info` 对账一次路由——把存活的实例推给 setline
-（管理口端口取 `<setline port>`，进程由 systemd / 容器入口负责，basctl 不拉起），没起来的实例
-不进路由。对账失败**只警告**，不影响退出码；`--no-setline` 跳过。详见 [setline.md](setline.md)。
+basctl 不在启停后调用 setline 或 basagent，也不触发状态上报；运行态由 basagent 自行上报。
 
 ## 实例目录重建
 
@@ -74,7 +71,7 @@ servers/<farm.server>/
 
 ## 停止
 
-`basctl stop [server.xml] <farm|server|all> [--force] [--timeout=<sec>] [--no-setline]` 逐个按
+`basctl stop [server.xml] <farm|server|all> [--force] [--timeout=<sec>]` 逐个按
 运行信息里的 `pid` 停止，不再委托 `jstart stop`：
 
 1. 没在跑（信息还在但进程已死）→ 清掉陈旧信息，记 skipped；
@@ -86,7 +83,7 @@ servers/<farm.server>/
 停完删除 `server.info`。因为 pid 记在运行信息里，`servers/<farm.server>/launch.jstart` 删了也能停；
 反过来，**未由 basctl 启动**的实例没有 `server.info`，停不掉，会报 `no run info`。
 配了 `<setline>` 时，停完还会按 `servers/*/server.info` 对账一次路由（摘除这些端口），
-失败同样是只警告；`--no-setline` 跳过。
+basctl 不在停止后调用 setline 或 basagent。
 
 ## 生成的 spec
 

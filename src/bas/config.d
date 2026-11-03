@@ -24,7 +24,6 @@
 module bas.config;
 
 import bas.artifact;
-import bas.endpoint : parseSetlinePort;
 import bas.remote : RemoteConfig, remoteBaseUrl, remoteConfForServerXml;
 
 import std.algorithm : canFind, endsWith, map, sort, startsWith;
@@ -646,7 +645,7 @@ class Container {
    *
    * 这是 setline 的**管理口**（`adminListen`）：basctl 拨 `127.0.0.1:<port>` 推路由、读路由表，
    * 它不是 setline 对外接业务的那个 `listen`（那由 setline 自己那份配置决定）。管理口只认回环来
-   * 的写，所以地址没有可配的余地，只有端口。解析见 {@link bas.endpoint.resolveSetlinePort}。
+   * 的写，所以地址没有可配的余地，只有端口。解析见 本文件的 parseSetlinePort。
    */
   Nullable!string setlinePort;
 
@@ -660,7 +659,7 @@ class Container {
   Webapp[] webapps;
   Resource[string] resources;
 
-  /** `<setline port>` 的原始写法（没写返回空串），供 {@link bas.endpoint} 解析。 */
+  /** `<setline port>` 的原始写法（没写返回空串），由本文件解析。 */
   string setlinePortText() const {
     return setlinePort.isNull ? "" : strip(setlinePort.get);
   }
@@ -1433,4 +1432,18 @@ Nullable!int optPositiveIntAttr(XmlElem elem, string name) {
   if (v.isNull)
     return Nullable!int.init;
   return nullable(to!int(v.get));
+}
+
+
+/** `<setline port>` 的端口写法；只接受 1..65535。 */
+private ushort parseSetlinePort(string value) {
+  import std.conv : ConvException, to;
+  ushort port;
+  try
+    port = value.strip.to!ushort;
+  catch (ConvException)
+    throw new ServerXmlException("Invalid setline port: " ~ value);
+  if (port == 0)
+    throw new ServerXmlException("Invalid setline port: " ~ value);
+  return port;
 }

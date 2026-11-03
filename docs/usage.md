@@ -127,11 +127,9 @@ setline 与 bashub 通道互不依赖，配置、部署与安全边界统一见 
 | `basctl init [--force] [--dry-run] [workdir]` | 初始化组件目录：把控制脚本铺到 `<workdir>/bin`，并生成带注释的 `conf/basctl.conf` 模板（已存在则不覆盖） |
 | `basctl make [server.xml] <farm\|server\|all>` | 只准备不启动：生成 jstart spec 并 `jstart resolve` 预取依赖 |
 | `basctl resolve <server.xml> [pattern...]` | 只解析 webapp，不生成实例 |
-| `basctl start [server.xml] <farm\|server\|all> [--port-range=<from>-<to>] [--no-setline]` | 为实例定端口（`<server http="0">` 时在区间内分配，缺省 `20000-29999`）、写 `server.info`、生成 jstart spec、resolve 并后台启动；配了 `<setline>` 时启动后对账路由（`--no-setline` 跳过） |
-| `basctl stop [server.xml] <farm\|server\|all> [--force] [--timeout=<sec>] [--no-setline]` | 按 `server.info` 里的 pid 停止 `start` 启动的实例：SIGTERM 后等 `--timeout`（缺省 15 秒），`--force` 直接 SIGKILL；`server.info` 缺失时按命令行 `-Dbas.server` + `-Dbas.home` 找回本实例的残留进程并停止，`restart` 因此在 info 丢失后也能先停旧进程；配了 `<setline>` 时停完对账路由（`--no-setline` 跳过） |
+| `basctl start [server.xml] <farm\|server\|all> [--port-range=<from>-<to>]` | 为实例定端口（`<server http="0">` 时在区间内分配，缺省 `20000-29999`）、写 `server.info`、生成 jstart spec、resolve 并后台启动 |
+| `basctl stop [server.xml] <farm\|server\|all> [--force] [--timeout=<sec>]` | 按 `server.info` 里的 pid 停止 `start` 启动的实例：SIGTERM 后等 `--timeout`（缺省 15 秒），`--force` 直接 SIGKILL；`server.info` 缺失时按命令行 `-Dbas.server` + `-Dbas.home` 找回本实例的残留进程并停止，`restart` 因此在 info 丢失后也能先停旧进程 |
 | `basctl run --engine=<type>-<version> <app>` | 嵌入式运行单个 webapp：`--engine=tomcat-11.0.25` 同时给出容器类型与版本，生成单应用 spec 后前台 `jstart run` |
-| `basctl setline [server.xml]` | 把**运行中实例**（`server.info`，含动态端口）的路由整组推给已在跑的 setline（管理口端口只从 `<setline port>` 来，无缺省、无命令行覆盖；没人应答就报错，basctl 不拉起它、也不生成 setline 的配置；配置里没有 `<setline>` 就报"没启用 setline"）；与 `basctl start` / `stop` 之后的自动对账同一条路 |
-| `basctl setline --sync` | 同上（显式写法，便于脚本与记忆）；只推一次，推完即退出，没有常驻模式——路由变化的时机就是实例的启停 |
 | `basctl make <type> [options]` | 容器入口（creator）：把 jstart 的 `[engine] init` 协议翻译成容器启动命令 |
 | `basctl firewall [workdir]` | 按配置交互式配置 firewalld 端口 |
 | `bas.sh pull` | 按 `conf/basctl.conf` 的 `[remote]` 拉取 `conf/server.xml`（底层调用 `basagent pull`）：地址为 `<url>/api/bashub/config/<project>/server`，请求用 `Authorization: Bearer <project>:<token>`；旧配置备份为 `server_old.xml`。未配置 `[remote]` 时告警并以 0 退出，配置无效或下载失败时非 0 |
@@ -259,7 +257,6 @@ basctl firewall /opt/bas          # 交互式地放行 server.xml 里的端口
 |---|---|---|
 | `Cannot find config file …` | `BAS_HOME` 不对，或 `conf/server.xml` 还没写 | `export BAS_HOME=…`，或直接用参数给配置文件路径 |
 | `Route conflict on /x` | 同一个路径被**端口集合不同**的多个 webapp 认领 | 给 webapp 显式声明 `<url path="…"/>`，让每个前缀有唯一归属 |
-| `setline routes not synced (…)`（启停时一行提示） | setline 没在跑，或管理口端口不对 | 看 `<setline port>`（那是 setline 的 `adminListen` 端口）；basctl 不会替你拉起 setline。手工 `basctl setline --sync` 会给出更详细的原因（没监听 / 拒绝 / 连不上） |
 | `Cannot run jstart …` | `jstart` 不在 `PATH` | 装 jstart，或 `export beangle_jstart=/path/to/jstart`；`basctl doctor` 会提示它是否就位（`jstart` 为可选提示，不影响 doctor 退出码，但实际调用仍会失败） |
 | `status` 里看不到某个实例，但 `servers/<name>` 还在 | 进程真的不在了（崩了或手工 kill），命令行也匹配不到 | `basctl stop <name>` 清掉残留运行信息，再 `start`；对账会把它的路由摘掉 |
 | `start` 报 `port ... is already in use` | 端口被别的进程占着（常见是未登记的残留实例） | 先 `basctl stop <name>`（会按命令行找回本实例残留进程并停掉）；报错里会带本实例残留 pid 和真正监听该端口的 pid（Linux），用 `ps -fp <pid>` 确认占用者，必要时手工停掉或换端口 |

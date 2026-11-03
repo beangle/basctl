@@ -24,13 +24,9 @@
  *  - `jstart`：`start` / `make` / `resolve` 用它解析下载构件，命令名可用 `beangle_jstart` 覆盖。
  *    它在 doctor 中只作可选提示：有些 jstart 操作（`resolve` / `fetch`）不需要 java，缺 jstart
  *    也不代表当前机器不能完成与 java 无关的工作；
- *  - `setline`：只有 `server.xml` 里声明了 `<setline>` 才检查，而且检的是**管理口可达**而不是命令
- *    存在——setline 是机器级服务（systemd / 容器入口 / 手工拉起），basctl 只往它的写接口推
- *    路由，不调用它的可执行文件。管理口端口取自 `<setline port>`（拨 `127.0.0.1:<port>`），
- *    与 `setline` / `start` / `status` 走同一个解析入口。
  *
- * 只检查“就位没就位”，**不校验版本**：java / jstart / setline / 容器的版本策略分别属于各自的
- * 发布节奏，basctl 掺和只会制造漂移。必需项（java、已启用的 setline）缺件时打印安装提示，
+ * 只检查“就位没就位”，**不校验版本**：java / jstart / 容器的版本策略分别属于各自的
+ * 发布节奏，basctl 掺和只会制造漂移。必需项（java）缺件时打印安装提示，
  * 并让退出码非 0；jstart 缺失只提示，不影响退出码。
  *
  * 打包（deb/rpm）不声明对这些命令的硬依赖：安装方式太多（系统包、sdkman、手工放置），
@@ -38,9 +34,8 @@
  */
 module bas.doctor;
 
-import bas.config : localSetlineConfig, parseServerXmlFile;
+import bas.config : parseServerXmlFile;
 import bas.jstart : jstartEnvVar;
-import bas.endpoint : adminAddress, portFree;
 import bas.net : localAddresses;
 
 import std.array : join, split;
@@ -109,8 +104,7 @@ struct ToolEnv {
 }
 
 /**
- * 检查 basctl 需要的命令；`confFile` 只用于判断 setline 是否必需
- * （文件缺失或解析失败都按“未启用 setline”处理，不因此报错）。
+ * 检查 basctl 需要的命令。
  */
 ToolCheck[] checkTools(string confFile) {
   return checkTools(confFile, ToolEnv.fromProcess());
@@ -121,35 +115,7 @@ ToolCheck[] checkTools(string confFile, in ToolEnv env) {
   ToolCheck[] checks;
   checks ~= checkJava(env);
   checks ~= checkJstart(env);
-  auto setline = setlineConfigState(confFile);
-  checks ~= checkSetline(setline);
   return checks;
-}
-
-/** `<setline>` 的启用状态、配置里写的管理口端口（可能为空）与展示用说明。 */
-private struct SetlineConfigState {
-  bool enabled;
-  ushort port;
-  string note;
-}
-
-/**
- * `server.xml` 是否启用了 setline：按本机 Host 的两个端口判断；旧格式的 `<setline port>`
- * 继续兼容。文件不存在或解析失败时按未启用处理，说明写进 `note`。
- */
-private SetlineConfigState setlineConfigState(string confFile) {
-  if (!exists(confFile))
-    return SetlineConfigState(false, 0, "no config file " ~ confFile);
-  try {
-    auto conf = parseServerXmlFile(confFile);
-    auto setline = localSetlineConfig(conf, localAddresses());
-    if (!setline.enabled)
-      return SetlineConfigState(false, 0, setline.source);
-    return SetlineConfigState(true, setline.adminPort,
-        setline.source ~ " hostname=" ~ setline.hostname);
-  } catch (Exception e) {
-    return SetlineConfigState(false, 0, "cannot parse " ~ confFile);
-  }
 }
 
 /** java：`JAVA_HOME/bin/java` 优先，其次 `PATH`。 */
@@ -182,26 +148,6 @@ private ToolCheck checkJstart(in ToolEnv env) {
       ? jstartEnvVar ~ " points to " ~ env.jstart ~ ", but that command was not found"
       : "not found on PATH; only commands that invoke jstart need it (set "
         ~ jstartEnvVar ~ " to its path)");
-}
-
-/**
- * setline：只有 `<setline>` 配置时才检查——检的是**管理口可达**（有人在监听），而不是命令存在：
- * setline 归 systemd / 容器入口 / 手工起，basctl 只往它的写接口（管理口）推路由。
- *
- * 管理口地址走与 `setline` / `start` / `status` 同一个解析入口，出处只有 `server.xml` 一处，
- * 不必再去猜环境里设了什么。
- */
-private ToolCheck checkSetline(SetlineConfigState setline) {
-  if (!setline.enabled)
-    return ToolCheck("setline", CheckState.skipped, "", "", "not required: " ~ setline.note);
-  auto configNote = setline.note;
-  auto port = setline.port;
-  configNote ~= " port=" ~ port.to!string;
-  if (portFree(port))
-    return unavailable("setline", "nothing listens on " ~ adminAddress(port)
-        ~ "; start the setline service, or fix the local <host> setline-admin-port ("
-        ~ configNote ~ ")");
-  return ToolCheck("setline", CheckState.ok, adminAddress(port), "server.xml", "");
 }
 
 /** 组装一条“找到”的结果。 */
@@ -279,8 +225,7 @@ string renderChecks(string confFile, const(ToolCheck)[] checks) {
       width = check.name.length;
   }
   string[] lines;
-  auto state = setlineConfigState(confFile);
-  auto configNote = exists(confFile) ? " (" ~ state.note ~ ")" : " (not found)";
+  auto configNote = exists(confFile) ? "" : " (not found)";
   lines ~= leftJustify("config", width) ~ "  " ~ confFile ~ configNote;
   foreach (check; checks) {
     auto detail = check.state == CheckState.ok
