@@ -116,7 +116,7 @@ JSONValue basReport(string basHome, Container container = null) {
 }
 
 /**
- * `report:health` 的 body：只含本机声明的实例与运行状态。
+ * `report:health` 的 body：本机声明的实例状态，以及轻量 CPU/内存动态指标。
  *
  * 历史监控按 hub 配置的周期只需要这一份小报文；OS/内存/磁盘与 webapps 明细仍在
  * `report:os` / `report:bas` 里，由首次连接或 `report:now` 触发。`state` 只有
@@ -155,7 +155,12 @@ JSONValue healthReport(string basHome, Container container = null) {
       "id": JSONValue(id),
       "state": JSONValue(runningById[id] ? "running" : "stopped")
     ]);
-  return JSONValue(["servers": JSONValue(servers)]);
+  // 轻量动态指标：cores/load 和内存总量/可用量，随 health 周期刷新，不重复发 OS/磁盘明细。
+  return JSONValue([
+    "servers": JSONValue(servers),
+    "cpu": cpuFields(),
+    "mem": memFields()
+  ]);
 }
 
 private:
