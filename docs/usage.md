@@ -16,11 +16,10 @@ dub build -c basagent --build=release-nobounds --compiler=ldc2  # 产物 target/
 scripts/build_deb.sh        # Debian 系
 scripts/build_rpm.sh        # Fedora / RHEL 系
 
-# 或者用「一机器一出口」的容器镜像（basctl + jstart + setline + JRE）
 docker run -d --name bas -p 8080:8080 -v ~/bas-work:/var/lib/bas basctl:0.0.1
 ```
 
-打包与镜像细节见 [scripts/README.md](../scripts/README.md)、[container.md](container.md)。
+打包细节见 [scripts/README.md](../scripts/README.md)。
 系统包会创建 `bas:beangle` 账号、`/var/lib/bas`、`/var/log/bas`，把控制脚本与
 `conf/basctl.conf` 模板装到 `/var/lib/bas`，并启用 `basagent.service`；basagent 不允许以
 root 运行。
@@ -113,8 +112,6 @@ basctl stop all
 `20000-29999`）内挑一个空闲端口，记进 `servers/<name>/server.info`（见
 [server-info.md](server-info.md)）。
 
-需要把本机多个实例汇总到一个入口时，再在 `server.xml` 加 `<setline port="10080"/>`。
-setline 与 bashub 通道互不依赖，配置、部署与安全边界统一见 [setline.md](setline.md)。
 
 ## 命令一览
 
@@ -122,7 +119,7 @@ setline 与 bashub 通道互不依赖，配置、部署与安全边界统一见 
 |---|---|
 | `basctl version` | 打印 `basctl <版本>`（单行纯文本，便于脚本取值） |
 | `basctl banner [server.xml]` | 操作者横幅：logo + bas 引擎版本（取自 `<bas version>`）+ basctl 版本 + 本机地址；`bas.sh version` 调它。图形为纯 ASCII，只在交互终端出现，重定向到日志/管道时只剩版本行与本机地址 |
-| `basctl status` | 列出 `$BAS_HOME/servers` 下运行中的实例：读 `server.info` 展示 pid、端口与各 webapp 的对外 url（引擎与启动时间只留在 `server.info` 里，不再打印）。记录 pid 已失效时，会按命令行 `-Dbas.server` + `-Dbas.home` 找回本实例的真实进程；找不到就不出现在这一节（不再打印 `stale`）。配了 `<setline>` 时另起一节报名命空间、管理口地址与通不通（`up` / `down`），并读一次 `GET /_setline/routes`（本机来源免凭据）给出 route 列（缺 / 端口对不上 / 多 / `routes in sync`） |
+| `basctl status` | 列出 `$BAS_HOME/servers` 下运行中的实例：读 `server.info` 展示 pid、端口与各 webapp 的对外 url（引擎与启动时间只留在 `server.info` 里，不再打印）。记录 pid 已失效时，会按命令行 `-Dbas.server` + `-Dbas.home` 找回本实例的真实进程；找不到就不出现在这一节（不再打印 `stale`）。 |
 | `basctl logs [server.xml] <farm.server> [-n <行数>] [-f]` | 读 `$BAS_HOME/logs/<farm.server>/console.out` 的尾部：`-n` 缺省 50 行、上限 2000；`-f` 持续跟随（Ctrl-C 退出），日志滚动后自动跟新文件。归档的旧日志在 `logs/archive/`，要查直接读文件 |
 | `basctl init [--force] [--dry-run] [workdir]` | 初始化组件目录：把控制脚本铺到 `<workdir>/bin`，并生成带注释的 `conf/basctl.conf` 模板（已存在则不覆盖） |
 | `basctl make [server.xml] <farm\|server\|all>` | 只准备不启动：生成 jstart spec 并 `jstart resolve` 预取依赖 |
@@ -136,7 +133,34 @@ setline 与 bashub 通道互不依赖，配置、部署与安全边界统一见 
 | `basagent report [server.xml]` | 连一次控制台（bashub）报一次主机与实例现状后退出；地址与凭证都取同目录 `basctl.conf` 的 `[remote]`，报上去了退出码才是 0。见 [channel.md](channel.md) |
 | `basagent [server.xml]` | 常驻：连上控制台后周期上报、回保活、执行固定指令（取日志 / 启停实例），断线自动重连；远程 `service:start` / `service:restart` 执行前会先拉取一次配置，`stop` 不拉取 |
 | `systemctl start/stop/restart basagent.service` | 管理系统级常驻 agent；运行账号固定为 `bas:beangle`。单元设置 `KillMode=process`：停止、重启或升级 agent 只结束 agent 自己，不会停掉实例（包括控制台 `service:start` 拉起的那些） |
-| `basctl doctor [server.xml]` | 检查 `java`（必需）、`jstart`（可选提示），以及启用 setline 时管理口通不通；必需项缺失时退出码非 0，见 [doctor.md](doctor.md) |
+| `basctl doctor [server.xml]` | 检查 `java`（必需）与 `jstart`（可选提示）；必需项缺失时退出码非 0 |
+
+## 环境自检（`basctl doctor`）
+
+`basctl` 自己不起进程池，也不直接 exec java；`doctor` 检查本机是否有它需要的命令。
+
+```sh
+basctl doctor
+basctl doctor /opt/bas/conf/server.xml
+```
+
+### 检查项
+
+| 命令 | 要求 | 从哪找 |
+|------|------|--------|
+| `java` | 必需 | `$JAVA_HOME/bin/java` 优先，其次 `PATH` |
+| `jstart` | 可选提示 | `beangle_jstart` 指向的命令优先，其次 `PATH` 上的 `jstart` |
+
+`java` 缺失时退出码为 `1`；`jstart` 缺失只提示，不影响退出码。
+
+### 输出
+
+```text
+config  /opt/bas/conf/server.xml
+java    ok       /usr/bin/java (PATH)
+jstart  optional not found; only commands that invoke jstart need it
+doctor: all required commands are available.
+```
 
 ## 组件目录初始化
 
@@ -216,7 +240,7 @@ basctl init --dry-run /opt/bas # 只打印将会写入的文件
 ### 开发态跑一个 war
 
 `run` 不读 `server.xml`，一个参数给出容器与版本，前台跑起来，Ctrl-C 就退出（不写
-`server.info`、不注册到 setline）：
+`server.info`）：
 
 ```sh
 basctl run --engine=tomcat-11.0.25  /repo/app.war
@@ -228,10 +252,6 @@ basctl run --engine=tomcat-11.0.25 --print  /repo/app.war   # 只打印将要执
 参数、生成的 spec 与「和 `start` 的关系」见 [run.md](run.md)。
 
 ### 一机器一出口（容器）
-
-容器里 `server.xml` 写 `<setline port="10080"/>`、`<server http="0"/>` 即可：
-容器内无论多少实例，对外只有 setline 那一个端口，增删 server 不用改端口映射。构建、运行与
-信号处理见 [container.md](container.md)。
 
 ### 拉配置与开防火墙
 
@@ -258,8 +278,7 @@ basctl firewall /opt/bas          # 交互式地放行 server.xml 里的端口
 | `Cannot find config file …` | `BAS_HOME` 不对，或 `conf/server.xml` 还没写 | `export BAS_HOME=…`，或直接用参数给配置文件路径 |
 | `Route conflict on /x` | 同一个路径被**端口集合不同**的多个 webapp 认领 | 给 webapp 显式声明 `<url path="…"/>`，让每个前缀有唯一归属 |
 | `Cannot run jstart …` | `jstart` 不在 `PATH` | 装 jstart，或 `export beangle_jstart=/path/to/jstart`；`basctl doctor` 会提示它是否就位（`jstart` 为可选提示，不影响 doctor 退出码，但实际调用仍会失败） |
-| `status` 里看不到某个实例，但 `servers/<name>` 还在 | 进程真的不在了（崩了或手工 kill），命令行也匹配不到 | `basctl stop <name>` 清掉残留运行信息，再 `start`；对账会把它的路由摘掉 |
+| `status` 里看不到某个实例，但 `servers/<name>` 还在 | 进程真的不在了（崩了或手工 kill），命令行也匹配不到 | `basctl stop <name>` 清掉残留运行信息，再 `start` |
 | `start` 报 `port ... is already in use` | 端口被别的进程占着（常见是未登记的残留实例） | 先 `basctl stop <name>`（会按命令行找回本实例残留进程并停掉）；报错里会带本实例残留 pid 和真正监听该端口的 pid（Linux），用 `ps -fp <pid>` 确认占用者，必要时手工停掉或换端口 |
-| 容器外访问不到 | 出口端口没映射，或 setline 的 `listen` 绑成了 `127.0.0.1` | `-p 8080:8080` 且容器内 `listen` 绑 `*:8080`（入口脚本默认如此），见 [container.md](container.md) |
 
-外部命令是否就位，优先用 `basctl doctor` 自查；它的输出与退出码见 [doctor.md](doctor.md)。
+外部命令是否就位，优先用 `basctl doctor` 自查；它的检查项与输出见下文「环境自检」。

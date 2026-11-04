@@ -1,7 +1,5 @@
 # 汇报通道（basagent → bashub）
 
-> 只想知道传什么、什么格式、多久一次：看 [channel-summary.md](channel-summary.md)。
-
 basagent 主动拨一条出站 WebSocket 到控制台（bashub），把**这台机器的现状**报上去，并接收控制台下发的
 固定指令。现状 = 主机家底（CPU / 内存 / 磁盘）+ 本机活着的 bas 实例；指令 = 立即上报、取日志区间、
 启动 / 停止 / 重启实例。
@@ -61,7 +59,7 @@ token = 9f8e7d6c5b4a39281706f5e4d3c2b1a0
   `running` / `stopped`，供在线页和半年运行历史使用；完整 OS、磁盘、webapps 明细只在首次连接、
   `report:now` 或实例动作后按需上报。
 - **不是**：不把 `server.xml` 当运行事实（它只用来补充“本机声明了哪些可操作实例”），不碰
-  setline 的流量与健康，不做通用监控（不替代 Prometheus），也没有远程 shell——能下发的动作是
+  应用实例的流量与健康，不做通用监控（不替代 Prometheus），也没有远程 shell——能下发的动作是
   固定的那几个原语。
 - 取不到的字段就**留空**，不伪造：Windows 开发机上没有 `/proc`，那些项就是「不可用」。
 
@@ -117,13 +115,3 @@ sudo systemctl restart basagent.service
 （或旧 PID 文件）停掉手工启动的 agent，再启动 systemd 服务；同一个 project 只允许一条
 连接，两份 agent 同时在跑会互相踢下线。
 
-## 与 setline 的分工
-
-|  | setline | 汇报通道 |
-|---|---|---|
-| 管什么 | 反代的**路由**（谁把哪些前缀转到哪个端口） | 节点的**现状**（机器家底 + 实例清单） |
-| 谁读它 | 反代（haproxy / nginx，经 setline 的读接口） | 控制台（bashub 的内存登记册） |
-| 地址从哪来 | `server.xml` 的 `<setline port>` | `conf/basctl.conf` 的 `[remote]` |
-| 失败的影响 | 路由不更新，实例本身没事 | 控制台看不到现状，实例本身没事 |
-
-两者都不常驻在 basctl 里（setline 是独立进程，通道靠 `basagent`），互不依赖。

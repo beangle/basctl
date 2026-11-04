@@ -1,16 +1,16 @@
 # 实例运行信息 `server.info`
 
 每个实例在 `servers/<farm.server>/server.info` 记一份运行信息：**它是谁、进程号多少、实际监听
-哪个端口、跑了哪些 webapp、对外暴露哪些 url**。`basctl status` 与 setline 的路由对账都读它，不再
+哪个端口、跑了哪些 webapp、对外暴露哪些 url**。`basctl status`、stop 和 basagent 都读它，不再
 各自去猜（`ss`/`netstat` 反查端口）或重新解析 `server.xml`。
 
 **状态：已落地**（basctl 的 `start` / `stop` / `status`，见文末「实现说明」）。
 
 ## 为什么要有这个文件
 
-- **对账只需要"现状"**：路由对账要的是"此刻谁活着、在哪个端口、占哪些 url"。重新解析
+- **运行态只需要"现状"**：路由生成要的是"此刻谁活着、在哪个端口、占哪些 url"。重新解析
   `server.xml` 会引入歧义——配置可能已经被改了，而跑着的实例还是启动时那一份。运行信息记录的是
-  **实例启动时的样子**，这正是对账要的语义。
+  **实例启动时的样子**，这正是运行态要的语义。
 - **端口不再是猜出来的**：由 basctl 分配（见下）并记录，`status` 不必依赖 `ss`/`netstat`
   （Windows 开发环境同样可用）。
 - **单一现状来源**：pid 只是其中一行；`status` / `stop` 要的端口、webapp、对外 url 都在这里，
@@ -92,7 +92,7 @@ url = /context2
 
 `<server http>` 有值时按该端口启动；为 `0`（或缺省）时由 basctl 在**端口区间**内挑一个空闲端口，
 用 `--port=<n>` 传给应用（与静态端口同一个参数，引擎不需要区分），并写进 `server.info` 的
-`http.port`。应用不自己选端口，`status` 与对账也不需要反查。
+`http.port`。应用不自己选端口，`status` 与 basagent 也不需要反查。
 
 **缺省区间 `20000-29999`**，理由：
 
@@ -122,7 +122,7 @@ url = /context2
 重跑该实例的 `basctl start` 就会收回来——它只影响同一份 `BAS_HOME` 的区间分配，不占系统意义上的
 端口（预留期间没人监听）。
 
-`--port-range` 只出现在 `basctl start` 上，`stop` / `status` / `setline` 都不需要它——端口已经记在
+`--port-range` 只出现在 `basctl start` 上，`stop` / `status` 都不需要它——端口已经记在
 运行信息里了。
 
 ## 与 jstart 的分工（jstart 只负责 `run`）
@@ -161,8 +161,7 @@ jstart 只负责"解析 + 准备 + exec"，实例身份与停止交给 basctl（
 | `src/bas/serverinfo.d` | 模型、INI 读写、原子替换 |
 | `src/bas/portalloc.d` | 端口区间、`flock` 内的"探测 + 预留"、顺序挑选与复用 |
 | `src/bas/starter.d` | `start` 写运行信息（含补 pid）、`stop` 按 pid 停止、`describeInstance` 从配置推导内容 |
-| `src/bas/main.d` | `status` 按运行信息展示（`pid` / `port` / 各 webapp 的 `url`；`engine`、`started` 只留在文件里）；配了 `<setline>` 时另起一节报入口状态 |
-| `src/bas/setline.d` | `runningPlan`：由运行信息（而非 `server.xml`）算路由与冲突 |
+| `src/bas/main.d` | `status` 按运行信息展示（`pid` / `port` / 各 webapp 的 `url`；`engine`、`started` 只留在文件里） |
 
 启动时先写第一段（无 `pid`，兼作端口预留）发生在解析 webapp **之前**：动态端口必须先定下来，
 随后生成的 spec 才能带上 `--port=`。准备失败（webapp 解析不出来、引擎依赖缺件）时撤销预留，避免

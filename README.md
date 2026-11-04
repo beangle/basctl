@@ -4,25 +4,20 @@
 `basagent`，负责显式配置拉取与出站控制通道。
 它把 `conf/server.xml` 解析成可运行的 Tomcat 实例：解析 webapp（`gav://` /
 `http(s)://` / 本地路径）、生成实例目录与 jstart launch spec，并渲染容器所需的
-`server.xml`、`web.xml`；也可按 farm 直接拉起实例，同时提供实例状态、本地代理对账与防火墙等工具。
+`server.xml`、`web.xml`；也可按 farm 直接拉起实例，同时提供实例状态、配置检查与防火墙等工具。
 
 ## 文档
 
 | 文档 | 内容 |
 |---|---|
-| [docs/features.md](docs/features.md) | 功能清单、核心模型（意图 / 现状 / 运行态与对账）、目录约定、`make` 的两种模式、与 jstart 的关系、边界与非目标 |
+| [docs/features.md](docs/features.md) | 功能清单、核心模型（意图 / 现状 / 运行态）、目录约定、`make` 的两种模式、与 jstart 的关系、边界与非目标 |
 | [docs/usage.md](docs/usage.md) | 安装、五分钟上手（接入 bashub / 独立使用）、命令一览、常见场景（`run` / 容器 / pull / firewall）、环境变量、排错 |
 | [docs/start.md](docs/start.md) | `start` 的流程与生成的 jstart spec |
 | [docs/run.md](docs/run.md) | `run`：嵌入式运行单个 webapp |
 | [docs/server-info.md](docs/server-info.md) | 实例运行信息 `server.info` 的格式与生命周期、动态端口分配 |
-| [docs/setline.md](docs/setline.md) | 本地代理：`<setline>` 配置、路由推送与 `status` 对账、多份 `BAS_HOME` 共享、部署与安全边界 |
 | [docs/engine-creator.md](docs/engine-creator.md) | 容器入口（creator）：jstart `[engine] init` 协议 |
-| [docs/doctor.md](docs/doctor.md) | 环境自检：`java`（必需）/ `jstart`（可选提示）/ setline 管理口 |
-| [docs/container.md](docs/container.md) | 容器化「一机器一出口」：镜像内容、构建、运行、信号 |
 | [docs/channel.md](docs/channel.md) | 汇报通道（basagent → bashub）：怎么启用、`report` / 常驻 agent、上报什么、失败怎么办 |
 | [docs/channel-protocol.md](docs/channel-protocol.md) | 控制通道协议：端点与鉴权、消息信封、固定原语、节拍、未知消息的处理与扩展方式 |
-| [docs/channel-summary.md](docs/channel-summary.md) | 通信备忘：传什么、什么格式、多久一次（速查；细节仍以协议为准） |
-| [docs/roadmap.md](docs/roadmap.md) | 待定项与下一步：R1 与 bashub 的汇报/指令通道（阶段 3 已落地、阶段 4 启停已落地、审计待补）、R2 漂移自动收敛、R3 生产侧拓扑 agent |
 | [scripts/README.md](scripts/README.md) | deb / rpm 打包 |
 
 ## 版本语义
@@ -57,7 +52,7 @@ IDE 补全与校验（见 `server.xml` 样例）。
   `basctl` 不链接 OpenSSL 或 vibe
 - `make` / `resolve` / `start` / `run` 需要本机有 `jstart`（负责构件的解析、下载与启动）；
   `basctl doctor` 会显示它是否就位，但在 doctor 中只是可选提示，缺失不影响退出码
-  （见 [docs/doctor.md](docs/doctor.md)）
+  （见 [docs/usage.md](docs/usage.md)）
 
 ```sh
 dub build -c basctl --build=release-nobounds --compiler=ldc2

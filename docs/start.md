@@ -42,7 +42,7 @@ basctl start all --port-range=21000-21999   # <server http="0"> 的实例改在�
 准备失败（端口没得挑、webapp 解析不出来、依赖缺件）或启动失败（进程没起来）的实例不留运行信息，
 端口预留随之撤销；同一批里其余实例照常启动，此时退出码非 0。
 
-basctl 不在启停后调用 setline 或 basagent，也不触发状态上报；运行态由 basagent 自行上报。
+basctl 不在启停后调用 basagent，也不触发状态上报；运行态由 basagent 自行上报。
 
 ## 实例目录重建
 
@@ -82,8 +82,7 @@ servers/<farm.server>/
 
 停完删除 `server.info`。因为 pid 记在运行信息里，`servers/<farm.server>/launch.jstart` 删了也能停；
 反过来，**未由 basctl 启动**的实例没有 `server.info`，停不掉，会报 `no run info`。
-配了 `<setline>` 时，停完还会按 `servers/*/server.info` 对账一次路由（摘除这些端口），
-basctl 不在停止后调用 setline 或 basagent。
+basctl 不在停止后调用 basagent。
 
 ## 生成的 spec
 
@@ -187,5 +186,5 @@ org.beangle.bas:beangle-bas-engine:0.14.0
 - `<server http="0">` 的实例在 spec 里拿到的仍是 `--port=<n>`——端口由 basctl 启动前分配，
   引擎侧看不出差别；普通 `start` / `restart` 会删除实例目录，动态端口每次重新分配；
 - 实例身份与停止归 basctl：pid 记在 `servers/<farm.server>/server.info`，运行信息是 `status`
-  与 setline 对账共用的「现状」（见 [server-info.md](server-info.md)）；jstart 已不写
+  共享的「现状」（见 [server-info.md](server-info.md)）；jstart 已不写
   `app.pid`、也不再提供 `stop`。
