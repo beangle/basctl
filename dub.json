@@ -1,6 +1,6 @@
 {
   "name": "beangle-basctl",
-  "description": "A Simple Application Server.",
+  "description": "A Beangle Application Server.",
   "authors": ["chaostone"],
   "license": "GPLv3",
   "sourcePaths": ["src"],
