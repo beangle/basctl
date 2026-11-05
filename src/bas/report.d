@@ -70,14 +70,18 @@ JSONValue basReport(string basHome, Container container = null) {
         "urls": JSONValue(urls)
       ]);
     }
-    instances ~= JSONValue([
+    JSONValue instance = [
       "id": JSONValue(info.id),
       "pid": JSONValue(cast(long) info.pid),
       "engine": JSONValue(info.engine),
       "httpPort": JSONValue(cast(long) info.httpPort),
       "started": JSONValue(info.started),
       "webapps": JSONValue(webapps)
-    ]);
+    ];
+    auto rssBytes = info.pid > 0 ? processRssBytes(info.pid) : 0;
+    if (rssBytes > 0)
+      instance["rssBytes"] = JSONValue(rssBytes);
+    instances ~= instance;
   }
   JSONValue[] declared;
   if (container !is null) {
