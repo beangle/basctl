@@ -62,8 +62,7 @@ Nullable!string fetch(string target, Repository repo) {
 /**
  * fetch（开发版）：未配置上游时以 `--offline` 只使用本地已有构件。
  *
- * SNAPSHOT 的上游存在与否是开发版常态，调用方通常还要与 `BAS_HOME/webapps`
- * 下的本地覆盖比较，因此默认静默 jstart 的下载失败与告警。
+ * SNAPSHOT 的上游存在与否是开发版常态，因此默认静默 jstart 的下载失败与告警。
  */
 Nullable!string fetch(string target, SnapshotRepo repo, bool quiet = true) {
   return exec("fetch", target, repo.local, [], repo.remotes.length == 0, repo.repoSpecs, quiet);

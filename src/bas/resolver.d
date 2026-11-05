@@ -30,16 +30,25 @@ import std.algorithm : canFind, endsWith;
 import std.file : exists, isDir, timeLastModified;
 import std.path : absolutePath, buildPath;
 import std.string : empty, replace, split, startsWith, strip;
+import std.process : environment;
 import std.stdio : writeln;
 import std.typecons : Nullable, nullable;
 
 /**
  * 解析每个 webapp 的 docBase 与依赖，返回未能解析的坐标/路径。
  *
- * 对 gav：转成 war 后交给 jstart fetch（开发版用快照仓库，允许 `BAS_HOME/webapps`
- * 下同名 war 覆盖较旧者）；对 http(s)：下载到 `BAS_HOME/webapps`；其余按本地路径处理，
- * 并展开 `${bas.home}` / `../../../` 前缀。
+ * 对 gav：转成 war 后交给 jstart fetch（快照也只用仓库解析结果，不读本地 webapps 覆盖）；
+ * 对 http(s)：下载到 `~/.m2/downloads`；其余按本地路径处理，并展开 `${bas.home}` /
+ * `../../../` 前缀。
  */
+/** 当前用户 home；下载缓存放在 `~/.m2/downloads`，不写回 BAS_HOME。 */
+private string mavenHome() {
+  auto home = environment.get("HOME", "").strip;
+  if (home.length == 0)
+    throw new Exception("HOME is not set; cannot locate ~/.m2/downloads");
+  return home;
+}
+
 string[] resolveWebapps(string basHome, Repository releaseRepo, SnapshotRepo snapshotRepo, Webapp[] webapps) {
   string[] missings;
 
@@ -51,9 +60,6 @@ string[] resolveWebapps(string basHome, Repository releaseRepo, SnapshotRepo sna
       if (gav.packaging == "jar")
         gav = gav.withPackaging("war");
       auto path = resolveArtifact(releaseRepo, snapshotRepo, gav);
-      if (gav.isSnapshot()) {
-        path = chooseSnapshotEntry(basHome, gav, path);
-      }
       if (!path.isNull) {
         app.docBase = path.get;
       } else {
@@ -61,9 +67,10 @@ string[] resolveWebapps(string basHome, Repository releaseRepo, SnapshotRepo sna
         missings ~= gav.asGav();
       }
     } else if (isRemote(app.uri)) {
-      auto fileName = downloadToDir(app.uri, buildPath(basHome, "webapps"),
+      auto downloadDir = buildPath(mavenHome(), ".m2", "downloads");
+      auto fileName = downloadToDir(app.uri, downloadDir,
           authHeadersFor(app.uri, releaseRepo, snapshotRepo));
-      app.docBase = buildPath(basHome, "webapps", fileName);
+      app.docBase = buildPath(downloadDir, fileName);
     } else {
       auto docBase = app.uri;
       if (docBase.canFind("${bas.home}"))
@@ -94,20 +101,6 @@ string[] resolveWebapps(string basHome, Repository releaseRepo, SnapshotRepo sna
     }
   }
   return missings;
-}
-
-/**
- * 选择 SNAPSHOT 的入口：仓库解析结果与 `BAS_HOME/webapps` 下同名 war 中取较新的一个。
- * 仓库不可达（例如 401）时，只要本地覆盖存在就直接使用，不让远端故障挡住本地启动。
- */
-Nullable!string chooseSnapshotEntry(string basHome, Artifact gav, Nullable!string repoPath) {
-  auto localWar = buildPath(basHome, "webapps", gav.fileName());
-  auto hasLocal = exists(localWar);
-  if (repoPath.isNull)
-    return hasLocal ? nullable(absolutePath(localWar)) : Nullable!string.init;
-  if (hasLocal && timeLastModified(localWar) > timeLastModified(repoPath.get))
-    return nullable(absolutePath(localWar));
-  return repoPath;
 }
 
 /**

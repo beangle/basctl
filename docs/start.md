@@ -25,8 +25,7 @@ basctl start all --port-range=21000-21999   # <server http="0"> 的实例改在�
    `20000-29999`）；随后写 `servers/<farm.server>/server.info` 的第一段——不含 `pid`，同时兼作
    端口预留。端口先定下来，第 3 步生成的 spec 才能带上 `--port=`。格式见
    [server-info.md](server-info.md)；
-3. **解析 webapp**：沿用 `make` / `resolve` 的语义（`gav://`、http(s) 直链、本地路径、
-   SNAPSHOT 本地覆盖）；失败写 `servers/<farm.server>/error` 并跳过该实例；
+3. **解析 webapp**：沿用 `make` / `resolve` 的语义（`gav://`、http(s) 直链、本地路径；SNAPSHOT 不再读取本地 webapps 覆盖）；失败写 `servers/<farm.server>/error` 并跳过该实例；
 4. **生成 spec**：`servers/<farm.server>/launch.jstart`——一个 `<server>` 一份 spec（一个 JVM），
    并按 `<engine type>` 把 `[engine] init` 写成对应 creator 的 `make <type>` 命令行
    （`tomcat-server` / `tomcat` / `undertow` / `jetty`，与 type 同名）；
