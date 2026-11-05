@@ -19,6 +19,7 @@ module test.enginecreator_test;
 
 import bas.enginecreator;
 
+
 import std.algorithm : canFind;
 import std.array : replicate, split;
 import std.file : exists, mkdirRecurse, readText, rmdirRecurse, tempDir, write;
@@ -149,6 +150,7 @@ import std.zip : ArchiveMember, CompressionMethod, ZipArchive;
         rmdirRecurse(root);
     }
     write(buildPath(pkg, "portal"), "#!/bin/sh\n");
+    assert(execute(["chmod", "755", buildPath(pkg, "portal")]).status == 0);
     write(buildPath(pkg, "libportal.so.1"), "");
     auto archive = buildPath(root, "portal.tar.gz");
     auto packed = execute(["tar", "-czf", archive, "-C", pkg, "portal", "libportal.so.1"]);
@@ -159,6 +161,9 @@ import std.zip : ArchiveMember, CompressionMethod, ZipArchive;
     o.entry = archive;
     o.entryOut = buildPath(o.base, "jstart.argv");
     o.name = "missing";
+    mkdirRecurse(o.base);
+    write(buildPath(o.base, "engine-app.classpath"), "");
+    write(buildPath(o.base, "engine-deps.classpath"), "");
     createNative(o);
     assert(readText(o.entryOut) == absolutePath(buildPath(o.base, "portal")) ~ "\0");
   }

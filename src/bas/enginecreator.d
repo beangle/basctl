@@ -43,7 +43,7 @@ import bas.render : catalinaProperties;
 import std.algorithm : canFind, filter, map;
 import std.array : appender, array, join, split;
 import std.conv : to;
-import std.file : DirEntry, SpanMode, copy, dirEntries, exists, getSize, isDir, isFile,
+import std.file : DirEntry, SpanMode, copy, dirEntries, exists, getAttributes, getSize, isDir, isFile,
   mkdirRecurse, read, readText, remove, rename, write;
 import std.path : absolutePath, baseName, buildNormalizedPath, buildPath, dirName, dirSeparator,
   pathSeparator;
@@ -1204,12 +1204,16 @@ private string locateNativeExecutable(string base, const EngineOptions o) {
   return "";
 }
 
-/** Linux native 包里的共享库没有启动入口，不参与自动探测。 */
+/** Linux native 包里的共享库和 jstart 生成的辅助文件没有启动入口，不参与自动探测。 */
 private bool nativeCandidate(DirEntry entry) {
   if (!entry.isFile)
     return false;
+  auto rawName = baseName(entry.name);
+  auto name = rawName.toLower;
+  // 只看可执行位：jstart 生成的 .classpath / .args 等普通文件自然被排除。
+  if ((getAttributes(entry.name) & 0x49) == 0)
+    return false;
   version (linux) {
-    auto name = baseName(entry.name).toLower;
     if (name.endsWith(".so") || name.indexOf(".so.") >= 0)
       return false;
   }
