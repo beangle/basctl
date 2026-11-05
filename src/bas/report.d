@@ -124,6 +124,7 @@ JSONValue basReport(string basHome, Container container = null) {
  */
 JSONValue healthReport(string basHome, Container container = null) {
   bool[string] runningById;
+  long[string] rssById;
   string[] ids;
   foreach (info; liveInstances(basHome)) {
     if (!info.id.length)
@@ -131,6 +132,8 @@ JSONValue healthReport(string basHome, Container container = null) {
     if ((info.id in runningById) is null)
       ids ~= info.id;
     runningById[info.id] = true;
+    if (info.pid > 0)
+      rssById[info.id] = processRssBytes(info.pid);
   }
 
   if (container !is null) {
@@ -150,17 +153,46 @@ JSONValue healthReport(string basHome, Container container = null) {
 
   ids.sort();
   JSONValue[] servers;
-  foreach (id; ids)
-    servers ~= JSONValue([
+  foreach (id; ids) {
+    JSONValue item = [
       "id": JSONValue(id),
       "state": JSONValue(runningById[id] ? "running" : "stopped")
-    ]);
+    ];
+    if (runningById[id] && (id in rssById) && rssById[id] > 0)
+      item["rssBytes"] = JSONValue(rssById[id]);
+    servers ~= item;
+  }
   // 轻量动态指标：cores/load 和内存总量/可用量，随 health 周期刷新，不重复发 OS/磁盘明细。
   return JSONValue([
     "servers": JSONValue(servers),
     "cpu": cpuFields(),
     "mem": memFields()
   ]);
+}
+
+/** 进程当前驻留内存（/proc/<pid>/status 的 VmRSS）；读不到返回 0。 */
+private long processRssBytes(int pid) {
+  version (linux) {
+    import std.algorithm : startsWith;
+    import std.array : split;
+    import std.conv : to;
+    import std.file : exists, readText;
+    import std.string : splitLines, strip;
+    auto path = "/proc/" ~ pid.to!string ~ "/status";
+    if (!exists(path))
+      return 0;
+    try {
+      foreach (line; readText(path).splitLines) {
+        if (!line.startsWith("VmRSS:"))
+          continue;
+        auto kb = strip(line["VmRSS:".length .. $]).split(' ')[0].to!long;
+        return kb * 1024;
+      }
+    } catch (Exception) {
+      return 0;
+    }
+  }
+  return 0;
 }
 
 private:
