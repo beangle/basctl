@@ -54,7 +54,7 @@ jstart 取包后执行 `basctl make native`：
 
 1. 解压 tar.gz 到 `servers/<server>`
 2. 如果压缩包只有一个顶层目录，自动剥离该目录
-3. 按 `exec`、`<artifactId>`、`bin/<artifactId>`、唯一可执行文件的顺序定位
+3. 按 `exec`、`<artifactId>`、`bin/<artifactId>`、唯一可执行文件的顺序定位；Linux 自动探测忽略 `*.so` / `*.so.N`
 4. 写 `jstart.argv`
 
 ## 目录

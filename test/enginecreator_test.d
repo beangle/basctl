@@ -23,6 +23,7 @@ import std.algorithm : canFind;
 import std.array : replicate, split;
 import std.file : exists, mkdirRecurse, readText, rmdirRecurse, tempDir, write;
 import std.path : absolutePath, buildPath;
+import std.process : execute;
 import std.string : representation;
 import std.uuid : randomUUID;
 import std.zip : ArchiveMember, CompressionMethod, ZipArchive;
@@ -136,6 +137,31 @@ import std.zip : ArchiveMember, CompressionMethod, ZipArchive;
   assert(exists(args));
   writeLaunchArgv(entryOut, ["java", "-version"]);
   assert(!exists(args));
+}
+
+@("createNative ignores shared libraries when locating the executable") unittest {
+  version (linux) {
+    auto root = buildPath(tempDir, "basctl-native-" ~ randomUUID().toString());
+    auto pkg = buildPath(root, "pkg");
+    mkdirRecurse(pkg);
+    scope (exit) {
+      if (exists(root))
+        rmdirRecurse(root);
+    }
+    write(buildPath(pkg, "portal"), "#!/bin/sh\n");
+    write(buildPath(pkg, "libportal.so.1"), "");
+    auto archive = buildPath(root, "portal.tar.gz");
+    auto packed = execute(["tar", "-czf", archive, "-C", pkg, "portal", "libportal.so.1"]);
+    assert(packed.status == 0);
+
+    EngineOptions o;
+    o.base = buildPath(root, "base");
+    o.entry = archive;
+    o.entryOut = buildPath(o.base, "jstart.argv");
+    o.name = "missing";
+    createNative(o);
+    assert(readText(o.entryOut) == absolutePath(buildPath(o.base, "portal")) ~ "\0");
+  }
 }
 
 @("prepareWebapp explodes a war and keeps a directory") unittest {

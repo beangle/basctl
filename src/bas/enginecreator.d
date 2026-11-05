@@ -43,8 +43,8 @@ import bas.render : catalinaProperties;
 import std.algorithm : canFind, filter, map;
 import std.array : appender, array, join, split;
 import std.conv : to;
-import std.file : SpanMode, copy, dirEntries, exists, getSize, isDir, isFile, mkdirRecurse,
-  read, readText, remove, rename, write;
+import std.file : DirEntry, SpanMode, copy, dirEntries, exists, getSize, isDir, isFile,
+  mkdirRecurse, read, readText, remove, rename, write;
 import std.path : absolutePath, baseName, buildNormalizedPath, buildPath, dirName, dirSeparator,
   pathSeparator;
 import std.process : environment, execute;
@@ -1188,16 +1188,32 @@ private string locateNativeExecutable(string base, const EngineOptions o) {
         return candidate;
   }
   auto bin = buildPath(base, "bin");
-  auto files = dirEntries(bin, SpanMode.shallow).array
-    .filter!(e => e.isFile).array;
+  DirEntry[] files;
+  if (dirHere(bin))
+    files = dirEntries(bin, SpanMode.shallow).array
+      .filter!(e => nativeCandidate(e)).array;
   if (files.length == 1)
     return files[0].name;
   auto roots = dirEntries(base, SpanMode.shallow).array
-    .filter!(e => e.isFile && !["launch.jstart", "server.info", "error", "jstart.argv", "jstart.args"].canFind(baseName(e.name))).array;
+    .filter!(e => nativeCandidate(e)
+        && !["launch.jstart", "server.info", "error", "jstart.argv", "jstart.args"]
+            .canFind(baseName(e.name))).array;
   if (roots.length == 1)
     return roots[0].name;
   stderr.writeln("Native candidates: " ~ (files ~ roots).map!(e => e.name).join(", "));
   return "";
+}
+
+/** Linux native 包里的共享库没有启动入口，不参与自动探测。 */
+private bool nativeCandidate(DirEntry entry) {
+  if (!entry.isFile)
+    return false;
+  version (linux) {
+    auto name = baseName(entry.name).toLower;
+    if (name.endsWith(".so") || name.indexOf(".so.") >= 0)
+      return false;
+  }
+  return true;
 }
 
 int runEngineCreator(string[] args) {
