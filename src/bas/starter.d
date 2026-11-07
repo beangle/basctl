@@ -77,9 +77,18 @@ import std.typecons : Nullable, nullable;
 /** 启动后等待多久（毫秒）再确认进程存活，用于 Webapp 启动失败/依赖缺失的快速反馈。 */
 private enum startupProbeMs = 2000;
 
-/// 阶段耗时统一按毫秒输出，启动慢时能直接看到时间花在清理、准备还是拉起。
+/// 只输出超过该值的阶段，避免正常启动刷屏。
+private enum slowPhaseMs = 500;
+
 private long elapsedMs(MonoTime started) {
   return (MonoTime.currTime - started).total!"msecs";
+}
+
+/// 阶段耗时超过阈值时才打印，保留定位慢启动的信息。
+private void reportSlow(string instance, string phase, MonoTime started) {
+  auto ms = elapsedMs(started);
+  if (ms >= slowPhaseMs)
+    writeln(format!"[timing] %s: %s %dms"(instance, phase, ms));
 }
 
 /** `service:*` 失败详情上限：完整日志仍由 `log:read` 提供。 */
@@ -157,14 +166,14 @@ private int startServers(Container container, string basHome, Server[] servers,
     auto phase = MonoTime.currTime;
     removeTree(serverDir);
     auto info = reserveInstance(basHome, container, server, range, startedAt);
-    writeln(format!"[timing] %s: cleanup+reserve %dms"(server.qualifiedName, elapsedMs(phase)));
+    reportSlow(server.qualifiedName, "cleanup+reserve", phase);
     if (info.isNull) {
       failed++;
       continue;
     }
     phase = MonoTime.currTime;
     auto spec = prepareServer(basHome, container, server);
-    writeln(format!"[timing] %s: prepare %dms"(server.qualifiedName, elapsedMs(phase)));
+    reportSlow(server.qualifiedName, "prepare", phase);
     if (spec.isNull) {
       // 端口预留随失败的准备一起撤销，否则这个端口会被永久算作占用
       removeInstanceInfo(basHome, server.qualifiedName);
@@ -187,12 +196,10 @@ private int startServers(Container container, string basHome, Server[] servers,
     auto phase = MonoTime.currTime;
     prepareLog(basHome, p.server);
     pids ~= launchBackground(p.spec, consoleLog(basHome, p.server), repoArgsFor(container, p.server));
-    writeln(format!"[timing] %s: launch %dms"(p.server.qualifiedName, elapsedMs(phase)));
+    reportSlow(p.server.qualifiedName, "launch", phase);
   }
 
-  auto probeStarted = MonoTime.currTime;
   Thread.sleep(msecs(startupProbeMs));
-  writeln(format!"[timing] startup probe %dms"(elapsedMs(probeStarted)));
 
   int started;
   foreach (i, ref p; prepared) {
@@ -1013,7 +1020,11 @@ private string[] repoArgsFor(Container container, Server server) {
 
 /** `jstart [repo] resolve <spec>`：校验 spec 与各 webapp 的依赖是否齐备。 */
 private bool resolveSpec(string spec, const(string)[] repos) {
+  auto started = MonoTime.currTime;
   auto res = execute([jstartCommand()] ~ repos ~ ["resolve", spec], null, Config.stderrPassThrough);
+  auto resolveMs = elapsedMs(started);
+  if (resolveMs >= slowPhaseMs)
+    writeln(format!"[timing] jstart resolve: %dms"(resolveMs));
   if (res.status != 0) {
     stderr.writeln("jstart resolve " ~ spec ~ " failed with exit code " ~ res.status.to!string);
     return false;

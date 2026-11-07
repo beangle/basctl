@@ -78,6 +78,8 @@ private enum slimVersion = "slim2";
 /** 最终命令参数总长超过该值时改用 `java @argfile`，避免 `E2BIG`。 */
 private enum argFileLimit = 4000;
 
+private enum slowExtractMs = 500;
+
 private long elapsedMs(MonoTime started) {
   return (MonoTime.currTime - started).total!"msecs";
 }
@@ -1149,7 +1151,8 @@ void createNative(EngineOptions o) {
   auto exe = locateNativeExecutable(base, o);
   if (exe.length == 0)
     throw new Exception("Cannot find native executable under " ~ base);
-  stderr.writeln("Native extract " ~ base ~ ": " ~ extractMs.to!string ~ "ms");
+  if (extractMs >= slowExtractMs)
+    stderr.writeln("Native extract " ~ base ~ ": " ~ extractMs.to!string ~ "ms");
   string[] argv = [exe];
   if (o.port.length)
     argv ~= "--port=" ~ o.port;
