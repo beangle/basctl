@@ -60,7 +60,7 @@ import bas.serverstatus : instanceProcessIds, listeningProcessIds, pidLooksLikeI
 import bas.spec : SubappSpec, basctlExecutable, engineInitCommand, renderLaunchSpec, shellQuote;
 
 import core.thread : Thread;
-import core.time : msecs;
+import core.time : MonoTime, msecs;
 
 import std.algorithm : canFind, map;
 import std.array : join, split;
@@ -76,6 +76,11 @@ import std.typecons : Nullable, nullable;
 
 /** 启动后等待多久（毫秒）再确认进程存活，用于 Webapp 启动失败/依赖缺失的快速反馈。 */
 private enum startupProbeMs = 2000;
+
+/// 阶段耗时统一按毫秒输出，启动慢时能直接看到时间花在清理、准备还是拉起。
+private long elapsedMs(MonoTime started) {
+  return (MonoTime.currTime - started).total!"msecs";
+}
 
 /** `service:*` 失败详情上限：完整日志仍由 `log:read` 提供。 */
 private enum maxServiceDetailBytes = 8 * 1024;
@@ -149,13 +154,17 @@ private int startServers(Container container, string basHome, Server[] servers,
       continue;
     }
     // 每次真正启动都从空的实例目录重建：引擎、webapps、运行信息全部重新生成。
+    auto phase = MonoTime.currTime;
     removeTree(serverDir);
     auto info = reserveInstance(basHome, container, server, range, startedAt);
+    writeln(format!"[timing] %s: cleanup+reserve %dms"(server.qualifiedName, elapsedMs(phase)));
     if (info.isNull) {
       failed++;
       continue;
     }
+    phase = MonoTime.currTime;
     auto spec = prepareServer(basHome, container, server);
+    writeln(format!"[timing] %s: prepare %dms"(server.qualifiedName, elapsedMs(phase)));
     if (spec.isNull) {
       // 端口预留随失败的准备一起撤销，否则这个端口会被永久算作占用
       removeInstanceInfo(basHome, server.qualifiedName);
@@ -175,11 +184,15 @@ private int startServers(Container container, string basHome, Server[] servers,
   // 2. 后台启动，再统一确认存活并补写 pid
   int[] pids;
   foreach (ref p; prepared) {
+    auto phase = MonoTime.currTime;
     prepareLog(basHome, p.server);
     pids ~= launchBackground(p.spec, consoleLog(basHome, p.server), repoArgsFor(container, p.server));
+    writeln(format!"[timing] %s: launch %dms"(p.server.qualifiedName, elapsedMs(phase)));
   }
 
+  auto probeStarted = MonoTime.currTime;
   Thread.sleep(msecs(startupProbeMs));
+  writeln(format!"[timing] startup probe %dms"(elapsedMs(probeStarted)));
 
   int started;
   foreach (i, ref p; prepared) {

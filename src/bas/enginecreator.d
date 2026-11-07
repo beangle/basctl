@@ -40,6 +40,8 @@ module bas.enginecreator;
 import bas.fsutil : removeTree;
 import bas.render : catalinaProperties;
 
+import core.time : MonoTime;
+
 import std.algorithm : canFind, filter, map;
 import std.array : appender, array, join, split;
 import std.conv : to;
@@ -75,6 +77,10 @@ private enum slimVersion = "slim2";
 
 /** 最终命令参数总长超过该值时改用 `java @argfile`，避免 `E2BIG`。 */
 private enum argFileLimit = 4000;
+
+private long elapsedMs(MonoTime started) {
+  return (MonoTime.currTime - started).total!"msecs";
+}
 
 /** base 下 jstart 交付多应用计划的固定文件名（launch spec 片段）。 */
 enum subappsPlanFile = "engine-subapps.jstart";
@@ -1137,10 +1143,13 @@ void createNative(EngineOptions o) {
     ~ "--name=<artifactId> [--exec=<relative>] [--port=<n>] [--path=<ctx>] [args...]");
   auto base = absolutePath(o.base);
   mkdirRecurse(base);
+  auto extractStarted = MonoTime.currTime;
   extractNative(o.entry, base);
+  auto extractMs = elapsedMs(extractStarted);
   auto exe = locateNativeExecutable(base, o);
   if (exe.length == 0)
     throw new Exception("Cannot find native executable under " ~ base);
+  stderr.writeln("Native extract " ~ base ~ ": " ~ extractMs.to!string ~ "ms");
   string[] argv = [exe];
   if (o.port.length)
     argv ~= "--port=" ~ o.port;
