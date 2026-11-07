@@ -1,6 +1,10 @@
-# Release v0.0.1
+# Release 0.0.1
 
 发布日期：2026-11-07
+
+GitHub tag：`v0.0.1`
+
+AUR：`basctl 0.0.1-1`
 
 首个公开版本。`basctl` 把一份 `conf/server.xml` 转成可运行的 Beangle Bas Server
 实例，并把构件解析、下载和进程启动交给同栈的 `jstart`；`basagent` 在同一个版本中提供
@@ -103,3 +107,11 @@ scripts/build_rpm.sh
 
 完整功能说明见 [features.md](features.md)、[usage.md](usage.md) 与
 [scripts/README.md](../scripts/README.md)。
+
+## 验证
+
+- `dub test --compiler=ldc2`：157 个用例通过。
+- `basctl version`：`basctl 0.0.1`。
+- `basagent version`：`basagent 0.0.1`。
+- Arch Linux `makepkg` 完整构建与 `check()` 通过；AUR 包已发布。
+- Arch 包内 `basctl` / `basagent` 均启用 FULL RELRO。

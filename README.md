@@ -19,7 +19,7 @@
 | [docs/channel.md](docs/channel.md) | 汇报通道（basagent → bashub）：怎么启用、`report` / 常驻 agent、上报什么、失败怎么办 |
 | [docs/channel-protocol.md](docs/channel-protocol.md) | 控制通道协议：端点与鉴权、消息信封、固定原语、节拍、未知消息的处理与扩展方式 |
 | [scripts/README.md](scripts/README.md) | deb / rpm 打包 |
-| [docs/release-v0.0.1.md](docs/release-v0.0.1.md) | v0.0.1 发布说明：版本范围、环境要求、已知限制与安装 |
+| [docs/release-0.0.1.md](docs/release-0.0.1.md) | 0.0.1 发布说明：版本范围、环境要求、已知限制与安装 |
 
 ## 版本语义
 
