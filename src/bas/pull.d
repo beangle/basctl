@@ -17,7 +17,7 @@
 /**
  * `pull`：从控制端拉取 `conf/server.xml`。
  *
- * 地址、Project 与凭证都取自 `conf/basctl.conf` 的 `[remote]` 段；请求只用
+ * 地址、Project 与凭证都取自 `BAS_PRINCIPAL` / `BAS_TOKEN`；请求只用
  * `Authorization: Bearer <project>:<Project.key>` 鉴权，不再发送可伪造的 `ip:` 头，也不再读取
  * `bas_remote_*` 环境变量。旧配置备份为 `conf/server_old.xml`；拉取失败时保留
  * 现有配置不动。
@@ -25,7 +25,7 @@
 module bas.pull;
 
 import bas.download : curlDownload;
-import bas.remote : RemoteConfig, bearerCredential, loadRemoteConf, remoteConfPath, serverConfigUrl,
+import bas.remote : RemoteConfig, bearerCredential, loadRemoteEnv, serverConfigUrl,
   validateRemoteConf;
 
 import std.file : exists, getcwd, mkdirRecurse, rename;
@@ -34,15 +34,12 @@ import std.process : environment;
 import std.stdio : stderr, stdout, write, writeln;
 import std.string : startsWith, strip;
 
-/** `pull [--file=<basctl.conf>] [--if-configured] [workdir]`：下载并替换 `<workdir>/conf/server.xml`。 */
+/** `pull [--if-configured] [workdir]`：按环境变量下载并替换 `<workdir>/conf/server.xml`。 */
 int runPull(string[] args, bool allowHttp = true) {
-  string confFile;
   string workdir;
   bool ifConfigured;
   foreach (arg; args) {
-    if (arg.startsWith("--file=")) {
-      confFile = strip(arg["--file=".length .. $]);
-    } else if (arg == "--if-configured") {
+    if (arg == "--if-configured") {
       ifConfigured = true;
     } else if (arg == "--help" || arg == "-h") {
       pullUsage();
@@ -66,19 +63,16 @@ int runPull(string[] args, bool allowHttp = true) {
   }
   workdir = absolutePath(workdir);
 
-  if (!confFile.length)
-    confFile = remoteConfPath(workdir);
   RemoteConfig remote;
   try {
-    remote = loadRemoteConf(confFile);
+    remote = loadRemoteEnv();
     if (!remote.complete) {
       if (ifConfigured && !remote.configured)
         return 0;
-      stderr.writeln("basagent pull: warning: remote is not configured in " ~ confFile
-          ~ "; server.xml was not refreshed.");
+      stderr.writeln("basagent pull: BAS_PRINCIPAL/BAS_TOKEN are not set; server.xml was not refreshed.");
       return 0;
     }
-    validateRemoteConf(remote, confFile, allowHttp);
+    validateRemoteConf(remote, "environment", allowHttp);
   } catch (Exception e) {
     stderr.writeln("basagent pull: " ~ e.msg);
     return 1;
@@ -108,10 +102,10 @@ int runPull(string[] args, bool allowHttp = true) {
 
 /** 打印 `pull` 用法到 stderr。 */
 void pullUsage() {
-  stderr.writeln("Usage: basagent pull [--file=<basctl.conf>] [--if-configured] [workdir]");
-  stderr.writeln("  Fetch <remote.url>/api/bashub/config/<remote.project>/server into <workdir>/conf,");
-  stderr.writeln("  authenticating with Bearer <remote.project>:<remote.token> from");
-  stderr.writeln("  <workdir>/conf/basctl.conf. The old");
+  stderr.writeln("Usage: basagent pull [--if-configured] [workdir]");
+  stderr.writeln("  Fetch <BAS_PRINCIPAL url>/api/bashub/config/<project>/server into <workdir>/conf,");
+  stderr.writeln("  authenticating with Bearer <project>:<BAS_TOKEN> from");
+  stderr.writeln("  <workdir>/conf/server.xml. The old");
   stderr.writeln("  file is backed up as server_old.xml. <workdir> defaults to $BAS_HOME (or the");
   stderr.writeln("  current directory). --if-configured exits silently when all remote fields");
   stderr.writeln("  are empty (the generated template uses this mode).");

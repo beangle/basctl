@@ -256,7 +256,7 @@ private void startUsage() {
   stderr.writeln("Usage: basctl start [server.xml] <farm|server|all> [--port-range=<from>-<to>]");
   stderr.writeln("  <server http=\"0\"> (or no http attribute) gets a free port from the range");
   stderr.writeln("  (default " ~ defaultPortRangeText ~ "), recorded in servers/<name>/server.info.");
-  stderr.writeln("  with [remote] in conf/basctl.conf the host/instance snapshot is pushed once (best effort;");
+  stderr.writeln("  with BAS_PRINCIPAL/BAS_TOKEN the host/instance snapshot is pushed once (best effort;");
   stderr.writeln("  see docs/channel-protocol.md).");
 }
 
@@ -370,7 +370,7 @@ private void stopUsage() {
   stderr.writeln("  SIGTERMs the pid recorded in servers/<name>/server.info and waits "
       ~ defaultStopTimeoutSec.to!string
       ~ "s by default; --force SIGKILLs at once.");
-  stderr.writeln("  with [remote] in conf/basctl.conf the host/instance snapshot is pushed once (best effort).");
+  stderr.writeln("  with BAS_PRINCIPAL/BAS_TOKEN the host/instance snapshot is pushed once (best effort).");
 }
 
 /** 单个实例的停止结果。 */

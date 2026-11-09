@@ -19,7 +19,6 @@ module test.init_test;
 
 import bas.fsutil : setExecutable;
 import bas.init : installScripts, runInit;
-import bas.remote : parseRemoteConf;
 
 import std.algorithm : canFind;
 import std.file : exists, readText, rmdirRecurse, tempDir, write;
@@ -95,24 +94,18 @@ private string fakeBasagent(string root) {
   assert(readText(bas).canFind("basctl_cmd"));
 }
 
-@("installScripts writes a commented basctl.conf template with empty remote fields") unittest {
+@("installScripts writes a basctl.env template with empty remote fields") unittest {
   auto root = newRoot("remote-template");
   scope (exit) if (exists(root)) rmdirRecurse(root);
 
   auto result = installScripts(root, false, false);
   assert(result.confWritten);
 
-  auto conf = buildPath(root, "conf", "basctl.conf");
+  auto conf = buildPath(root, "conf", "basctl.env");
   auto text = readText(conf);
-  assert(text.canFind("# basctl.conf"), text);
-  assert(text.canFind("[remote]"), text);
-  assert(text.canFind("url ="), text);
-  assert(text.canFind("project ="), text);
-  assert(text.canFind("token ="), text);
-
-  auto remote = parseRemoteConf(text);
-  assert(!remote.complete);
-  assert(!remote.url.length && !remote.project.length && !remote.token.length);
+  assert(text.canFind("# basctl.env"), text);
+  assert(text.canFind("BAS_PRINCIPAL="), text);
+  assert(text.canFind("BAS_TOKEN="), text);
 
   version (Posix) {
     import core.sys.posix.sys.stat : lstat, stat_t;
@@ -135,16 +128,16 @@ private string fakeBasagent(string root) {
   assert(!exists(root));
 }
 
-@("installScripts never rewrites conf/basctl.conf, even with force") unittest {
+@("installScripts never rewrites conf/basctl.env, even with force") unittest {
   auto root = newRoot("remote-conf");
   scope (exit) if (exists(root)) rmdirRecurse(root);
 
   installScripts(root, false, false);
-  auto conf = buildPath(root, "conf", "basctl.conf");
-  write(conf, "[remote]\nurl = https://hub.example.com\n");
+  auto conf = buildPath(root, "conf", "basctl.env");
+  write(conf, "BAS_PRINCIPAL=openurp.prod@https://hub.example.com\n");
 
   installScripts(root, true, false);
-  assert(readText(conf) == "[remote]\nurl = https://hub.example.com\n");
+  assert(readText(conf) == "BAS_PRINCIPAL=openurp.prod@https://hub.example.com\n");
 }
 
 @("runInit rejects unknown options") unittest {

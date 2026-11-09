@@ -451,7 +451,7 @@ import std.exception : assertThrown;
   assert(deps.canFind("ch.qos.logback:logback-core:1.6.3"));
 }
 
-@("remote placeholders expand from basctl.conf instead of environment") unittest {
+@("remote placeholders expand from the supplied remote config") unittest {
   auto cfg = parseServerXml(`<bas version="0.14.0">
       <snapshot-repo remote="${bas_remote_url}/maven" token="${bas_remote_token}"/>
       <engines><engine name="tomcat" type="tomcat-server" version="11.0.26"/></engines>

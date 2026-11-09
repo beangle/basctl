@@ -39,8 +39,7 @@ import bas.hub : agentUrl;
 import bas.logs : agentLog, consoleLog, countLines, maxLogLines, plainName, readLogWindow;
 import bas.net : hostName, localAddresses;
 import bas.pull : runPull;
-import bas.remote : RemoteConfig, agentChannelUrl, bearerCredential, loadRemoteConf, remoteConfFileName,
-  validateRemoteConf;
+import bas.remote : RemoteConfig, agentChannelUrl, bearerCredential, loadRemoteEnv, validateRemoteConf;
 import bas.report : basReport, healthReport, osReport;
 import bas.starter : serviceAction;
 
@@ -112,7 +111,7 @@ private final class RoleState {
   bool stopHub;
 }
 
-/** 一次会话需要的全部输入。地址与 token 都来自同目录 `conf/basctl.conf`，没有第二处来源。 */
+/** 一次会话需要的全部输入。地址与 token 都来自 `BAS_PRINCIPAL` / `BAS_TOKEN`。 */
 struct AgentContext {
   string endpoint;
   /** 握手凭证：`<project>:<Project.key>`。 */
@@ -156,17 +155,17 @@ int runAgent(string configFile, string basctlVersion, string[] rest) {
     stderr.writeln("basagent: cannot find config file " ~ configFile);
     return 1;
   }
-  auto remotePath = agentRemotePath(configFile);
-  auto remote = loadRemoteConf(remotePath);
+  auto remote = loadRemoteEnv();
   if (!channelEnabled(remote)) {
-    stderr.writeln("basagent: warning: remote is not configured in " ~ remotePath
-        ~ "; agent not started.");
+    stderr.writeln("basagent: warning: BAS_PRINCIPAL/BAS_TOKEN are not set; agent not started.");
     return 0;
   }
-  // 启动时先对齐 hub 的 server.xml；拉取失败才使用本地旧配置。
+  // 启动时先对齐 hub 的 server.xml；没有本地 fallback，拉取失败即启动失败。
   auto bootHome = dirName(dirName(absolutePath(configFile)));
-  if (runPull([bootHome], true) != 0)
-    logWarn("channel: startup pull failed, using local server.xml");
+  if (runPull([bootHome], true) != 0) {
+    stderr.writeln("basagent: startup pull failed");
+    return 1;
+  }
   AgentContext ctx;
   try {
     ctx = agentContext(parseServerXmlFile(configFile), remote, configFile, basctlVersion, false);
@@ -208,21 +207,15 @@ int runReport(string configFile, string basctlVersion, string[] rest) {
   return code;
 }
 
-/** `[remote] url/project/token` 齐全即启用通道；文件不存在或字段缺失都静默跳过。 */
+/** 两项环境变量齐全即启用通道；只设置一项会在读取时报错。 */
 bool channelEnabled(const RemoteConfig remote) {
   return remote.complete;
 }
 
-/** 与 `server.xml` 同目录的 `basctl.conf`。 */
-private string agentRemotePath(string configFile) {
-  return buildPath(dirName(configFile), remoteConfFileName);
-}
-
-/** 组装上下文：地址、Project 与 token 全部来自同目录 `basctl.conf`。 */
+/** 组装上下文：地址、Project 与 token 全部来自环境变量。 */
 AgentContext agentContext(const Container conf, string configFile, string basctlVersion, bool once) {
-  auto remotePath = agentRemotePath(configFile);
-  auto remote = loadRemoteConf(remotePath);
-  validateRemoteConf(remote, remotePath, true);
+  auto remote = loadRemoteEnv();
+  validateRemoteConf(remote, "environment", true);
   return agentContext(conf, remote, configFile, basctlVersion, once);
 }
 
@@ -1051,10 +1044,9 @@ private void sendHealth(const AgentContext ctx, scope WebSocket ws) {
 private bool refreshBeforeService(ref AgentContext ctx) {
   // start/restart 一律先拉 hub 的 server.xml；follower 也一样，
   // 否则 master 侧的新配置不会反映到本机实例动作上。
-  auto remotePath = agentRemotePath(ctx.configFile);
   try {
-    auto remote = loadRemoteConf(remotePath);
-    validateRemoteConf(remote, remotePath, true);
+    auto remote = loadRemoteEnv();
+    validateRemoteConf(remote, "environment", true);
   } catch (Exception e) {
     logWarn("channel: service postponed, remote config is not usable: %s", e.msg);
     return false;

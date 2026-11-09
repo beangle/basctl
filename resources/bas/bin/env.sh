@@ -11,6 +11,13 @@ if [ "$(id -u)" = 0 ]; then
   exit 1
 fi
 
+# 手工执行 bin/*.sh 时也从 conf/basctl.env 注入远程配置；systemd 服务另有 EnvironmentFile。
+if [ -f "$BAS_HOME/conf/basctl.env" ]; then
+  set -a
+  . "$BAS_HOME/conf/basctl.env"
+  set +a
+fi
+
 if [ -z "$M2_REMOTE_REPO" ]; then
   export M2_REMOTE_REPO="https://maven.aliyun.com/nexus/content/groups/public"
 fi

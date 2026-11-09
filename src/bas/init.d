@@ -19,7 +19,7 @@
  *
  * 脚本内嵌在本二进制里（`resources/bas/bin/`），随 basctl 版本发布，避免发行包与
  * basctl 版本错配。已存在的脚本默认保留（用户可能改过），`--force` 才覆盖；
- * `conf/basctl.conf` 只在不存在时生成一份带注释、字段留空的模板（0600），已有文件
+ * `conf/basctl.env` 只在不存在时生成一份带注释、字段留空的模板（0600），已有文件
  * 一律保留，`--force` 也不覆盖。`bin/setenv.sh` 与 `conf/server.xml` 属用户配置，
  * 本命令不生成。
  */
@@ -39,8 +39,8 @@ import std.string : startsWith, strip;
 private immutable string[] scriptNames =
   ["env.sh", "bas.sh", "start.sh", "stop.sh", "restart.sh"];
 
-/** 内嵌的 `conf/basctl.conf` 注释模板；三项留空，不会意外启用远端。 */
-private enum remoteConfTemplate = import("bas/init/basctl.conf");
+/** 内嵌的 `conf/basctl.env` 注释模板；两项留空，不会意外启用远端。 */
+private enum remoteConfTemplate = import("bas/init/basctl.env");
 
 /** 取某个内嵌脚本的内容（相对 `resources/` 的路径）。 */
 string scriptBody(string name) {
@@ -60,7 +60,7 @@ string scriptBody(string name) {
   }
 }
 
-/** `installScripts` 的结果：脚本与 `basctl.conf` 的写入 / 保留情况。 */
+/** `installScripts` 的结果：脚本与 `basctl.env` 的写入 / 保留情况。 */
 struct InitResult {
   int written;
   int kept;
@@ -71,7 +71,7 @@ struct InitResult {
 /**
  * 把内嵌控制脚本铺到 `workdir/bin/`，建好 `conf/`，并在配置不存在时生成注释模板。
  *
- * 已存在的脚本默认保留，`force` 才覆盖；`basctl.conf` 一旦存在就永不覆盖。
+ * 已存在的脚本默认保留，`force` 才覆盖；`basctl.env` 一旦存在就永不覆盖。
  * `dryRun` 只打印动作、不落盘。
  */
 InitResult installScripts(string workdir, bool force = false, bool dryRun = false) {
@@ -160,7 +160,7 @@ void initUsage() {
   stderr.writeln("Usage: basctl init [--force] [--dry-run] [workdir]");
   stderr.writeln("  Install the control scripts (env.sh, bas.sh, start.sh, stop.sh,");
   stderr.writeln("  restart.sh) into <workdir>/bin and create <workdir>/conf. When");
-  stderr.writeln("  conf/basctl.conf is absent, write a commented 0600 template with empty");
+  stderr.writeln("  conf/basctl.env is absent, write a commented 0600 template with empty");
   stderr.writeln("  remote fields; an existing file is never overwritten. Existing scripts");
   stderr.writeln("  are kept unless --force is given. <workdir> defaults to $BAS_HOME (or");
   stderr.writeln("  the current directory).");

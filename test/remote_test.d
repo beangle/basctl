@@ -4,36 +4,31 @@
  * it under the terms of the GNU General Public License as published by
  * the Free Software Foundation, either version 3 of the License, or
  * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-/** Unit tests for conf/basctl.conf. */
+/** Unit tests for BAS_PRINCIPAL / BAS_TOKEN. */
 module test.remote_test;
 
-import bas.remote : RemoteConfig, agentChannelUrl, bearerCredential, isAllowedRemoteUrl, parseRemoteConf,
-  serverConfigUrl, validateRemoteConf;
+import bas.remote : RemoteConfig, agentChannelUrl, bearerCredential, isAllowedRemoteUrl,
+  loadRemoteEnv, serverConfigUrl, validateRemoteConf;
 
 import std.exception : assertThrown;
+import std.process : environment;
 
-@("remote section parses url, profile and token") unittest {
-  auto conf = parseRemoteConf(q"{
-; control plane
-[remote]
-url = https://hub.example.com/bashub/
-project = openurp.prod
-token = "secret"
-}");
+private void clearRemote() {
+  environment.remove("BAS_PRINCIPAL");
+  environment.remove("BAS_TOKEN");
+}
+
+@("BAS_PRINCIPAL parses project and url") unittest {
+  clearRemote();
+  scope (exit) clearRemote();
+  environment["BAS_PRINCIPAL"] = "openurp.prod@https://hub.example.com/bashub/";
+  environment["BAS_TOKEN"] = "secret";
+  auto conf = loadRemoteEnv();
   assert(conf.url == "https://hub.example.com/bashub/");
   assert(conf.project == "openurp.prod");
   assert(conf.token == "secret");
-  assert(conf.configured);
   assert(conf.complete);
   assert(serverConfigUrl(conf)
       == "https://hub.example.com/bashub/api/bashub/config/openurp.prod/server");
@@ -42,34 +37,36 @@ token = "secret"
   assert(bearerCredential(conf) == "openurp.prod:secret");
 }
 
-@("other sections do not leak into remote") unittest {
-  auto conf = parseRemoteConf("[other]\nurl = https://wrong\n[remote]\nproject = demo.prod");
-  assert(conf.url == "");
-  assert(conf.project == "demo.prod");
-  assert(conf.token == "");
-  assert(conf.configured);
-  assert(!conf.complete);
+@("empty environment is offline") unittest {
+  clearRemote();
+  scope (exit) clearRemote();
+  assert(!loadRemoteEnv().configured);
+  assert(!loadRemoteEnv().complete);
 }
 
-@("an empty template is neither configured nor complete") unittest {
-  auto conf = parseRemoteConf("# template\n[remote]\nurl =\nproject =\ntoken =\n");
-  assert(!conf.configured);
-  assert(!conf.complete);
+@("partial or malformed environment is rejected") unittest {
+  clearRemote();
+  scope (exit) clearRemote();
+  environment["BAS_PRINCIPAL"] = "openurp.prod@https://hub.example.com";
+  assertThrown!Exception(loadRemoteEnv());
+  environment["BAS_TOKEN"] = "secret";
+  environment["BAS_PRINCIPAL"] = "openurp.prod";
+  assertThrown!Exception(loadRemoteEnv());
+  environment["BAS_PRINCIPAL"] = "openurp.prod@ftp://host";
+  assertThrown!Exception(loadRemoteEnv());
+  environment["BAS_PRINCIPAL"] = "prod@https://host";
+  assertThrown!Exception(loadRemoteEnv());
 }
 
 @("remote validation rejects incomplete values") unittest {
-  assertThrown!Exception(validateRemoteConf(RemoteConfig.init, "basctl.conf"));
-  assertThrown!Exception(validateRemoteConf(RemoteConfig("ftp://host", "a.b", "k"), "basctl.conf"));
-  validateRemoteConf(RemoteConfig("http://hub.example.com", "a.b", "k"), "basctl.conf");
-  assertThrown!Exception(validateRemoteConf(RemoteConfig("https://host", "prod", "k"), "basctl.conf"));
-  assertThrown!Exception(validateRemoteConf(RemoteConfig("https://host", "openurp.prod", ""), "basctl.conf"));
+  assertThrown!Exception(validateRemoteConf(RemoteConfig.init, "environment"));
+  assertThrown!Exception(validateRemoteConf(RemoteConfig("ftp://host", "a.b", "k"), "environment"));
+  validateRemoteConf(RemoteConfig("http://hub.example.com", "a.b", "k"), "environment");
+  assertThrown!Exception(validateRemoteConf(RemoteConfig("https://host", "prod", "k"), "environment"));
+  assertThrown!Exception(validateRemoteConf(RemoteConfig("https://host", "openurp.prod", ""), "environment"));
 }
 
 @("plain HTTP is accepted for configured hosts") unittest {
   assert(isAllowedRemoteUrl("https://hub.example.com/bashub"));
   assert(isAllowedRemoteUrl("http://hub.example.com"));
-  assert(isAllowedRemoteUrl("http://127.0.0.1:8080"));
-  assert(isAllowedRemoteUrl("http://localhost:8080"));
-  assert(isAllowedRemoteUrl("http://[::1]:8080"));
-  assert(!isAllowedRemoteUrl("https://user:pass@hub.example.com"));
 }

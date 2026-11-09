@@ -60,7 +60,7 @@ install -m 0644 "$BASCTL_HOME/resources/logrotate/bas" etc/logrotate.d/bas
 basctl_stage_runtime_home "$PKGDIR"
 # DEB 的 conffiles 要求文件在包内；remove 会保留它，只有 purge 才删除。
 install -d -m 0755 "$PKGDIR/var/lib/bas/conf"
-install -m 0600 "$BASCTL_HOME/resources/bas/init/basctl.conf" "$PKGDIR/var/lib/bas/conf/basctl.conf"
+install -m 0600 "$BASCTL_HOME/resources/bas/init/basctl.env" "$PKGDIR/var/lib/bas/conf/basctl.env"
 
 # DEBIAN 控制文件
 mkdir -p DEBIAN
@@ -87,7 +87,7 @@ EOF
 
 # basagent 以专用账号 bas:beangle 由 systemd 常驻。
 cat > DEBIAN/conffiles << 'EOF'
-/var/lib/bas/conf/basctl.conf
+/var/lib/bas/conf/basctl.env
 /etc/logrotate.d/bas
 EOF
 
@@ -110,7 +110,7 @@ chown bas:beangle /var/lib/bas /var/log/bas /var/log/bas/agent
 chown -R bas:beangle /var/lib/bas/bin /var/lib/bas/conf
 chmod 0750 /var/lib/bas /var/lib/bas/bin /var/lib/bas/conf /var/log/bas
 chmod 0755 /var/lib/bas/bin/*.sh
-chmod 0600 /var/lib/bas/conf/basctl.conf
+chmod 0600 /var/lib/bas/conf/basctl.env
 chmod 0700 /var/log/bas/agent
 if [ ! -e /var/lib/bas/logs ]; then
   ln -s /var/log/bas /var/lib/bas/logs

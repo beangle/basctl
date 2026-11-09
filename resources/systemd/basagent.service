@@ -10,6 +10,7 @@ User=bas
 Group=beangle
 Environment=HOME=/var/lib/bas
 Environment=BAS_HOME=/var/lib/bas
+EnvironmentFile=-/var/lib/bas/conf/basctl.env
 EnvironmentFile=-/etc/sysconfig/basagent
 EnvironmentFile=-/etc/default/basagent
 WorkingDirectory=/var/lib/bas

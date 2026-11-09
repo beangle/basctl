@@ -24,7 +24,7 @@
 module bas.config;
 
 import bas.artifact;
-import bas.remote : RemoteConfig, remoteBaseUrl, remoteConfForServerXml;
+import bas.remote : RemoteConfig, loadRemoteEnv, remoteBaseUrl;
 
 import std.algorithm : canFind, endsWith, map, sort, startsWith;
 import std.array : array, join, split;
@@ -894,7 +894,7 @@ Container parseServerXml(string xmlText, RemoteConfig remote = RemoteConfig.init
 Container parseServerXmlFile(string path) {
   import std.file : readText;
 
-  return parseServerXml(readText(path), remoteConfForServerXml(path));
+  return parseServerXml(readText(path), loadRemoteEnv());
 }
 
 /** 本机 setline 的实际入口；`enabled=false` 表示本机不参与 setline。 */

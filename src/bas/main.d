@@ -123,7 +123,7 @@ void printUsage() {
   stderr.writeln("  status                        Show running servers under $BAS_HOME/servers");
   stderr.writeln("  logs [server.xml] <instance>  Print the tail of logs/<instance>/console.out");
   stderr.writeln("                                (-n <lines> default 50, -f to keep following)");
-  stderr.writeln("  init [--force] [workdir]      Install control scripts and a conf/basctl.conf template");
+  stderr.writeln("  init [--force] [workdir]      Install control scripts and a conf/basctl.env template");
   stderr.writeln("  make [server.xml] <pattern>   Generate specs and resolve dependencies (no start)");
   stderr.writeln("  make <type> [options]         Prepare a container for jstart `[engine] init` (creator)");
   stderr.writeln("  resolve <server.xml> [pattern...]  Resolve webapps only");

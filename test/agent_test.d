@@ -26,7 +26,9 @@ module test.agent_test;
 
 import bas.agent : agentLogResult, channelEnabled, logReadResult, runAgent, runReport, serviceResult;
 import bas.channel : Envelope, parseEnvelope;
-import bas.remote : loadRemoteConf;
+import bas.remote : loadRemoteEnv;
+import std.exception : assertThrown;
+import std.process : environment;
 
 import core.thread : Thread;
 import core.time : dur;
@@ -39,6 +41,7 @@ import std.digest.sha : sha1Of;
 import std.file : mkdirRecurse, tempDir, write;
 import std.json : JSONValue, parseJSON;
 import std.path : buildPath;
+import std.process : environment;
 import std.socket : AddressFamily, InternetAddress, Socket, SocketOption, SocketOptionLevel,
   SocketType;
 import std.string : indexOf, representation, strip;
@@ -51,8 +54,12 @@ import std.uuid : randomUUID;
 
   auto hub = new FakeHub();
   write(configFile, "<bas version=\"0.14.0\"/>");
-  write(buildPath(home, "conf", "basctl.conf"), "[remote]\nurl = http://127.0.0.1:"
-      ~ hub.port.to!string ~ "\nproject = demo.prod\ntoken = k1\n");
+  environment["BAS_PRINCIPAL"] = "demo.prod@http://127.0.0.1:" ~ hub.port.to!string;
+  environment["BAS_TOKEN"] = "k1";
+  scope (exit) {
+    environment.remove("BAS_PRINCIPAL");
+    environment.remove("BAS_TOKEN");
+  }
 
   auto serving = new Thread({ hub.serve(); });
   serving.start();
@@ -87,18 +94,19 @@ import std.uuid : randomUUID;
   assert(("declared" in bas.body.object) !is null, hub.messages[2]);
 }
 
-@("channel is enabled only by a complete basctl.conf [remote] section") unittest {
-  auto home = buildPath(tempDir(), "basctl-agent-switch-" ~ randomUUID().toString);
-  mkdirRecurse(buildPath(home, "conf"));
-  auto configFile = buildPath(home, "conf", "server.xml");
-  auto remoteFile = buildPath(home, "conf", "basctl.conf");
-  write(configFile, "<bas version=\"0.14.0\"/>");
-  assert(!channelEnabled(loadRemoteConf(remoteFile)), "没有 basctl.conf 就不该拨号");
-  write(remoteFile, "[remote]\nurl = http://127.0.0.1:8080\nproject = demo\n");
-  assert(!channelEnabled(loadRemoteConf(remoteFile)), "缺 token 不启用");
+@("channel is enabled only by complete BAS_PRINCIPAL/BAS_TOKEN") unittest {
+  environment.remove("BAS_PRINCIPAL");
+  environment.remove("BAS_TOKEN");
+  assert(!channelEnabled(loadRemoteEnv()), "没有环境变量就不该拨号");
+  environment["BAS_PRINCIPAL"] = "demo.prod@http://127.0.0.1:8080";
+  assertThrown!Exception(loadRemoteEnv(), "缺 token 必须报错");
 
-  write(remoteFile, "[remote]\nurl = http://127.0.0.1:8080\nproject = demo\ntoken = k1\n");
-  assert(channelEnabled(loadRemoteConf(remoteFile)), "三项齐全就是启用");
+  environment["BAS_TOKEN"] = "k1";
+  scope (exit) {
+    environment.remove("BAS_PRINCIPAL");
+    environment.remove("BAS_TOKEN");
+  }
+  assert(channelEnabled(loadRemoteEnv()), "两项齐全就是启用");
 }
 
 @("agent warns and exits cleanly when remote is not configured") unittest {
@@ -106,6 +114,8 @@ import std.uuid : randomUUID;
   mkdirRecurse(buildPath(home, "conf"));
   auto configFile = buildPath(home, "conf", "server.xml");
   write(configFile, "<bas version=\"0.14.0\"/>");
+  environment.remove("BAS_PRINCIPAL");
+  environment.remove("BAS_TOKEN");
 
   assert(runAgent(configFile, "0.0.0-test", []) == 0);
 }

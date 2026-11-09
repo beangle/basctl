@@ -15,7 +15,7 @@
  */
 
 /**
- * `conf/basctl.conf`：basctl 与控制台之间的远程连接配置。
+ * `BAS_PRINCIPAL` / `BAS_TOKEN`：basctl 与控制台之间的远程连接配置。
  *
  * 远程地址、Project 名与凭证都只从这里读取；`pull` 不再依赖 `ip:` 请求头，也不再
  * 从环境变量推断控制台地址。文件格式是简单的 INI：
@@ -34,23 +34,24 @@
 module bas.remote;
 
 import std.file : exists, readText;
+import std.process : environment;
 import std.path : buildPath, dirName;
 import std.string : indexOf, lastIndexOf, splitLines, strip, toLower;
 
 /** 配置文件相对 `BAS_HOME/conf` 的文件名。 */
-enum remoteConfFileName = "basctl.conf";
+enum remoteConfFileName = "basctl.env";
 
 /** bashub API 的固定根路径。 */
 private enum bashubApiPath = "/api/bashub";
 
-/** Raised when `basctl.conf` is incomplete or malformed enough to use. */
+/** Raised when the remote environment is incomplete or malformed. */
 class RemoteConfigException : Exception {
   this(string msg, string file = __FILE__, size_t line = __LINE__, Throwable nextInChain = null) {
     super(msg, file, line, nextInChain);
   }
 }
 
-/** `[remote]` 段的三个字段；空字段表示尚未配置。 */
+/** 远程连接信息；空字段表示尚未配置。 */
 struct RemoteConfig {
   string url;
   string project;
@@ -67,73 +68,42 @@ struct RemoteConfig {
   }
 }
 
-/** `<BAS_HOME>/conf/basctl.conf`。 */
-string remoteConfPath(string basHome) {
-  return buildPath(basHome, "conf", remoteConfFileName);
-}
-
-/** 与 `server.xml` 同目录的 `basctl.conf`。 */
-RemoteConfig remoteConfForServerXml(string serverXmlPath) {
-  return loadRemoteConf(buildPath(dirName(serverXmlPath), remoteConfFileName));
-}
-
-/** 读取配置；文件不存在时返回空配置，由调用方决定是报错还是跳过。 */
-RemoteConfig loadRemoteConf(string path) {
-  if (!exists(path))
+/// 从进程环境读取 `BAS_PRINCIPAL` / `BAS_TOKEN`；两者都为空表示离线。
+RemoteConfig loadRemoteEnv() {
+  auto principal = environment.get("BAS_PRINCIPAL", "").strip;
+  auto token = environment.get("BAS_TOKEN", "").strip;
+  if (principal.length == 0 && token.length == 0)
     return RemoteConfig.init;
-  return parseRemoteConf(readText(path));
+  if (principal.length == 0 || token.length == 0)
+    throw new RemoteConfigException("BAS_PRINCIPAL and BAS_TOKEN must be set together");
+  auto at = principal.indexOf('@');
+  if (at <= 0 || at == principal.length - 1)
+    throw new RemoteConfigException("BAS_PRINCIPAL must be project@url");
+  auto project = principal[0 .. at].strip;
+  auto url = principal[at + 1 .. $].strip;
+  auto conf = RemoteConfig(url, project, token);
+  validateRemoteConf(conf, "environment");
+  return conf;
 }
 
-/** 解析 INI 文本；只识别 `[remote]` 下的 `url` / `project` / `token`。 */
-RemoteConfig parseRemoteConf(string text) {
-  RemoteConfig result;
-  string section;
-  foreach (raw; text.splitLines()) {
-    auto line = strip(raw);
-    if (!line.length || line[0] == '#' || line[0] == ';')
-      continue;
-    if (line[0] == '[') {
-      auto close = line.indexOf(']');
-      section = close > 0 ? strip(line[1 .. close]) : "";
-      continue;
-    }
-    if (section != "remote")
-      continue;
-    auto equals = line.indexOf('=');
-    if (equals <= 0)
-      continue;
-    auto key = strip(line[0 .. equals]);
-    auto value = unquote(line[equals + 1 .. $]);
-    switch (key) {
-    case "url":
-      result.url = value;
-      break;
-    case "project":
-      result.project = value;
-      break;
-    case "token":
-      result.token = value;
-      break;
-    default:
-      break;
-    }
-  }
-  return result;
+/** `${bas_remote_url}` / `${bas_remote_token}` 占位只从环境变量展开。 */
+RemoteConfig remoteConfForServerXml(string serverXmlPath) {
+  return loadRemoteEnv();
 }
 
 /** 校验三项是否齐全以及基本的 URL / Project 形态。 */
 void validateRemoteConf(const RemoteConfig conf, string path, bool allowHttp = true) {
   if (!conf.url.length)
-    throw new RemoteConfigException("No remote.url in " ~ path);
+    throw new RemoteConfigException("No url in BAS_PRINCIPAL in " ~ path);
   if (!isAllowedRemoteUrl(conf.url, allowHttp))
     throw new RemoteConfigException(
-        "remote.url must use http:// or https:// in " ~ path);
+        "BAS_PRINCIPAL url must use http:// or https:// in " ~ path);
   if (!conf.project.length)
-    throw new RemoteConfigException("No remote.project in " ~ path);
+    throw new RemoteConfigException("No project in BAS_PRINCIPAL in " ~ path);
   if (!validProjectName(conf.project))
-    throw new RemoteConfigException("remote.project must be org.name in " ~ path);
+    throw new RemoteConfigException("BAS_PRINCIPAL project must be org.name in " ~ path);
   if (!conf.token.length)
-    throw new RemoteConfigException("No remote.token in " ~ path);
+    throw new RemoteConfigException("BAS_TOKEN is empty");
 }
 
 /** 控制台根地址：去掉首尾空白与尾部斜杠，供 URL 拼接和 `${bas_remote_url}` 展开共用。 */

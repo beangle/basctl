@@ -63,7 +63,7 @@ version (unittest) {
 
   private void usage() {
     stderr.writeln("Usage: basagent [server.xml]");
-    stderr.writeln("       basagent pull [--file=<basctl.conf>] [--if-configured] [workdir]");
+    stderr.writeln("       basagent pull [--if-configured] [workdir]");
     stderr.writeln("       basagent report [server.xml]");
     stderr.writeln("       basagent version");
     stderr.writeln("  Without a subcommand, stay connected to the hub as the local agent.");

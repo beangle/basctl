@@ -21,7 +21,7 @@ docker run -d --name bas -p 8080:8080 -v ~/bas-work:/var/lib/bas basctl:0.0.1
 
 打包细节见 [scripts/README.md](../scripts/README.md)。
 系统包会创建 `bas:beangle` 账号、`/var/lib/bas`、`/var/log/bas`，把控制脚本与
-`conf/basctl.conf` 模板装到 `/var/lib/bas`，并启用 `basagent.service`；basagent 不允许以
+`conf/basctl.env` 模板装到 `/var/lib/bas`，并启用 `basagent.service`；basagent 不允许以
 root 运行。
 
 ## 五分钟上手
@@ -36,20 +36,18 @@ bashub 是配置与实例的远端权威：`bas.sh pull` 从它拉取 `conf/serv
 把本机现状报回去，并接收日志 / 启停指令。先在 bashub 里为这台机器建好 Project，再填写本地配置：
 
 ```sh
-# 1. 系统包已预置控制脚本与 basctl.conf 模板；源码安装或其它目录执行：
+# 1. 系统包已预置控制脚本与 basctl.env 模板；源码安装或其它目录执行：
 # sudo -u bas -H basctl init /var/lib/bas
 
 # 2. 填写模板（已按 0600 安装、含字段说明）
-sudo -u bas -H "${EDITOR:-vi}" /var/lib/bas/conf/basctl.conf
+sudo -u bas -H "${EDITOR:-vi}" /var/lib/bas/conf/basctl.env
 ```
 
-模板结构如下，把三个空值填成 bashub 中这台机器对应的值：
+模板结构如下，把两项填成 bashub 中这台机器对应的值：
 
-```ini
-[remote]
-url = https://hub.example.com
-project = openurp.prod
-token = 9f8e7d6c5b4a39281706f5e4d3c2b1a0
+```sh
+BAS_PRINCIPAL=openurp.prod@https://hub.example.com
+BAS_TOKEN=9f8e7d6c5b4a39281706f5e4d3c2b1a0
 ```
 
 ```sh
@@ -67,15 +65,15 @@ sudo systemctl start basagent.service
 sudo -u bas -H tail -f /var/log/bas/agent/console.out
 ```
 
-把 `url` / `project` / `token` 换成 bashub 中这台机器对应 Project 的值：`project` 必须是
-`org.name`，`token` 就是 `Project.key`。三项齐全才会启用 `pull` 与汇报通道；缺项时按未接入
-处理，不影响本地 `start` / `stop`。`bin/start.sh` / `bin/restart.sh` 只读本地配置，不会隐式
+把 `BAS_PRINCIPAL` / `BAS_TOKEN` 换成 bashub 中这台机器对应 Project 的值：principal 的 project 必须是
+`org.name`，`token` 就是 `Project.key`。两项都设置才启用 `pull` 与汇报通道；只设置一项会报错，
+两项都为空时本地运行，不影响 `start` / `stop`。`bin/start.sh` / `bin/restart.sh` 只读本地配置，不会隐式
 拉取；需要更新时显式执行 `bin/bas.sh pull`。字段说明见下方「远程配置」，失败行为见
 [channel.md](channel.md)。
 
 ### 方式二：不接 bashub，单独使用
 
-只需要 `conf/server.xml`；`init` 生成的空 `conf/basctl.conf` 不影响本地命令：
+只需要 `conf/server.xml`；`init` 生成的空 `conf/basctl.env` 不影响本地命令：
 
 ```sh
 basctl init /opt/bas
@@ -121,7 +119,7 @@ basctl stop all
 | `basctl banner [server.xml]` | 操作者横幅：logo + bas 引擎版本（取自 `<bas version>`）+ basctl 版本 + 本机地址；`bas.sh version` 调它。图形为纯 ASCII，只在交互终端出现，重定向到日志/管道时只剩版本行与本机地址 |
 | `basctl status` | 列出 `$BAS_HOME/servers` 下运行中的实例：读 `server.info` 展示 pid、端口与各 webapp 的对外 url（引擎与启动时间只留在 `server.info` 里，不再打印）。记录 pid 已失效时，会按命令行 `-Dbas.server` + `-Dbas.home` 找回本实例的真实进程；找不到就不出现在这一节（不再打印 `stale`）。 |
 | `basctl logs [server.xml] <farm.server> [-n <行数>] [-f]` | 读 `$BAS_HOME/logs/<farm.server>/console.out` 的尾部：`-n` 缺省 50 行、上限 2000；`-f` 持续跟随（Ctrl-C 退出），日志滚动后自动跟新文件。归档的旧日志在 `logs/archive/`，要查直接读文件 |
-| `basctl init [--force] [--dry-run] [workdir]` | 初始化组件目录：把控制脚本铺到 `<workdir>/bin`，并生成带注释的 `conf/basctl.conf` 模板（已存在则不覆盖） |
+| `basctl init [--force] [--dry-run] [workdir]` | 初始化组件目录：把控制脚本铺到 `<workdir>/bin`，并生成带注释的 `conf/basctl.env` 模板（已存在则不覆盖） |
 | `basctl make [server.xml] <farm\|server\|all>` | 只准备不启动：生成 jstart spec 并 `jstart resolve` 预取依赖 |
 | `basctl resolve <server.xml> [pattern...]` | 只解析 webapp，不生成实例 |
 | `basctl start [server.xml] <farm\|server\|all> [--port-range=<from>-<to>]` | 为实例定端口（`<server http="0">` 时在区间内分配，缺省 `20000-29999`）、写 `server.info`、生成 jstart spec、resolve 并后台启动 |
@@ -129,8 +127,8 @@ basctl stop all
 | `basctl run --engine=<type>-<version> <app>` | 嵌入式运行单个 webapp：`--engine=tomcat-11.0.25` 同时给出容器类型与版本，生成单应用 spec 后前台 `jstart run` |
 | `basctl make <type> [options]` | 容器入口（creator）：把 jstart 的 `[engine] init` 协议翻译成容器启动命令 |
 | `basctl firewall [workdir]` | 按配置交互式配置 firewalld 端口 |
-| `bas.sh pull` | 按 `conf/basctl.conf` 的 `[remote]` 拉取 `conf/server.xml`（底层调用 `basagent pull`）：地址为 `<url>/api/bashub/config/<project>/server`，请求用 `Authorization: Bearer <project>:<token>`；旧配置备份为 `server_old.xml`。未配置 `[remote]` 时告警并以 0 退出，配置无效或下载失败时非 0 |
-| `basagent report [server.xml]` | 连一次控制台（bashub）报一次主机与实例现状后退出；地址与凭证都取同目录 `basctl.conf` 的 `[remote]`，报上去了退出码才是 0。见 [channel.md](channel.md) |
+| `bas.sh pull` | 按 `BAS_PRINCIPAL` / `BAS_TOKEN` 拉取 `conf/server.xml`（底层调用 `basagent pull`）：地址为 `<url>/api/bashub/config/<project>/server`，请求用 `Authorization: Bearer <project>:<token>`；旧配置备份为 `server_old.xml`。未配置 `BAS_PRINCIPAL` / `BAS_TOKEN` 时告警并以 0 退出，配置无效或下载失败时非 0 |
+| `basagent report [server.xml]` | 连一次控制台（bashub）报一次主机与实例现状后退出；地址与凭证取自环境变量，报上去了退出码才是 0。见 [channel.md](channel.md) |
 | `basagent [server.xml]` | 常驻：连上控制台后周期上报、回保活、执行固定指令（取日志 / 启停实例），断线自动重连；远程 `service:start` / `service:restart` 执行前会先拉取一次配置，`stop` 不拉取 |
 | `systemctl start/stop/restart basagent.service` | 管理系统级常驻 agent；运行账号固定为 `bas:beangle`。单元设置 `KillMode=process`：停止、重启或升级 agent 只结束 agent 自己，不会停掉实例（包括控制台 `service:start` 拉起的那些） |
 | `basctl doctor [server.xml]` | 检查 `java`（必需）与 `jstart`（可选提示）；必需项缺失时退出码非 0 |
@@ -170,23 +168,23 @@ bas 组件目录。RPM/DEB 安装包已经把同一套文件铺到标准目录 `
 `init`。常驻 agent 由系统级 systemd 管理，不再生成 `agent/agent.pid` 或
 `agent/console.out`；标准安装中实例日志位于 `/var/log/bas`，并通过
 `/var/lib/bas/logs` 符号链接保持原有路径。若
-`conf/basctl.conf` 不存在，还会生成一份带注释、`[remote]` 三项留空的模板，权限为 `0600`。
+`conf/basctl.env` 不存在，还会生成一份带注释、两项留空的模板，权限为 `0600`。
 脚本与模板都内嵌在 basctl 里，随 basctl 版本发布，不再依赖单独的发行包：
 
 ```sh
-basctl init /opt/bas           # 写入 bin/*.sh 与 basctl.conf 模板（已存在的文件保留）
-basctl init --force /opt/bas   # 覆盖为当前 basctl 内置的脚本（仍不覆盖 basctl.conf）
+basctl init /opt/bas           # 写入 bin/*.sh 与 basctl.env 模板（已存在的文件保留）
+basctl init --force /opt/bas   # 覆盖为当前 basctl 内置的脚本（仍不覆盖 basctl.env）
 basctl init --dry-run /opt/bas # 只打印将会写入的文件
 ```
 
-`conf/basctl.conf` 一旦存在就永不覆盖，`--force` 也只作用于脚本；`bin/setenv.sh` 与
+`conf/basctl.env` 一旦存在就永不覆盖，`--force` 也只作用于脚本；`bin/setenv.sh` 与
 `conf/server.xml` 是用户配置，`init` 不生成。使用系统包时，升级会刷新 `bin/*.sh`，并保留已有
-的 `basctl.conf`。RPM 把模板放在 `/usr/share/basctl/basctl.conf`，`%post` 只在
-`/var/lib/bas/conf/basctl.conf` 缺失时生成，并以 `%ghost` 登记——卸载、重装、升级都不会覆盖或
+的 `basctl.env`。RPM 把模板放在 `/usr/share/basctl/basctl.env`，`%post` 只在
+`/var/lib/bas/conf/basctl.env` 缺失时生成，并以 `%ghost` 登记——卸载、重装、升级都不会覆盖或
 删除它；DEB 仍按 conffile 安装，`apt remove` 保留、`apt purge` 才删除。非系统包目录仍可在
 升级 basctl 后重跑 `basctl init --force`。不再有单独的发行包 zip（原 `bas.sh update` 已移除）。
 
-> **`conf/basctl.conf` 是用户配置，卸载、重装、升级都不得删除或覆盖。** RPM 不要把它改回
+> **`conf/basctl.env` 是用户配置，卸载、重装、升级都不得删除或覆盖。** RPM 不要把它改回
 > `%files` 里的普通 `%config`，也不要在 `%preun`/`%postun` 里 `rm`；模板 + 缺失时生成 + `%ghost`
 > 是唯一入口。DEB 的 conffile 语义是 `apt remove` 保留、`apt purge` 删除。
 
@@ -196,20 +194,19 @@ basctl init --dry-run /opt/bas # 只打印将会写入的文件
 `/usr/lib/systemd/system/basagent.service` 并 `systemctl daemon-reload`，再替换二进制；
 直接用新包升级时 `%post` 会先 `daemon-reload` 再 `try-restart`，实例不受影响。
 
-## 远程配置 `conf/basctl.conf`
+## 远程配置 `conf/basctl.env`
 
-控制台连接只从 `conf/basctl.conf` 读取，不再使用 `bas_remote_*` 环境变量，也不靠 `ip:` 请求头
-识别机器。文件是简单 INI，只识别 `[remote]` 段；格式见上面的「接入 bashub」示例。
+控制台连接只从环境变量读取；`conf/basctl.env` 是 systemd 的 `EnvironmentFile`，手工执行
+`bin/*.sh` 时由 `bin/env.sh` 自动加载。不再读取 INI 文件，也不靠 `ip:` 请求头识别机器。
 
-| 字段 | 必填 | 说明 |
+| 变量 | 必填 | 说明 |
 |---|---|---|
-| `url` | 是 | bashub 根地址（有反向代理前缀就连前缀一起写，不要带 `/api/bashub`）。`basagent` 和 `basctl pull` 都允许 `http://` 或 `https://` |
-| `project` | 是 | bashub 里的配置名，必须是 `org.name` |
-| `token` | 是 | 该 Project 的 `key`（bashub 配置详情里可查看/重置） |
+| `BAS_PRINCIPAL` | 是 | `project@url`。project 是 bashub 配置名（`org.name`），url 是根地址（有反向代理前缀就连前缀一起写，不要带 `/api/bashub`） |
+| `BAS_TOKEN` | 是 | 该 Project 的 `key`（bashub 配置详情里可查看/重置） |
 
 运行历史采样由 bashub 控制：agent 不保存采样间隔或时间窗口，只在收到 hub 下发的
 `report:health` 时即时返回实例的 `id` / `state`。采样频率与时间窗口配置在 bashub 的
-`hub.xml`，修改后无需调整各生产机上的 `basctl.conf`。
+`hub.xml`，修改后无需调整各生产机上的 `basctl.env`。
 
 在线页的详细 OS、磁盘和 webapps 信息不参与周期采样：agent 首次连接时发一次完整快照，
 之后由控制台点击“刷新详情”下发 `report:now` 按需获取。
@@ -224,14 +221,15 @@ basctl init --dry-run /opt/bas # 只打印将会写入的文件
   `bin/bas.sh pull`；远程 `service:start` / `service:restart` 由 agent 在动作前拉取一次，拉取失败
   则动作失败；`service:stop` 始终按当前运行信息停机，不会被拉取挡住。
 - `server.xml` 里仍可写 `${bas_remote_url}` / `${bas_remote_token}`，解析时会用
-  `basctl.conf` 的 `remote.url` / `remote.token` 展开，而不是读取环境变量。SNAPSHOT
+  `BAS_PRINCIPAL` / `BAS_TOKEN` 展开。SNAPSHOT
   下载另有自己的 `token`：bashub 会把 Project 的 micdn `<auth download-key>` 写入
   `<snapshot-repo token="...">`；没有配置 key 时不写 `token`，按匿名下载处理。
   SNAPSHOT 也完全以仓库解析结果为准，不再读取 `BAS_HOME/webapps` 下的同名 war 做本地覆盖。
 - 同一个 `<repository>` / `<snapshot-repo>` 有多个 `remote` 时，`token` 可写成与地址
   等长的逗号列表（如 `token="key1,key2"`）；basctl 会合并成
   `--remote=key1@url1,url2` 交给 jstart。空段表示对应仓库匿名，凭证不会跨仓库复用。
-- 文件含凭证；`init` 生成的模板已是 `0600`，手工创建时也建议 `chmod 600 conf/basctl.conf`。
+- 文件含凭证；`init` 生成的模板已是 `0600`，手工创建时也建议 `chmod 600 conf/basctl.env`。
+- 修改环境文件后重启 `basagent.service`；手工执行 `bin/bas.sh pull` 时由 `bin/env.sh` 自动加载。
 
 ## 常见场景
 
@@ -254,7 +252,7 @@ basctl run --engine=tomcat-11.0.25 --print  /repo/app.war   # 只打印将要执
 ### 拉配置与开防火墙
 
 ```sh
-/opt/bas/bin/bas.sh pull          # 读取 /opt/bas/conf/basctl.conf
+/opt/bas/bin/bas.sh pull          # 读取 /opt/bas/conf/basctl.env
 basctl firewall /opt/bas          # 交互式地放行 server.xml 里的端口
 ```
 

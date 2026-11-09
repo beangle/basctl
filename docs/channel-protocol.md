@@ -15,16 +15,16 @@ basagent 与 bashub 之间那条 WebSocket 连接上说什么、怎么说。**�
 | 项 | 取值 |
 |---|---|
 | 路径 | `{remote.url}/api/bashub/monitor/agents/{project}/channel` |
-| `{remote.url}` | `conf/basctl.conf` 的 `[remote] url`，如 `https://hub.example.com` 或 `https://hub.example.com/bas/hub`；`basagent` 允许 HTTP/HTTPS（连接时换成 WS/WSS），`basctl pull` 同样允许 HTTP/HTTPS |
-| 凭证 | `Authorization: Bearer <project>:<[remote] token>`（握手头），token 取值是 bashub 的 `Project.key` |
+| `{remote.url}` | `BAS_PRINCIPAL` 里的 url 部分，如 `https://hub.example.com` 或 `https://hub.example.com/bas/hub`；`basagent` 允许 HTTP/HTTPS（连接时换成 WS/WSS），`basctl pull` 同样允许 HTTP/HTTPS |
+| 凭证 | `Authorization: Bearer <project>:<BAS_TOKEN>`（握手头），token 取值是 bashub 的 `Project.key` |
 | 身份 | `ip: <addr>[,<addr>…]`（握手头）：本机地址，多网卡时全部上报（**回环地址不发**，只有回环的开发机例外）；hub 过滤后只保留与 Host 配置命中的那个作为 `project + server ip` 身份，只顶掉同一 IP 的旧连接 |
 
 - **一个 project 多台机器**：同一 project 的不同机器各持一条连接，互不顶替；hub 靠 `ip` 头区分，
   因此这个头在握手时必填。头里没有合法 IP 时 hub 返回 400；地址合法但不属于该 Project 的
   `ip` / `hosts.ip` 时返回 403（配置里没有任何 IP 也拒绝，不做“没配置就放行”的兜底）。
 - **谁拨号**：basagent 主动出站。生产机多在 NAT 后面，开入站口要申请、要另配一套鉴权；出站只要
-  机器能访问控制台。启用开关、地址与 token 都来自同目录 `conf/basctl.conf` 的 `[remote]`；
-  三项齐全才拨号，没有该文件或字段不完整就不发任何外连，也不读取环境变量。
+  机器能访问控制台。启用开关、地址与 token 都来自 `BAS_PRINCIPAL` / `BAS_TOKEN`；
+  两项都设置才拨号；只设置一项会报错，不发起连接。
 - **鉴权在握手，不在首帧**：凭证随 `pull` 通道下发，换掉即吊销；未通过鉴权的连接在握手阶段就被
   关掉，连一个字节的协议都拿不到。`Project.key` 由 bashub 新建时随机生成，可重置（重置即吊销）。
   `pull` 本身也用同一个 `<project>:<Project.key>` 做 Bearer 鉴权，不再依赖可伪造的 `ip:` 头。
@@ -116,7 +116,7 @@ basagent 与 bashub 之间那条 WebSocket 连接上说什么、怎么说。**�
   下一轮轻量采样才看到新状态。
 - `service:*` 必须带合法 `id` 与新鲜的 `at`；同一 `id` 只回放上次结果，不重复执行。WebSocket
   单帧上限为 256 KiB，超过的消息由连接层拒绝。
-- `service:start` / `service:restart` 执行前，agent 先按 `[remote]` 拉取一次 `server.xml`；拉取或
+- `service:start` / `service:restart` 执行前，agent 先按 `BAS_PRINCIPAL` / `BAS_TOKEN` 拉取一次 `server.xml`；拉取或
   新配置解析失败时返回 `result{ok:false, error:"pull-failed"}`，不执行动作。`service:stop` 不拉取，
   始终按当前运行信息停机。
 - 老 agent 不申报 `service:*` 时，hub 不下发；万一收到，agent 仍按「不认识」回
