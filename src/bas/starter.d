@@ -48,7 +48,7 @@ module bas.starter;
 import bas.artifact : isMavenCoord, parseArtifact, toArtifact;
 import bas.config;
 import bas.fsutil : linkIfMissing, mkdirPrivate, removeTree;
-import bas.jstart : jstartCommand;
+import bas.jstart : jstartAvailable, jstartCommand;
 import bas.logs : consoleLog, plainName, readTail;
 import bas.net : canBindPort, localAddresses;
 import bas.portalloc : PortRange, defaultPortRange, defaultPortRangeText, parsePortRange, reservePort;
@@ -133,6 +133,12 @@ int runStart(string configFile, string[] rest) {
  */
 private int startServers(Container container, string basHome, Server[] servers,
     PortRange range) {
+  if (!jstartAvailable()) {
+    stderr.writeln("Cannot start instances: jstart was not found.");
+    stderr.writeln("  Install jstart or set beangle_jstart=/path/to/jstart.");
+    stderr.writeln("  Check with: basctl doctor <server.xml>");
+    return 1;
+  }
   applyEngineDefaults(container, servers);
   auto startedAt = localIsoTimestamp(Clock.currTime());
   // 上一次准备的 error 文件不能留到这一次失败时展示，否则会把旧版本/旧依赖误报成当前错误。

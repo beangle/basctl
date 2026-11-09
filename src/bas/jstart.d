@@ -30,9 +30,11 @@ import bas.config : Repository, SnapshotRepo;
 
 import std.array : join, split;
 import std.conv : to;
+import std.file : exists, getAttributes, isFile;
+import std.path : buildPath;
 import std.process : Config, execute, environment;
 import std.stdio : stderr, writeln;
-import std.string : empty, strip;
+import std.string : empty, indexOf, strip;
 import std.typecons : Nullable, nullable;
 
 /** 覆盖 jstart 可执行文件位置的环境变量名；命令相关的覆盖一律用 `beangle_<command>`。 */
@@ -42,6 +44,21 @@ enum jstartEnvVar = "beangle_jstart";
 string jstartCommand() {
   auto cmd = environment.get(jstartEnvVar, "");
   return strip(cmd).length ? strip(cmd) : "jstart";
+}
+
+/** jstart 是否可从 PATH / beangle_jstart 找到；启动前用它给出明确错误。 */
+bool jstartAvailable() {
+  auto cmd = jstartCommand();
+  if (cmd.indexOf('/') >= 0 || cmd.indexOf('\\') >= 0)
+    return isExecutableFile(cmd);
+  foreach (dir; environment.get("PATH", "").split(":"))
+    if (isExecutableFile(buildPath(dir, cmd)))
+      return true;
+  return false;
+}
+
+private bool isExecutableFile(string path) {
+  return exists(path) && isFile(path) && (getAttributes(path) & 0x49) != 0;
 }
 
 /** resolve：下载目标并补齐依赖，返回本地绝对路径。 */
