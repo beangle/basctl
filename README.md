@@ -12,6 +12,7 @@
 |---|---|
 | [docs/features.md](docs/features.md) | 功能清单、核心模型（意图 / 现状 / 运行态）、目录约定、`make` 的两种模式、与 jstart 的关系、边界与非目标 |
 | [docs/usage.md](docs/usage.md) | 安装、五分钟上手（接入 bashub / 独立使用）、命令一览、常见场景（`run` / 容器 / pull / firewall）、环境变量、排错 |
+| [docs/proxy.md](docs/proxy.md) | `basctl proxy`：ZIP bundle 内容、haproxy/nginx 差异、本地应用、ACL/Map 选择 |
 | [docs/start.md](docs/start.md) | `start` 的流程与生成的 jstart spec |
 | [docs/run.md](docs/run.md) | `run`：嵌入式运行单个 webapp |
 | [docs/server-info.md](docs/server-info.md) | 实例运行信息 `server.info` 的格式与生命周期、动态端口分配 |

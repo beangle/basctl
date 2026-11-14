@@ -34,6 +34,7 @@ import bas.firewall;
 import bas.init;
 import bas.logs : runLogs;
 import bas.net;
+import bas.proxy : runProxy;
 import bas.shellenv : readContainer;
 import bas.resolver;
 import bas.serverinfo : ServerInfo, liveInstancePid, liveInstances, readInstanceInfo;
@@ -99,6 +100,8 @@ version (unittest) {
       auto rest = args[2 .. $];
       return runDoctor(takeConfigFile(rest));
     }
+    case "proxy":
+      return runProxy(args[2 .. $]);
     case "firewall":
       return runFirewall(args[1 .. $]);
     case "help", "-h", "--help":
@@ -136,6 +139,7 @@ void printUsage() {
   stderr.writeln("                                (--engine=<type>-<version>, e.g. tomcat-11.0.25;");
   stderr.writeln("                                bas engine version defaults to " ~ defaultBasVersion ~ ")");
   stderr.writeln("  doctor [server.xml]           Check java (required) and jstart (optional)");
+  stderr.writeln("  proxy apply|status --engine=haproxy|nginx  Apply a basproxy bundle");
   stderr.writeln("  firewall [workdir]            Configure firewalld ports from conf/server.xml");
 }
 

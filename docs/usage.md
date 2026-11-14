@@ -131,7 +131,42 @@ basctl stop all
 | `basagent report [server.xml]` | 连一次控制台（bashub）报一次主机与实例现状后退出；地址与凭证取自环境变量，报上去了退出码才是 0。见 [channel.md](channel.md) |
 | `basagent [server.xml]` | 常驻：连上控制台后周期上报、回保活、执行固定指令（取日志 / 启停实例），断线自动重连；远程 `service:start` / `service:restart` 执行前会先拉取一次配置，`stop` 不拉取 |
 | `systemctl start/stop/restart basagent.service` | 管理系统级常驻 agent；运行账号固定为 `bas:beangle`。单元设置 `KillMode=process`：停止、重启或升级 agent 只结束 agent 自己，不会停掉实例（包括控制台 `service:start` 拉起的那些） |
+| `basctl proxy apply --engine=haproxy\|nginx` | 从 bashub 下载完整代理 bundle，校验、安装并 reload；不需要 `conf/server.xml` |
+| `basctl proxy status --engine=haproxy\|nginx` | 查看本地代理配置和证书文件状态 |
 | `basctl doctor [server.xml]` | 检查 `java`（必需）与 `jstart`（可选提示）；必需项缺失时退出码非 0 |
+
+## 代理配置（`basctl proxy`）
+
+完整格式、ZIP 文件列表和 ACL/Map 选择见 [proxy.md](proxy.md)。
+
+`basctl proxy` 从 bashub 下载 ZIP 代理 bundle（内含 manifest、配置、证书、私钥），不使用 `conf/server.xml`：
+
+```bash
+sudo basctl proxy apply --engine=haproxy
+sudo basctl proxy apply --engine=nginx
+sudo basctl proxy apply --engine=haproxy --bundle=/tmp/proxy-bundle.zip
+sudo basctl proxy status --engine=haproxy
+```
+
+认证仍来自 `BAS_PRINCIPAL` / `BAS_TOKEN`。systemd timer 可以用：
+
+```ini
+EnvironmentFile=/var/lib/bas/conf/basctl.env
+ExecStart=/usr/bin/basctl proxy apply --engine=haproxy
+```
+
+`--bundle` 直接应用本地 bundle，适合在不联网的环境验证落盘和 reload 流程。
+
+bundle 中的 Micdn 路由由 bashub 按 Project 的 Micdn 服务器追加，与 endpoint 无关。
+
+应用流程：
+
+```text
+下载 bundle → 校验 SHA-256 → 写证书 → 写配置 → haproxy -c/nginx -t → reload
+```
+
+配置或 reload 失败时恢复旧文件。bundle 里的 HAProxy 后端和路由已由 bashub 渲染，
+不再依赖 setline-agent 或 `/var/lib/setline`。
 
 ## 环境自检（`basctl doctor`）
 

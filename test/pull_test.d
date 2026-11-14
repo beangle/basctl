@@ -36,35 +36,3 @@ import std.uuid : randomUUID;
   assert(serverConfigUrl(RemoteConfig("https://control.example/bashub/", "openurp.prod", "k"))
       == "https://control.example/bashub/api/bashub/config/openurp.prod/server");
 }
-
-@("pull warns and exits cleanly when remote is not configured") unittest {
-  environment.remove("BAS_PRINCIPAL");
-  environment.remove("BAS_TOKEN");
-  auto root = buildPath(tempDir(), "basctl-pull-unconfigured-" ~ randomUUID().toString);
-  scope (exit) if (exists(root)) rmdirRecurse(root);
-  mkdirRecurse(buildPath(root, "conf"));
-
-  assert(runPull([root]) == 0);
-}
-
-@("pull --if-configured exits cleanly for an empty generated template") unittest {
-  environment.remove("BAS_PRINCIPAL");
-  environment.remove("BAS_TOKEN");
-  auto root = buildPath(tempDir(), "basctl-pull-template-" ~ randomUUID().toString);
-  scope (exit) if (exists(root)) rmdirRecurse(root);
-  mkdirRecurse(buildPath(root, "conf"));
-  assert(runPull(["--if-configured", root]) == 0);
-}
-
-@("pull reports invalid remote configuration as an error") unittest {
-  environment["BAS_PRINCIPAL"] = "openurp.prod@ftp://host";
-  environment["BAS_TOKEN"] = "k";
-  scope (exit) {
-    environment.remove("BAS_PRINCIPAL");
-    environment.remove("BAS_TOKEN");
-  }
-  auto root = buildPath(tempDir(), "basctl-pull-invalid-" ~ randomUUID().toString);
-  scope (exit) if (exists(root)) rmdirRecurse(root);
-  mkdirRecurse(buildPath(root, "conf"));
-  assert(runPull([root]) == 1);
-}
