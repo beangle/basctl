@@ -147,6 +147,15 @@ use_backend micdn if { path_beg /maven }
 - 路由数量在当前规模下可控
 - 调试时直接看配置文件即可
 
+所有 `use_backend` 按路径长度从长到短生成，例如：
+
+```text
+/api/edu/exam  → 考务后端
+/api/edu       → 其他教学后端
+```
+
+不能反过来，否则 HAProxy 的首个匹配规则会把考务请求路由到教学后端。
+
 只有在以下情况才考虑 map：
 
 - 路由数量达到数千条
