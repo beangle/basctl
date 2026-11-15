@@ -148,11 +148,17 @@ sudo basctl proxy apply --engine=haproxy --bundle=/tmp/proxy-bundle.zip
 sudo basctl proxy status --engine=haproxy
 ```
 
-认证仍来自 `BAS_PRINCIPAL` / `BAS_TOKEN`。systemd timer 可以用：
+认证仍来自 `BAS_PRINCIPAL` / `BAS_TOKEN`。`basctl proxy` 是手工/一次性命令，不安装
+systemd service，也不提供定时器；需要定时执行时由运维在外层调度。
 
-```ini
-EnvironmentFile=/var/lib/bas/conf/basctl.env
-ExecStart=/usr/bin/basctl proxy apply --engine=haproxy
+直接执行时需要先加载环境：
+
+```bash
+sudo -i
+set -a
+. /var/lib/bas/conf/basctl.env
+set +a
+basctl proxy apply --engine=haproxy
 ```
 
 `--bundle` 直接应用本地 bundle，适合在不联网的环境验证落盘和 reload 流程。

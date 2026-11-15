@@ -25,22 +25,27 @@ import bas.remote : RemoteConfig, bearerCredential, hubApiRoot, loadRemoteEnv;
 
 import core.sys.posix.unistd : geteuid;
 import std.algorithm : canFind, startsWith;
-import std.array : join;
+import std.array : join, split;
 import std.conv : to;
 import std.digest : LetterCase, toHexString;
 import std.digest.sha : sha256Of;
 import std.file : exists, mkdirRecurse, read, readText, remove, rename, write;
 import std.json : JSONType, JSONValue, parseJSON;
-import std.path : dirName;
-import std.process : execute;
+import std.path : buildPath, dirName;
+import std.process : environment, execute;
 import std.stdio : stderr, writeln;
-import std.string : strip, toStringz;
+import std.string : indexOf, strip, toStringz;
+import std.uri : encode;
 import std.uuid : randomUUID;
 import std.zip : ZipArchive;
 
-private enum haproxyConfig = "/etc/haproxy/haproxy.cfg";
-private enum nginxConfig = "/etc/nginx/nginx.conf";
-private enum certificateRoot = "/etc/basproxy/certs";
+/// 当前代理部署的本地落点。配置路径按实际安装发现，不假设发行版布局。
+struct ProxyTargets {
+  string engine;
+  string config;
+  string service;
+  string binary;
+}
 
 /// 当前 bundle 的本地落点。
 struct ProxyPaths {
@@ -49,16 +54,94 @@ struct ProxyPaths {
   string key;
 }
 
-private ProxyPaths pathsFor(string engine, string endpoint) {
+private ProxyTargets discoverTargets(string engine, string configOverride, string serviceOverride) {
+  ProxyTargets targets;
+  targets.engine = engine;
+  targets.service = serviceOverride.length ? serviceOverride : engine;
+  targets.binary = findExecutable(engine);
+  if (configOverride.length) {
+    targets.config = configOverride;
+    return targets;
+  }
+  if (engine == "nginx")
+    targets.config = nginxConfigPath(targets.binary);
+  if (targets.config.length == 0)
+    targets.config = systemdConfigPath(targets.service);
+  if (targets.config.length == 0) {
+    auto candidates = engine == "haproxy"
+        ? ["/etc/haproxy/haproxy.cfg", "/etc/haproxy/haproxy.conf",
+           "/usr/local/etc/haproxy/haproxy.cfg"]
+        : ["/etc/nginx/nginx.conf", "/usr/local/nginx/conf/nginx.conf"];
+    foreach (candidate; candidates)
+      if (exists(candidate)) {
+        targets.config = candidate;
+        break;
+      }
+  }
+  if (targets.config.length == 0)
+    targets.config = engine == "haproxy" ? "/etc/haproxy/haproxy.cfg" : "/etc/nginx/nginx.conf";
+  return targets;
+}
+
+private string findExecutable(string name) {
+  foreach (dir; environment.get("PATH", "").split(":")) {
+    if (dir.length == 0)
+      continue;
+    auto path = buildPath(dir, name);
+    if (exists(path))
+      return path;
+  }
+  return "";
+}
+
+private string nginxConfigPath(string binary) {
+  if (binary.length == 0)
+    return "";
+  auto result = execute(["/bin/sh", "-c", "exec \"$1\" -V 2>&1", "sh", binary]);
+  auto text = result.output;
+  auto marker = text.indexOf("--conf-path=");
+  if (marker < 0)
+    return "";
+  auto start = marker + "--conf-path=".length;
+  auto end = start;
+  while (end < text.length && text[end] != ' ' && text[end] != '\n' && text[end] != '\r')
+    end++;
+  return text[start .. end].strip;
+}
+
+/// 从 systemd unit 的 ExecStart 中读取 -f/-c 指定的配置文件。
+private string systemdConfigPath(string service) {
+  auto result = execute(["systemctl", "cat", service]);
+  if (result.status != 0)
+    return "";
+  foreach (line; result.output.split("\n")) {
+    if (!line.strip.startsWith("ExecStart="))
+      continue;
+    foreach (option; [" -f ", " -c "]) {
+      auto marker = line.indexOf(option);
+      if (marker < 0)
+        continue;
+      auto start = marker + option.length;
+      auto end = start;
+      while (end < line.length && line[end] != ' ' && line[end] != '\t')
+        end++;
+      auto path = line[start .. end].strip;
+      return path.startsWith("/") ? path : "";
+    }
+  }
+  return "";
+}
+
+private ProxyPaths pathsFor(ProxyTargets targets, string endpoint) {
   ProxyPaths paths;
   auto plain = endpoint.length ? endpoint : "default";
-  if (engine == "haproxy") {
-    paths.config = haproxyConfig;
-    paths.certificate = certificateRoot ~ "/" ~ (plain == "default" ? "bundle.pem" : plain ~ ".bundle.pem");
-  } else {
-    paths.config = nginxConfig;
-    paths.certificate = certificateRoot ~ "/" ~ (plain == "default" ? "cert.pem" : plain ~ ".pem");
-    paths.key = certificateRoot ~ "/" ~ (plain == "default" ? "key.pem" : plain ~ ".key.pem");
+  paths.config = targets.config;
+  auto certRoot = buildPath(dirName(targets.config), "certs");
+  if (targets.engine == "haproxy")
+    paths.certificate = certRoot ~ "/" ~ (plain == "default" ? "bundle.pem" : plain ~ ".bundle.pem");
+  else {
+    paths.certificate = certRoot ~ "/" ~ (plain == "default" ? "cert.pem" : plain ~ ".pem");
+    paths.key = certRoot ~ "/" ~ (plain == "default" ? "key.pem" : plain ~ ".key.pem");
   }
   return paths;
 }
@@ -72,6 +155,8 @@ int runProxy(string[] args) {
   string engine;
   string endpoint;
   string bundleFile;
+  string configOverride;
+  string serviceOverride;
   bool dryRun;
   foreach (arg; args[1 .. $]) {
     if (arg.startsWith("--engine="))
@@ -80,6 +165,10 @@ int runProxy(string[] args) {
       endpoint = arg["--endpoint=".length .. $].strip;
     else if (arg.startsWith("--bundle="))
       bundleFile = arg["--bundle=".length .. $].strip;
+    else if (arg.startsWith("--config="))
+      configOverride = arg["--config=".length .. $].strip;
+    else if (arg.startsWith("--service="))
+      serviceOverride = arg["--service=".length .. $].strip;
     else if (arg == "--dry-run")
       dryRun = true;
     else if (arg == "--help" || arg == "-h") {
@@ -95,9 +184,12 @@ int runProxy(string[] args) {
     stderr.writeln("basctl proxy: --engine must be haproxy or nginx");
     return 1;
   }
-  auto paths = pathsFor(engine, endpoint);
+  auto targets = discoverTargets(engine, configOverride, serviceOverride);
+  auto paths = pathsFor(targets, endpoint);
   if (command == "status") {
     writeln("engine:      " ~ engine);
+    writeln("binary:      " ~ (targets.binary.length ? targets.binary : "(not found)"));
+    writeln("service:     " ~ targets.service);
     writeln("config:      " ~ paths.config ~ (exists(paths.config) ? " (present)" : " (missing)"));
     writeln("certificate: " ~ paths.certificate ~ (exists(paths.certificate) ? " (present)" : " (missing)"));
     if (paths.key.length)
@@ -113,7 +205,7 @@ int runProxy(string[] args) {
     stderr.writeln("basctl proxy apply: root is required");
     return 2;
   }
-  return applyBundle(engine, endpoint, paths, dryRun, bundleFile);
+  return applyBundle(targets, endpoint, paths, dryRun, bundleFile);
 }
 
 private struct ProxyBundle {
@@ -164,7 +256,8 @@ private string zipMember(ZipArchive zip, JSONValue files, string role) {
   return content;
 }
 
-private int applyBundle(string engine, string endpoint, ProxyPaths paths, bool dryRun, string bundleFile) {
+private int applyBundle(ProxyTargets targets, string endpoint, ProxyPaths paths, bool dryRun, string bundleFile) {
+  auto engine = targets.engine;
   auto temp = bundleFile.length ? bundleFile
       : "/tmp/basctl-proxy-" ~ randomUUID().toString ~ ".zip";
   if (bundleFile.length == 0) {
@@ -181,6 +274,9 @@ private int applyBundle(string engine, string endpoint, ProxyPaths paths, bool d
     auto url = hubApiRoot(remote) ~ "/config/" ~ remote.project ~ "/proxy-bundle?engine=" ~ engine;
     if (endpoint.length)
       url ~= "&endpoint=" ~ endpoint;
+    auto certDir = dirName(paths.certificate);
+    if (certDir.length)
+      url ~= "&cert-dir=" ~ encode(certDir);
     if (!curlDownload(url, temp, ["Authorization: Bearer " ~ bearerCredential(remote)], false, 8 * 1024 * 1024)) {
       stderr.writeln("basctl proxy: failed to download bundle from " ~ url);
       return 1;
@@ -206,9 +302,13 @@ private int applyBundle(string engine, string endpoint, ProxyPaths paths, bool d
   }
 
   string[string] previous;
+  bool[string] existed;
   foreach (path; [paths.config, paths.certificate, paths.key]) {
-    if (path.length && exists(path))
-      previous[path] = readText(path);
+    if (path.length) {
+      existed[path] = exists(path);
+      if (existed[path])
+        previous[path] = readText(path);
+    }
   }
   try {
     if (certificate.length && privateKey.length) {
@@ -217,10 +317,13 @@ private int applyBundle(string engine, string endpoint, ProxyPaths paths, bool d
         writePrivate(paths.key, privateKey);
     }
     writeAtomic(paths.config, config);
-    checkAndReload(engine, paths.config);
+    checkAndReload(targets, paths.config);
   } catch (Exception e) {
     foreach (path, content; previous)
       writeAtomic(path, content);
+    foreach (path; [paths.config, paths.certificate, paths.key])
+      if (path.length && (path !in existed || !existed[path]) && exists(path))
+        remove(path);
     stderr.writeln("basctl proxy: apply failed, previous files restored: " ~ e.msg);
     return 1;
   }
@@ -241,15 +344,16 @@ private void writePrivate(string path, string content) {
   writeAtomic(path, content);
 }
 
-private void checkAndReload(string engine, string config) {
-  string[] check = engine == "haproxy"
-      ? ["haproxy", "-c", "-f", config]
-      : ["nginx", "-t", "-c", config];
+private void checkAndReload(ProxyTargets targets, string config) {
+  if (targets.binary.length == 0)
+    throw new Exception("proxy binary not found: " ~ targets.engine);
+  string[] check = targets.engine == "haproxy"
+      ? [targets.binary, "-c", "-f", config]
+      : [targets.binary, "-t", "-c", config];
   auto checkResult = execute(check);
   if (checkResult.status != 0)
     throw new Exception("config check failed: " ~ checkResult.output.strip);
-  auto reload = execute(["/bin/sh", "-c", engine == "haproxy"
-      ? "systemctl reload haproxy" : "systemctl reload nginx"]);
+  auto reload = execute(["systemctl", "reload", targets.service]);
   if (reload.status != 0)
     throw new Exception("reload failed: " ~ reload.output.strip);
 }
@@ -264,6 +368,6 @@ private string sha256(string value) {
 }
 
 private void proxyUsage() {
-  stderr.writeln("Usage: basctl proxy apply --engine=haproxy|nginx [--endpoint=NAME] [--bundle=FILE] [--dry-run]");
+  stderr.writeln("Usage: basctl proxy apply --engine=haproxy|nginx [--endpoint=NAME] [--bundle=FILE] [--config=FILE] [--service=NAME] [--dry-run]");
   stderr.writeln("       basctl proxy status --engine=haproxy|nginx [--endpoint=NAME]");
 }

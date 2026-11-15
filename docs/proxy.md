@@ -11,6 +11,8 @@ sudo basctl proxy apply --engine=haproxy
 sudo basctl proxy apply --engine=nginx
 ```
 
+`basctl proxy` 不安装 systemd service，也不创建定时器。
+
 认证来自：
 
 ```text
@@ -115,18 +117,31 @@ sudo basctl proxy apply --engine=haproxy --bundle=/tmp/proxy-bundle.zip
 basctl proxy apply --engine=haproxy --bundle=/tmp/proxy-bundle.zip --dry-run
 ```
 
-## 安装位置
+## 部署位置发现
+
+不同发行版/安装方式的 HAProxy/Nginx 配置位置可能不同，`basctl proxy` 会先查找：
+
+1. `--config=FILE` 显式覆盖
+2. Nginx 的 `nginx -V` 中的 `--conf-path=`
+3. systemd unit 的 `ExecStart` 中的 `-f` / `-c`
+4. 常见默认路径
+
+服务名默认与引擎相同，可用 `--service=NAME` 覆盖。
 
 ```text
 haproxy:
-  /etc/haproxy/haproxy.cfg
-  /etc/basproxy/certs/<endpoint>.bundle.pem
+  config: 自动发现，默认 /etc/haproxy/haproxy.cfg
+  service: haproxy
+  certs:   /etc/haproxy/certs/<endpoint>.bundle.pem
 
 nginx:
-  /etc/nginx/nginx.conf
-  /etc/basproxy/certs/<endpoint>.pem
-  /etc/basproxy/certs/<endpoint>.key.pem
+  config: 自动发现，默认 /etc/nginx/nginx.conf
+  service: nginx
+  certs:   /etc/nginx/certs/<endpoint>.pem
+           /etc/nginx/certs/<endpoint>.key.pem
 ```
+
+证书目录取配置文件所在目录下的 `certs/`：basctl 把该目录作为 `cert-dir` 传给 bashub，bundle 内配置与本地安装路径一致。
 
 ## ACL 还是 map
 
