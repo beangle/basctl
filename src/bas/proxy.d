@@ -260,6 +260,8 @@ private int applyBundle(ProxyTargets targets, string endpoint, ProxyPaths paths,
   auto engine = targets.engine;
   auto temp = bundleFile.length ? bundleFile
       : "/tmp/basctl-proxy-" ~ randomUUID().toString ~ ".zip";
+  auto downloaded = bundleFile.length == 0;
+  scope (exit) if (downloaded && exists(temp)) remove(temp);
   if (bundleFile.length == 0) {
     RemoteConfig remote;
     try {
@@ -270,7 +272,6 @@ private int applyBundle(ProxyTargets targets, string endpoint, ProxyPaths paths,
       stderr.writeln("basctl proxy: " ~ e.msg);
       return 1;
     }
-    scope (exit) if (exists(temp)) remove(temp);
     auto url = hubApiRoot(remote) ~ "/config/" ~ remote.project ~ "/proxy-bundle?engine=" ~ engine;
     if (endpoint.length)
       url ~= "&endpoint=" ~ endpoint;
