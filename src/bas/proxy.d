@@ -370,9 +370,12 @@ private void checkAndReload(ProxyTargets targets, string config) {
   auto checkResult = execute(check);
   if (checkResult.status != 0)
     throw new Exception("config check failed: " ~ checkResult.output.strip);
-  auto reload = execute(["systemctl", "reload", targets.service]);
-  if (reload.status != 0)
-    throw new Exception("reload failed: " ~ reload.output.strip);
+  // 服务未运行时 reload 必然失败；首次 apply 应当启动而不是 reload。
+  auto active = execute(["systemctl", "is-active", "--quiet", targets.service]);
+  auto action = active.status == 0 ? "reload" : "start";
+  auto result = execute(["systemctl", action, targets.service]);
+  if (result.status != 0)
+    throw new Exception(action ~ " failed: " ~ result.output.strip);
 }
 
 private string text(JSONValue value, string key) {
