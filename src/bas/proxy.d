@@ -52,6 +52,7 @@ struct ProxyPaths {
   string config;
   string certificate;
   string key;
+  string routeMap;
 }
 
 private ProxyTargets discoverTargets(string engine, string configOverride, string serviceOverride) {
@@ -137,9 +138,10 @@ private ProxyPaths pathsFor(ProxyTargets targets, string endpoint) {
   auto plain = endpoint.length ? endpoint : "default";
   paths.config = targets.config;
   auto certRoot = buildPath(dirName(targets.config), "certs");
-  if (targets.engine == "haproxy")
+  if (targets.engine == "haproxy") {
     paths.certificate = certRoot ~ "/" ~ (plain == "default" ? "bundle.pem" : plain ~ ".bundle.pem");
-  else {
+    paths.routeMap = buildPath(dirName(targets.config), "bas-routes.map");
+  } else {
     paths.certificate = certRoot ~ "/" ~ (plain == "default" ? "cert.pem" : plain ~ ".pem");
     paths.key = certRoot ~ "/" ~ (plain == "default" ? "key.pem" : plain ~ ".key.pem");
   }
@@ -212,6 +214,7 @@ private struct ProxyBundle {
   string config;
   string certificate;
   string privateKey;
+  string routeMap;
 }
 
 private ProxyBundle readBundle(string path, string engine) {
@@ -231,6 +234,8 @@ private ProxyBundle readBundle(string path, string engine) {
   bundle.config = zipMember(zip, files, "config");
   bundle.certificate = zipMember(zip, files, "certificate");
   bundle.privateKey = zipMember(zip, files, "privateKey");
+  if ("routeMap" in files)
+    bundle.routeMap = zipMember(zip, files, "routeMap");
   if (bundle.config.length == 0)
     throw new Exception("bundle is missing config");
   return bundle;
@@ -278,6 +283,8 @@ private int applyBundle(ProxyTargets targets, string endpoint, ProxyPaths paths,
     auto certDir = dirName(paths.certificate);
     if (certDir.length)
       url ~= "&cert-dir=" ~ encode(certDir);
+    if (paths.routeMap.length)
+      url ~= "&route-map=" ~ encode(paths.routeMap);
     if (!curlDownload(url, temp, ["Authorization: Bearer " ~ bearerCredential(remote)], false, 8 * 1024 * 1024)) {
       stderr.writeln("basctl proxy: failed to download bundle from " ~ url);
       return 1;
@@ -294,17 +301,24 @@ private int applyBundle(ProxyTargets targets, string endpoint, ProxyPaths paths,
   auto config = bundle.config;
   auto certificate = bundle.certificate;
   auto privateKey = bundle.privateKey;
+  auto routeMap = bundle.routeMap;
+  if (engine == "haproxy" && routeMap.length == 0) {
+    stderr.writeln("basctl proxy: bundle is missing route map");
+    return 1;
+  }
 
   auto certPem = engine == "haproxy" ? privateKey.strip ~ "\n" ~ certificate.strip ~ "\n" : certificate;
   if (dryRun) {
     writeln("would install " ~ paths.config);
     writeln("would install " ~ paths.certificate);
+    if (paths.routeMap.length)
+      writeln("would install " ~ paths.routeMap);
     return 0;
   }
 
   string[string] previous;
   bool[string] existed;
-  foreach (path; [paths.config, paths.certificate, paths.key]) {
+  foreach (path; [paths.config, paths.certificate, paths.key, paths.routeMap]) {
     if (path.length) {
       existed[path] = exists(path);
       if (existed[path])
@@ -317,12 +331,14 @@ private int applyBundle(ProxyTargets targets, string endpoint, ProxyPaths paths,
       if (paths.key.length)
         writePrivate(paths.key, privateKey);
     }
+    if (paths.routeMap.length)
+      writeAtomic(paths.routeMap, routeMap);
     writeAtomic(paths.config, config);
     checkAndReload(targets, paths.config);
   } catch (Exception e) {
     foreach (path, content; previous)
       writeAtomic(path, content);
-    foreach (path; [paths.config, paths.certificate, paths.key])
+    foreach (path; [paths.config, paths.certificate, paths.key, paths.routeMap])
       if (path.length && (path !in existed || !existed[path]) && exists(path))
         remove(path);
     stderr.writeln("basctl proxy: apply failed, previous files restored: " ~ e.msg);

@@ -38,6 +38,7 @@ ZIP 文件列表按引擎区分：
 haproxy:
   manifest.json
   config/haproxy.cfg
+  config/bas-routes.map
   certificate/cert.pem
   certificate/key.pem
 
@@ -50,10 +51,10 @@ nginx:
 
 | 引擎 | 配置内容 | 证书使用 |
 |---|---|---|
-| haproxy | `config/haproxy.cfg`，HAProxy 语法 | basctl 将私钥和证书合并为 PEM |
+| haproxy | `config/haproxy.cfg`，HAProxy 语法；路由在 `config/bas-routes.map` | basctl 将私钥和证书合并为 PEM |
 | nginx | `config/nginx.conf`，Nginx 语法 | 证书、私钥分文件安装 |
 
-Micdn 路由也会写入同一份配置：
+Micdn 路由和 webapp 路由都会写入 HAProxy 的 `bas-routes.map`；Nginx 仍使用 location：
 
 ```text
 /asset
@@ -83,6 +84,10 @@ Micdn 路由也会写入同一份配置：
     },
     "privateKey": {
       "path": "certificate/key.pem",
+      "sha256": "..."
+    },
+    "routeMap": {
+      "path": "config/bas-routes.map",
       "sha256": "..."
     }
   }
@@ -132,6 +137,7 @@ basctl proxy apply --engine=haproxy --bundle=/tmp/proxy-bundle.zip --dry-run
 haproxy:
   config: 自动发现，默认 /etc/haproxy/haproxy.cfg
   service: haproxy
+  route map: /etc/haproxy/bas-routes.map
   certs:   /etc/haproxy/certs/<endpoint>.bundle.pem
 
 nginx:
