@@ -1,11 +1,10 @@
-# Release 0.0.3
+# Release 0.0.2
 
-发布日期：待定
+发布日期：2026-11-17  
+Tag：`v0.0.2`
 
-计划 tag：`v0.0.3`
-
-本版本新增 `basctl proxy`：从 bashub 下载完整代理 ZIP，校验、安装并 reload。
-代理节点不需要 `conf/server.xml`，也不安装常驻 service 或 timer。
+本版本新增 `basctl proxy`，并完成远程凭证、配置模板、jstart 预检和依赖调整。
+代理节点不再部署常驻 service 或 timer。
 
 ## 版本范围
 
@@ -14,13 +13,14 @@
 ```bash
 sudo basctl proxy apply --engine=haproxy
 sudo basctl proxy apply --engine=nginx
-sudo basctl proxy status --engine=haproxy
+basctl proxy status --engine=haproxy
 ```
 
 - 机器下载使用 `BAS_PRINCIPAL` / `BAS_TOKEN`。
 - 不读取 `conf/server.xml`。
-- `apply` 要求 root，写入代理配置、证书，执行配置检查和 reload。
+- `apply` 要求 root，写入代理配置、路由 map、证书，执行配置检查和 reload/start。
 - 失败时恢复旧文件，并删除本次新建的文件。
+- HAProxy 使用 `config/bas-routes.map`；Nginx 继续使用 location。
 
 ### 部署位置发现
 
@@ -40,7 +40,7 @@ sudo basctl proxy status --engine=haproxy
 /etc/nginx/certs
 ```
 
-下载时通过 `cert-dir` 通知 bashub，因此 bundle 内配置引用同一路径。
+下载时通过 `cert-dir` / `route-map` 通知 bashub，因此 bundle 内配置引用同一路径。
 
 ### 本地应用
 
@@ -49,13 +49,27 @@ sudo basctl proxy apply --engine=haproxy --bundle=/tmp/proxy-bundle.zip
 basctl proxy apply --engine=haproxy --bundle=/tmp/proxy-bundle.zip --dry-run
 ```
 
-ZIP 内含 `manifest.json`、配置、证书和私钥；basctl 校验角色、路径和 SHA-256，
-拒绝绝对路径和 `..`。
+ZIP 内含 `manifest.json`、配置、证书和私钥；HAProxy 还包含 `bas-routes.map`。
+basctl 校验角色、路径和 SHA-256，拒绝绝对路径和 `..`。
+
+### 远程凭证与配置
+
+- 删除 `basctl.conf` 的 `[remote]` 段，改用：
+
+  ```bash
+  BAS_PRINCIPAL=project@url
+  BAS_TOKEN=...
+  ```
+
+- `pull` 不再接受 `--file`；启动拉取失败即失败，不做本地兜底。
+- 安装包下发 `basctl.env`，systemd 通过 `EnvironmentFile` 读取。
+- `basagent` 只从环境变量读取 Project 和 token。
 
 ### 其他
 
 - `start` 在删除实例目录前预检 jstart，缺失时给出明确错误。
 - `vibe-stream` 依赖范围对齐 1.5。
+- `proxy apply` 在服务 inactive 时启动，运行中才 reload。
 
 ## 升级
 
@@ -68,8 +82,6 @@ ZIP 内含 `manifest.json`、配置、证书和私钥；basctl 校验角色、�
   sudo basctl proxy apply --engine=haproxy
   ```
 
-- 不安装 `basctl-proxy.service` 或 timer；定时执行由外部调度负责。
-- 不再使用 setline-agent 的 pull/render/apply。
 
 ## 验证
 

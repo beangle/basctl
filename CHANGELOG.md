@@ -1,23 +1,6 @@
 # Changelog
 
-## v0.0.3 (unreleased)
-
-- **`basctl proxy`**：新增 `apply` / `status` 子命令，从 bashub 下载代理 ZIP bundle，
-  校验 manifest 和各文件 SHA-256，安装后执行 `haproxy -c` / `nginx -t` 和
-  `systemctl reload`。不读取 `conf/server.xml`，代理节点只依赖 `BAS_PRINCIPAL` /
-  `BAS_TOKEN`。
-- **ZIP bundle 应用**：支持引擎区分的 `config/haproxy.cfg` / `config/nginx.conf`、证书、
-  私钥和 `manifest.json`；HAProxy 安装时合并证书和私钥，Nginx 分文件安装；失败自动恢复旧文件。
-- **本地应用模式**：`--bundle=FILE` 直接应用已下载的 ZIP，可配合 `--dry-run` 在不联网时验证。
-- **部署位置发现**：按 `--config`、`nginx -V` 的 `--conf-path`、systemd `ExecStart` 和常见路径
-  查找代理配置；`--service` 覆盖 reload 的服务名。不安装 systemd service，也不创建定时器。
-- **证书随代理目录**：证书安装到配置文件所在目录的 `certs/`（如 `/etc/haproxy/certs`、
-  `/etc/nginx/certs`），并通过 `cert-dir` 让 bashub 按同一路径渲染配置。
-- **jstart 预检**：`start` 在删除实例目录前检查 jstart 是否存在，缺失时给出明确错误。
-- **依赖**：对齐 `vibe-stream` 1.5 版本范围。
-- **测试**：`dub test` 通过 151 个用例；移除依赖真实网络和进程环境的 agent report 用例。
-
-## v0.0.2 (2026-11-09)
+## v0.0.2 (2026-11-17)
 
 - **远程凭证改为环境变量**：删除 `basctl.conf` 的 `[remote]` 段，改用
   `BAS_PRINCIPAL=project@url` 和 `BAS_TOKEN`；`pull` 不再接受 `--file`，启动拉取失败即失败，
@@ -25,6 +8,22 @@
 - **配置模板**：安装包改为下发 `basctl.env`，systemd 通过 `EnvironmentFile` 加载；
   `${bas_remote_url}` / `${bas_remote_token}` 由环境变量展开。
 - **控制通道**：`basagent` 只从环境变量读取 Project 和 token，启动时先拉取 server.xml。
+- **`basctl proxy`**：新增 `apply` / `status` 子命令，从 bashub 下载代理 ZIP bundle，
+  校验 manifest 和各文件 SHA-256，安装后执行 `haproxy -c` / `nginx -t` 和
+  `systemctl reload`。不读取 `conf/server.xml`，代理节点只依赖 `BAS_PRINCIPAL` /
+  `BAS_TOKEN`。
+- **ZIP bundle 应用**：支持引擎区分的 `config/haproxy.cfg` / `config/nginx.conf`、证书、
+  私钥、HAProxy 路由 map 和 `manifest.json`；HAProxy 安装时合并证书和私钥，Nginx 分文件安装；
+  失败自动恢复旧文件。
+- **本地应用模式**：`--bundle=FILE` 直接应用已下载的 ZIP，可配合 `--dry-run` 在不联网时验证。
+- **部署位置发现**：按 `--config`、`nginx -V` 的 `--conf-path`、systemd `ExecStart` 和常见路径
+  查找代理配置；`--service` 覆盖 reload 的服务名。不安装 systemd service，也不创建定时器。
+- **证书随代理目录**：证书安装到配置文件所在目录的 `certs/`（如 `/etc/haproxy/certs`、
+  `/etc/nginx/certs`），并通过 `cert-dir` 让 bashub 按同一路径渲染配置。
+- **服务未运行时启动**：`proxy apply` 在目标服务 inactive 时执行 `start`，运行中才 `reload`。
+- **jstart 预检**：`start` 在删除实例目录前检查 jstart 是否存在，缺失时给出明确错误。
+- **依赖**：对齐 `vibe-stream` 1.5 版本范围。
+- **测试**：`dub test` 通过 151 个用例；移除依赖真实网络和进程环境的 agent report 用例。
 
 ## v0.0.1 (2026-11-07)
 
