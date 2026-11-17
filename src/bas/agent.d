@@ -36,6 +36,7 @@ module bas.agent;
 import bas.channel;
 import bas.config : Container, Host, parseServerXmlFile;
 import bas.hub : agentUrl;
+import bas.download : curlDownload;
 import bas.logs : agentLog, consoleLog, countLines, maxLogLines, plainName, readLogWindow;
 import bas.net : hostName, localAddresses;
 import bas.pull : runPull;
@@ -58,9 +59,13 @@ import core.stdc.stdlib : abort;
 import std.algorithm : canFind, filter, sort;
 import std.array : array, join;
 import std.datetime.stopwatch : MonoTime;
-import std.file : exists;
+import std.file : exists, readText, remove, tempDir;
 import std.json : JSONType, JSONValue;
 import std.path : absolutePath, buildPath, dirName;
+import std.uuid : randomUUID;
+
+/// 本机 micdn 的 reload 端点：固定回环地址，hub 不能传入任意 URL。
+private enum string micdnReloadUrl = "http://127.0.0.1:8888/admin/reload";
 import std.process : environment, execute, spawnShell;
 import std.stdio : stderr, writeln;
 import std.conv : to;
@@ -1120,6 +1125,21 @@ private void handle(ref AgentContext ctx, scope WebSocket ws, string text) {
     rememberResult(ctx, msg.id, reply);
     ws.send(reply);
     break;
+  case "micdn:reload":
+    if (!msg.isRequest()) {
+      logWarn("channel: ignore %s without id", msg.type);
+      break;
+    }
+    if (!requestTimestampFresh(msg.at)) {
+      auto reply = resultMessage(msg.id, false, JSONValue(null), "bad-request: stale or missing timestamp");
+      rememberResult(ctx, msg.id, reply);
+      ws.send(reply);
+      break;
+    }
+    auto reloadReply = micdnReloadResult(msg.id);
+    rememberResult(ctx, msg.id, reloadReply);
+    ws.send(reloadReply);
+    break;
   case "service:start":
   case "service:stop":
   case "service:restart":
@@ -1238,6 +1258,29 @@ private string logWindowResult(string path, string id, ref JSONValue body) {
     "lines": JSONValue(items),
     "truncated": JSONValue(truncated)
   ];
+  return resultMessage(id, true, data, "");
+}
+
+/** `micdn:reload`：GET 本机 micdn 的 `/admin/reload`，把结果回给 hub。
+ *
+ * 地址固定 127.0.0.1:8888，不接受 hub 传入 URL；响应体只回前 8 KiB（reload 失败时 micdn
+ * 的报错正文可能较长）。curl 自身超时 300s，hub 侧 90s 超时后可能先放弃，但 agent 会继续完成。
+ */
+string micdnReloadResult(string id) {
+  auto tmp = buildPath(tempDir(), "micdn-reload-" ~ randomUUID().toString());
+  scope (exit)
+    if (exists(tmp))
+      remove(tmp);
+  if (!curlDownload(micdnReloadUrl, tmp, null, false, 64 * 1024))
+    return resultMessage(id, false, JSONValue(null), "reload-failed");
+  string body;
+  try
+    body = readText(tmp);
+  catch (Exception)
+    body = "";
+  if (body.length > 8 * 1024)
+    body = body[0 .. 8 * 1024];
+  JSONValue data = ["body": JSONValue(body)];
   return resultMessage(id, true, data, "");
 }
 

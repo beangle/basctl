@@ -2,7 +2,7 @@
 
 basagent 主动拨一条出站 WebSocket 到控制台（bashub），把**这台机器的现状**报上去，并接收控制台下发的
 固定指令。现状 = 主机家底（CPU / 内存 / 磁盘）+ 本机活着的 bas 实例；指令 = 立即上报、取日志区间、
-启动 / 停止 / 重启实例。
+启动 / 停止 / 重启实例、触发本机 micdn reload。
 
 协议本身（信封、原语表、鉴权、节拍）见 [channel-protocol.md](channel-protocol.md)——**那份是唯一权威**，
 本文只讲怎么用、什么时候用、坏了怎么办。
@@ -36,7 +36,7 @@ BAS_TOKEN=9f8e7d6c5b4a39281706f5e4d3c2b1a0
 | 命令 | 做什么 | 什么时候用 |
 |---|---|---|
 | `basagent report [server.xml]` | 连一次、发 `hello` + 两份上报、断开；报上去了退出码 0 | 手工对一次账；脚本 / cron |
-| `systemctl start basagent.service` | 常驻：连上发一次完整快照，之后按 hub 下发的 `report:health` 即时返回实例状态、回保活、执行固定指令（读日志 / 启停实例），断线 10s 后重连 | 生产机由系统级 systemd 管理，账号固定为 `bas:beangle` |
+| `systemctl start basagent.service` | 常驻：连上发一次完整快照，之后按 hub 下发的 `report:health` 即时返回实例状态、回保活、执行固定指令（读日志 / 启停实例 / micdn reload），断线 10s 后重连 | 生产机由系统级 systemd 管理，账号固定为 `bas:beangle` |
 | `bin/bas.sh pull` | 显式拉取一次 `conf/server.xml`（底层调用 `basagent pull`） | 需要从 bashub 更新配置时 |
 
 `basctl start` / `basctl stop` 与 `bin/start.sh` / `bin/restart.sh` 只做本地动作，不拉配置、

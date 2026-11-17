@@ -57,7 +57,8 @@ immutable string[] hubPrimitives = [
  */
 immutable string[] supportedPrimitives = [
   "hello", "report:os", "report:bas", "report:health", "result", "pong", "ping", "report:now",
-  "config:refresh", "log:read", "agent:log", "service:start", "service:stop", "service:restart"
+  "config:refresh", "log:read", "agent:log", "service:start", "service:stop", "service:restart",
+  "micdn:reload"
 ];
 
 /** 请求号上限；hub 目前发 UUID。 */
