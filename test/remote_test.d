@@ -13,19 +13,9 @@ import bas.remote : RemoteConfig, agentChannelUrl, bearerCredential, isAllowedRe
   loadRemoteEnv, serverConfigUrl, validateRemoteConf;
 
 import std.exception : assertThrown;
-import std.process : environment;
-
-private void clearRemote() {
-  environment.remove("BAS_PRINCIPAL");
-  environment.remove("BAS_TOKEN");
-}
 
 @("BAS_PRINCIPAL parses project and url") unittest {
-  clearRemote();
-  scope (exit) clearRemote();
-  environment["BAS_PRINCIPAL"] = "openurp.prod@https://hub.example.com/bashub/";
-  environment["BAS_TOKEN"] = "secret";
-  auto conf = loadRemoteEnv();
+  auto conf = loadRemoteEnv("openurp.prod@https://hub.example.com/bashub/", "secret");
   assert(conf.url == "https://hub.example.com/bashub/");
   assert(conf.project == "openurp.prod");
   assert(conf.token == "secret");
@@ -38,24 +28,15 @@ private void clearRemote() {
 }
 
 @("empty environment is offline") unittest {
-  clearRemote();
-  scope (exit) clearRemote();
-  assert(!loadRemoteEnv().configured);
-  assert(!loadRemoteEnv().complete);
+  assert(!loadRemoteEnv("", "").configured);
+  assert(!loadRemoteEnv("", "").complete);
 }
 
 @("partial or malformed environment is rejected") unittest {
-  clearRemote();
-  scope (exit) clearRemote();
-  environment["BAS_PRINCIPAL"] = "openurp.prod@https://hub.example.com";
-  assertThrown!Exception(loadRemoteEnv());
-  environment["BAS_TOKEN"] = "secret";
-  environment["BAS_PRINCIPAL"] = "openurp.prod";
-  assertThrown!Exception(loadRemoteEnv());
-  environment["BAS_PRINCIPAL"] = "openurp.prod@ftp://host";
-  assertThrown!Exception(loadRemoteEnv());
-  environment["BAS_PRINCIPAL"] = "prod@https://host";
-  assertThrown!Exception(loadRemoteEnv());
+  assertThrown!Exception(loadRemoteEnv("openurp.prod@https://hub.example.com", ""));
+  assertThrown!Exception(loadRemoteEnv("openurp.prod", "secret"));
+  assertThrown!Exception(loadRemoteEnv("openurp.prod@ftp://host", "secret"));
+  assertThrown!Exception(loadRemoteEnv("prod@https://host", "secret"));
 }
 
 @("remote validation rejects incomplete values") unittest {
