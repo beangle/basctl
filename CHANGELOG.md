@@ -9,7 +9,6 @@
   `/etc/bas/conf/basctl.env`；`bin/env.sh` 默认加载该文件，源码/自定义目录用
   `BAS_ENV_FILE` 覆盖。
 - **不提供旧路径回退**：程序不读取 `/var/lib/bas/conf/basctl.env`；升级时需自行迁移文件。
-- 安装包把 `basctl.env` 作为 `/etc` 下的 conffile 下发；RPM/DEB 的旧路径条目已移除。
 - **agent 可无 server.xml 运行**：`basagent pull` 发现远端配置没有本机 bas server 时，不安装
   server.xml（并清理无效的旧空文件）；`basagent.service` 不再要求该文件存在，micdn/proxy 节点
   可以只保留 agent 身份与通道。
