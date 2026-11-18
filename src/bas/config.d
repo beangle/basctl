@@ -893,8 +893,14 @@ Container parseServerXml(string xmlText, RemoteConfig remote = RemoteConfig.init
 /** Reads the file path then delegates to `parseServerXml`. */
 Container parseServerXmlFile(string path) {
   import std.file : readText;
+  import std.algorithm : canFind;
 
-  return parseServerXml(readText(path), loadRemoteEnv());
+  auto text = readText(path);
+  // 只有配置里真的写了 `${bas_remote_*}` 才需要远程身份；本地独立使用的 server.xml
+  // 不应因为进程里残留的不完整 BAS_PRINCIPAL 而解析失败。
+  auto remote = text.canFind("${bas_remote_url}") || text.canFind("${bas_remote_token}")
+      ? loadRemoteEnv() : RemoteConfig.init;
+  return parseServerXml(text, remote);
 }
 
 /** 本机 setline 的实际入口；`enabled=false` 表示本机不参与 setline。 */
