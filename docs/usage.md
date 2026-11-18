@@ -20,15 +20,15 @@ docker run -d --name bas -p 8080:8080 -v ~/bas-work:/var/lib/bas basctl:0.0.1
 ```
 
 打包细节见 [scripts/README.md](../scripts/README.md)。
-系统包会创建 `bas:beangle` 账号、`/var/lib/bas`、`/var/log/bas`，把控制脚本与
-`conf/basctl.env` 模板装到 `/var/lib/bas`，并启用 `basagent.service`；basagent 不允许以
-root 运行。
+系统包会创建 `bas:beangle` 账号、`/var/lib/bas`、`/var/log/bas`，把控制脚本装到
+`/var/lib/bas`、把 `basctl.env` 模板装到 `/etc/bas/conf`（root:beangle 0640），并启用
+`basagent.service`；basagent 不允许以 root 运行。
 
 ## 五分钟上手
 
 先选一种运行方式：由 bashub 管配置，或只在本机独立使用。系统包已经铺好
-`/var/lib/bas/bin` 与 `/var/lib/bas/conf`；从源码安装或使用其它目录时，才需要先执行
-`basctl init`。
+`/var/lib/bas/bin`、`/var/lib/bas/conf` 与 `/etc/bas/conf/basctl.env`；从源码安装或使用
+其它目录时，执行 `basctl init` 铺脚本，但**不会**生成 `basctl.env`。
 
 ### 方式一：接入 bashub（推荐）
 
@@ -36,11 +36,11 @@ bashub 是配置与实例的远端权威：`bas.sh pull` 从它拉取 `conf/serv
 把本机现状报回去，并接收日志 / 启停指令。先在 bashub 里为这台机器建好 Project，再填写本地配置：
 
 ```sh
-# 1. 系统包已预置控制脚本与 basctl.env 模板；源码安装或其它目录执行：
+# 1. 系统包已预置控制脚本与 /etc/bas/conf/basctl.env 模板；源码安装或其它目录执行：
 # sudo -u bas -H basctl init /var/lib/bas
 
-# 2. 填写模板（已按 0600 安装、含字段说明）
-sudo -u bas -H "${EDITOR:-vi}" /var/lib/bas/conf/basctl.env
+# 2. 填写主机级配置（root:beangle 0640，含字段说明）
+sudo "${EDITOR:-vi}" /etc/bas/conf/basctl.env
 ```
 
 模板结构如下，把两项填成 bashub 中这台机器对应的值：
@@ -73,7 +73,7 @@ sudo -u bas -H tail -f /var/log/bas/agent/console.out
 
 ### 方式二：不接 bashub，单独使用
 
-只需要 `conf/server.xml`；`init` 生成的空 `conf/basctl.env` 不影响本地命令：
+只需要 `conf/server.xml`；不接 bashub 时不需要 `basctl.env`：
 
 ```sh
 basctl init /opt/bas
@@ -119,7 +119,7 @@ basctl stop all
 | `basctl banner [server.xml]` | 操作者横幅：logo + bas 引擎版本（取自 `<bas version>`）+ basctl 版本 + 本机地址；`bas.sh version` 调它。图形为纯 ASCII，只在交互终端出现，重定向到日志/管道时只剩版本行与本机地址 |
 | `basctl status` | 列出 `$BAS_HOME/servers` 下运行中的实例：读 `server.info` 展示 pid、端口与各 webapp 的对外 url（引擎与启动时间只留在 `server.info` 里，不再打印）。记录 pid 已失效时，会按命令行 `-Dbas.server` + `-Dbas.home` 找回本实例的真实进程；找不到就不出现在这一节（不再打印 `stale`）。 |
 | `basctl logs [server.xml] <farm.server> [-n <行数>] [-f]` | 读 `$BAS_HOME/logs/<farm.server>/console.out` 的尾部：`-n` 缺省 50 行、上限 2000；`-f` 持续跟随（Ctrl-C 退出），日志滚动后自动跟新文件。归档的旧日志在 `logs/archive/`，要查直接读文件 |
-| `basctl init [--force] [--dry-run] [workdir]` | 初始化组件目录：把控制脚本铺到 `<workdir>/bin`，并生成带注释的 `conf/basctl.env` 模板（已存在则不覆盖） |
+| `basctl init [--force] [--dry-run] [workdir]` | 初始化组件目录：把控制脚本铺到 `<workdir>/bin` 并建 `conf/`；**不生成 `basctl.env`**，未设置 `BAS_PRINCIPAL`/`BAS_TOKEN` 时提示使用 `/etc/bas/conf/basctl.env` |
 | `basctl make [server.xml] <farm\|server\|all>` | 只准备不启动：生成 jstart spec 并 `jstart resolve` 预取依赖 |
 | `basctl resolve <server.xml> [pattern...]` | 只解析 webapp，不生成实例 |
 | `basctl start [server.xml] <farm\|server\|all> [--port-range=<from>-<to>]` | 为实例定端口（`<server http="0">` 时在区间内分配，缺省 `20000-29999`）、写 `server.info`、生成 jstart spec、resolve 并后台启动 |
@@ -148,15 +148,16 @@ sudo basctl proxy apply --engine=haproxy --bundle=/tmp/proxy-bundle.zip
 sudo basctl proxy status --engine=haproxy
 ```
 
-认证仍来自 `BAS_PRINCIPAL` / `BAS_TOKEN`。`basctl proxy` 是手工/一次性命令，不安装
-systemd service，也不提供定时器；需要定时执行时由运维在外层调度。
+认证仍来自 `BAS_PRINCIPAL` / `BAS_TOKEN`。`basctl proxy` 目前是手工/一次性命令，不安装
+systemd service，也不提供定时器；需要定时执行时由运维在外层调度。由 bashub 集中触发的
+权限设计（含 CentOS 7 的 polkit 兼容说明）见 [proxy.md](proxy.md) 的「集中触发与 polkit」。
 
 直接执行时需要先加载环境：
 
 ```bash
 sudo -i
 set -a
-. /var/lib/bas/conf/basctl.env
+. /etc/bas/conf/basctl.env
 set +a
 basctl proxy apply --engine=haproxy
 ```
@@ -204,30 +205,29 @@ doctor: all required commands are available.
 ## 组件目录初始化
 
 `basctl init [workdir]` 把控制脚本（`env.sh`、`bas.sh`、`start.sh`、`stop.sh`、`restart.sh`）
-铺到 `<workdir>/bin` 并建好 `conf/`，用于从零搭建一个
-bas 组件目录。RPM/DEB 安装包已经把同一套文件铺到标准目录 `/var/lib/bas`，不需要额外执行
-`init`。常驻 agent 由系统级 systemd 管理，不再生成 `agent/agent.pid` 或
-`agent/console.out`；标准安装中实例日志位于 `/var/log/bas`，并通过
-`/var/lib/bas/logs` 符号链接保持原有路径。若
-`conf/basctl.env` 不存在，还会生成一份带注释、两项留空的模板，权限为 `0600`。
-脚本与模板都内嵌在 basctl 里，随 basctl 版本发布，不再依赖单独的发行包：
+铺到 `<workdir>/bin` 并建好 `conf/`，用于从零搭建一个 bas 组件目录。RPM/DEB 安装包已经把
+同一套文件铺到标准目录 `/var/lib/bas`，不需要额外执行 `init`。常驻 agent 由系统级 systemd
+管理，不再生成 `agent/agent.pid` 或 `agent/console.out`；标准安装中实例日志位于
+`/var/log/bas`，并通过 `/var/lib/bas/logs` 符号链接保持原有路径。
+
+**`init` 不生成 `basctl.env`。** 远程身份是主机级配置，固定放在
+`/etc/bas/conf/basctl.env`（root:beangle 0640）；未设置 `BAS_PRINCIPAL`/`BAS_TOKEN` 时，
+`init` 只打印提示。脚本内嵌在 basctl 里，随 basctl 版本发布，不再依赖单独的发行包：
 
 ```sh
-basctl init /opt/bas           # 写入 bin/*.sh 与 basctl.env 模板（已存在的文件保留）
-basctl init --force /opt/bas   # 覆盖为当前 basctl 内置的脚本（仍不覆盖 basctl.env）
+basctl init /opt/bas           # 写入 bin/*.sh；不写 basctl.env
+basctl init --force /opt/bas   # 覆盖为当前 basctl 内置的脚本
 basctl init --dry-run /opt/bas # 只打印将会写入的文件
 ```
 
-`conf/basctl.env` 一旦存在就永不覆盖，`--force` 也只作用于脚本；`bin/setenv.sh` 与
-`conf/server.xml` 是用户配置，`init` 不生成。使用系统包时，升级会刷新 `bin/*.sh`，并保留已有
-的 `basctl.env`。RPM 把模板放在 `/usr/share/basctl/basctl.env`，`%post` 只在
-`/var/lib/bas/conf/basctl.env` 缺失时生成，并以 `%ghost` 登记——卸载、重装、升级都不会覆盖或
-删除它；DEB 仍按 conffile 安装，`apt remove` 保留、`apt purge` 才删除。非系统包目录仍可在
-升级 basctl 后重跑 `basctl init --force`。不再有单独的发行包 zip（原 `bas.sh update` 已移除）。
+`bin/setenv.sh` 与 `conf/server.xml` 是用户配置，`init` 不生成。使用系统包时，升级会刷新
+`bin/*.sh`；`/etc/bas/conf/basctl.env` 按 conffile 保留，卸载/重装/升级都不会覆盖。
+源码或自定义目录默认也读 `/etc/bas/conf/basctl.env`，需要独立文件时用 `BAS_ENV_FILE`
+指向自己的文件。DEB conffile 语义是 `apt remove` 保留、`apt purge` 删除；RPM 的
+`%config(noreplace)` 同理。
 
-> **`conf/basctl.env` 是用户配置，卸载、重装、升级都不得删除或覆盖。** RPM 不要把它改回
-> `%files` 里的普通 `%config`，也不要在 `%preun`/`%postun` 里 `rm`；模板 + 缺失时生成 + `%ghost`
-> 是唯一入口。DEB 的 conffile 语义是 `apt remove` 保留、`apt purge` 删除。
+> **`/etc/bas/conf/basctl.env` 是主机级配置，卸载、重装、升级都不得删除或覆盖。**
+> 需要迁移旧路径时由运维手工处理，程序不读取 `/var/lib/bas/conf/basctl.env`。
 
 **替换 basagent 不会停实例。** `basctl start` 拉起的实例本来就是独立进程；控制台
 `service:start` 拉起的实例会继承 `basagent.service` 的 cgroup，因此单元设置为
@@ -235,10 +235,10 @@ basctl init --dry-run /opt/bas # 只打印将会写入的文件
 `/usr/lib/systemd/system/basagent.service` 并 `systemctl daemon-reload`，再替换二进制；
 直接用新包升级时 `%post` 会先 `daemon-reload` 再 `try-restart`，实例不受影响。
 
-## 远程配置 `conf/basctl.env`
+## 远程配置 `/etc/bas/conf/basctl.env`
 
-控制台连接只从环境变量读取；`conf/basctl.env` 是 systemd 的 `EnvironmentFile`，手工执行
-`bin/*.sh` 时由 `bin/env.sh` 自动加载。不再读取 INI 文件，也不靠 `ip:` 请求头识别机器。
+控制台连接只从环境变量读取；`/etc/bas/conf/basctl.env` 是 systemd 的 `EnvironmentFile`，
+手工执行 `bin/*.sh` 时由 `bin/env.sh` 自动加载（可用 `BAS_ENV_FILE` 覆盖路径）。不再读取 INI 文件，也不靠 `ip:` 请求头识别机器。
 
 | 变量 | 必填 | 说明 |
 |---|---|---|
@@ -269,7 +269,7 @@ basctl init --dry-run /opt/bas # 只打印将会写入的文件
 - 同一个 `<repository>` / `<snapshot-repo>` 有多个 `remote` 时，`token` 可写成与地址
   等长的逗号列表（如 `token="key1,key2"`）；basctl 会合并成
   `--remote=key1@url1,url2` 交给 jstart。空段表示对应仓库匿名，凭证不会跨仓库复用。
-- 文件含凭证；`init` 生成的模板已是 `0600`，手工创建时也建议 `chmod 600 conf/basctl.env`。
+- 文件含凭证：`/etc/bas/conf` 目录 `0750 root:beangle`，文件 `0640 root:beangle`；`bas` 只读。
 - 修改环境文件后重启 `basagent.service`；手工执行 `bin/bas.sh pull` 时由 `bin/env.sh` 自动加载。
 
 ## 常见场景
@@ -293,7 +293,7 @@ basctl run --engine=tomcat-11.0.25 --print  /repo/app.war   # 只打印将要执
 ### 拉配置与开防火墙
 
 ```sh
-/opt/bas/bin/bas.sh pull          # 读取 /opt/bas/conf/basctl.env
+/opt/bas/bin/bas.sh pull          # 读取 /etc/bas/conf/basctl.env
 basctl firewall /opt/bas          # 交互式地放行 server.xml 里的端口
 ```
 

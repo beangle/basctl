@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- **远程配置迁到 `/etc`**：`basctl.env` 从 `$BAS_HOME/conf` 迁到
+  `/etc/bas/conf/basctl.env`（root:beangle 0640）；systemd 只读这一处，不再读取
+  `/etc/sysconfig/basagent`、`/etc/default/basagent`。
+- **`basctl init` 不再写 `basctl.env`**：未设置 `BAS_PRINCIPAL`/`BAS_TOKEN` 时只提示创建
+  `/etc/bas/conf/basctl.env`；`bin/env.sh` 默认加载该文件，源码/自定义目录用
+  `BAS_ENV_FILE` 覆盖。
+- **不提供旧路径回退**：程序不读取 `/var/lib/bas/conf/basctl.env`；升级时需自行迁移文件。
+- 安装包把 `basctl.env` 作为 `/etc` 下的 conffile 下发；RPM/DEB 的旧路径条目已移除。
+
 ## v0.0.2 (2026-11-17)
 
 - **远程凭证改为环境变量**：删除 `basctl.conf` 的 `[remote]` 段，改用

@@ -11,10 +11,12 @@ if [ "$(id -u)" = 0 ]; then
   exit 1
 fi
 
-# 手工执行 bin/*.sh 时也从 conf/basctl.env 注入远程配置；systemd 服务另有 EnvironmentFile。
-if [ -f "$BAS_HOME/conf/basctl.env" ]; then
+# 手工执行 bin/*.sh 时也从 /etc/bas/conf/basctl.env 注入远程配置（可用 BAS_ENV_FILE 覆盖）；
+# systemd 服务另有 EnvironmentFile。源码/自定义目录用 BAS_ENV_FILE 指向自己的文件。
+BAS_ENV_FILE="${BAS_ENV_FILE:-/etc/bas/conf/basctl.env}"
+if [ -f "$BAS_ENV_FILE" ]; then
   set -a
-  . "$BAS_HOME/conf/basctl.env"
+  . "$BAS_ENV_FILE"
   set +a
 fi
 

@@ -62,7 +62,8 @@ basctl 校验角色、路径和 SHA-256，拒绝绝对路径和 `..`。
   ```
 
 - `pull` 不再接受 `--file`；启动拉取失败即失败，不做本地兜底。
-- 安装包下发 `basctl.env`，systemd 通过 `EnvironmentFile` 读取。
+- 安装包下发 `basctl.env` 到 `/etc/bas/conf/basctl.env`（root:beangle 0640），systemd 通过
+  `EnvironmentFile` 读取；不再读取 `/etc/sysconfig/basagent`、`/etc/default/basagent`。
 - `basagent` 只从环境变量读取 Project 和 token。
 
 ### 其他
@@ -73,11 +74,14 @@ basctl 校验角色、路径和 SHA-256，拒绝绝对路径和 `..`。
 
 ## 升级
 
+- 远程配置：把旧的 `/var/lib/bas/conf/basctl.env` 手工迁到
+  `/etc/bas/conf/basctl.env`，属主 `root:beangle`、权限 `0640`；程序不读取旧路径。
+  `basctl init` 不再生成该文件。
 - 代理节点配置：
 
   ```bash
   set -a
-  . /var/lib/bas/conf/basctl.env
+  . /etc/bas/conf/basctl.env
   set +a
   sudo basctl proxy apply --engine=haproxy
   ```
@@ -87,5 +91,5 @@ basctl 校验角色、路径和 SHA-256，拒绝绝对路径和 `..`。
 
 ```text
 dub build: 通过
-dub test: 151 passed
+dub test: 149 passed
 ```

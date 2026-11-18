@@ -17,29 +17,23 @@
 /**
  * `BAS_PRINCIPAL` / `BAS_TOKEN`：basctl 与控制台之间的远程连接配置。
  *
- * 远程地址、Project 名与凭证都只从这里读取；`pull` 不再依赖 `ip:` 请求头，也不再
- * 从环境变量推断控制台地址。文件格式是简单的 INI：
+ * 远程地址、Project 名与凭证都只从进程环境读取；`/etc/bas/conf/basctl.env` 是 systemd
+ * 的 EnvironmentFile（手工执行时由 `bin/env.sh` 加载）。`pull` 不再依赖 `ip:` 请求头，
+ * 也不读取 INI 文件：
  *
- *     [remote]
- *     url = https://hub.example.com
- *     project = openurp.prod
- *     token = <Project.key>
+ *     BAS_PRINCIPAL=openurp.prod@https://hub.example.com
+ *     BAS_TOKEN=<Project.key>
  *
- * `url` 是控制台根地址（含反向代理前缀），不是某个 Project 的完整地址；Project 与
- * 凭证分别由 `project` / `token` 给出。所有端点按 bashub 的能力域拼接：
+ * `BAS_PRINCIPAL` 的 project 部分是 Project 名，url 是控制台根地址（含反向代理前缀），
+ * 不是某个 Project 的完整地址。所有端点按 bashub 的能力域拼接：
  *
  *     <url>/api/bashub/config/<name>/server
  *     <url>/api/bashub/monitor/agents/<name>/channel
  */
 module bas.remote;
 
-import std.file : exists, readText;
 import std.process : environment;
-import std.path : buildPath, dirName;
-import std.string : indexOf, lastIndexOf, splitLines, strip, toLower;
-
-/** 配置文件相对 `BAS_HOME/conf` 的文件名。 */
-enum remoteConfFileName = "basctl.env";
+import std.string : indexOf, lastIndexOf, strip, toLower;
 
 /** bashub API 的固定根路径。 */
 private enum bashubApiPath = "/api/bashub";

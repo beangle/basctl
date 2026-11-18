@@ -9,10 +9,10 @@ basagent 主动拨一条出站 WebSocket 到控制台（bashub），把**这台�
 
 ## 启用
 
-地址、Project 和凭证都放在 `conf/basctl.env`，由 systemd `EnvironmentFile` 注入，与 `pull` 共用：
+地址、Project 和凭证都放在 `/etc/bas/conf/basctl.env`（root:beangle 0640），由 systemd `EnvironmentFile` 注入，与 `pull` 共用：
 
-> RPM/DEB 会把模板装到 `/var/lib/bas/conf/basctl.env`；源码安装或其它目录由
-> `basctl init` 生成。填上两项即可。
+> RPM/DEB 会把模板装到 `/etc/bas/conf/basctl.env`；源码安装或其它目录不再由
+> `basctl init` 生成，需自行创建该文件（或用 `BAS_ENV_FILE` 指向自己的文件）。
 
 ```sh
 BAS_PRINCIPAL=openurp.prod@https://hub.example.com
@@ -29,7 +29,7 @@ BAS_TOKEN=9f8e7d6c5b4a39281706f5e4d3c2b1a0
   发送时拼成 `<project>:<Project.key>`；`POST /api/bashub/config/projects/{id}/reset-key` 可以
   重置（重置后旧的拉取与通道连接一起失效）。
 - `server.xml` **不再**保存通道地址或凭证；旧文件里遗留的 `<hub>` 元素会被直接忽略。
-- remote 不读 INI 文件；手工执行 `bin/*.sh` 时由 `bin/env.sh` 加载 `conf/basctl.env`。
+- remote 不读 INI 文件；手工执行 `bin/*.sh` 时由 `bin/env.sh` 加载 `/etc/bas/conf/basctl.env`（源码/自定义目录用 `BAS_ENV_FILE` 指向）。
 
 ## 命令
 
@@ -66,9 +66,9 @@ BAS_TOKEN=9f8e7d6c5b4a39281706f5e4d3c2b1a0
 | 现象 | 多半是 | 怎么办 |
 |---|---|---|
 | `warning: remote is not configured` | `BAS_PRINCIPAL` / `BAS_TOKEN` 只有一项或格式错误；`basagent` / `pull` 报错 | 需要通道时补全两项，见上面的样例 |
-| `no snapshot published: wss://…` | 地址不对 / 控制台不可达 / 网络不通 | 先确认 `bin/bas.sh pull` 能通；地址看 `conf/basctl.env` |
+| `no snapshot published: wss://…` | 地址不对 / 控制台不可达 / 网络不通 | 先确认 `bin/bas.sh pull` 能通；地址看 `/etc/bas/conf/basctl.env` |
 | `certificate verify failed` / `no system CA bundle` | 系统没有 CA 包，或服务端证书不被信任 | 安装发行版的 CA 包；不要通过改成 `ws://` 绕过 |
-| 常驻 agent 反复重连 | 同上，或 token 被重置过 | 更新 `basctl.env` 的 token 后重启 agent |
+| 常驻 agent 反复重连 | 同上，或 token 被重置过 | 更新 `/etc/bas/conf/basctl.env` 的 token 后重启 agent |
 | 控制台看不到这台机器 | 通道没连上，或 project 名不对 | 看 `/var/log/bas/agent/console.out` 的 `channel:` 行；确认路径里的 project 与 bashub 的配置名一致 |
 | `service:*` 返回 `start-failed` / `prepare-failed` | 实例启动或依赖解析失败 | 控制台先看结果里的 `detail` / `logTail`；完整内容用 `log:read` 或 `basctl logs` |
 
@@ -89,8 +89,8 @@ sudo systemctl status basagent.service
 自身也会拒绝 root。PID 由 systemd 管理，日志追加到 `/var/log/bas/agent/console.out`；
 `/etc/logrotate.d/bas` 在文件达到 10 MiB 时用 `copytruncate` 轮转，保留 8 份压缩历史。
 systemd 不读取 `bas` 用户的 `.bashrc`；需要自定义 JDK 或 OpenSSL 时，把
-`JAVA_HOME` / `PATH` / `LD_LIBRARY_PATH` 写进 `/etc/sysconfig/basagent`
-（Debian 系也可用 `/etc/default/basagent`），再重启服务。
+`JAVA_HOME` / `PATH` / `LD_LIBRARY_PATH` 直接写进 `/etc/bas/conf/basctl.env`，
+或用 `systemctl edit basagent.service` 的 drop-in，再重启服务。
 
 agent 只做「上报 + 固定指令」，**不做 supervisor**：实例崩了不会自动重启（这条一直不变），
 也没被超时或坏消息弄退出的风险——它宁可重连也不退出。`service:stop` / `service:restart`
@@ -99,7 +99,7 @@ agent 只做「上报 + 固定指令」，**不做 supervisor**：实例崩了�
 ## 升级
 
 RPM/DEB 升级时会刷新 `/var/lib/bas/bin/*.sh` 并执行 `systemctl try-restart basagent.service`，
-让正在运行的 agent 切换到新二进制。`basctl.env`、`server.xml` 与日志目录不会被安装包覆盖。
+让正在运行的 agent 切换到新二进制。`/etc/bas/conf/basctl.env`、`server.xml` 与日志目录不会被安装包覆盖。
 只有非系统包目录或需要手工刷新脚本时才需要执行：
 
 ```bash
@@ -107,7 +107,7 @@ sudo -u bas -H basctl init --force /var/lib/bas
 sudo systemctl restart basagent.service
 ```
 
-`basctl init --force` 只刷新 `bin/*.sh`；`basctl.env` 与 `server.xml` 仍不会被覆盖。
+`basctl init --force` 只刷新 `bin/*.sh`；`basctl.env` 不由 `init` 创建，`server.xml` 也不会被覆盖。
 
 从旧版 `bas.sh agent-start` 迁移时，先用旧 `BAS_HOME` 里的 `bin/bas.sh agent-stop`
 （或旧 PID 文件）停掉手工启动的 agent，再启动 systemd 服务；同一个 project 只允许一条

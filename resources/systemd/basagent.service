@@ -10,9 +10,7 @@ User=bas
 Group=beangle
 Environment=HOME=/var/lib/bas
 Environment=BAS_HOME=/var/lib/bas
-EnvironmentFile=-/var/lib/bas/conf/basctl.env
-EnvironmentFile=-/etc/sysconfig/basagent
-EnvironmentFile=-/etc/default/basagent
+EnvironmentFile=-/etc/bas/conf/basctl.env
 WorkingDirectory=/var/lib/bas
 ExecStartPre=/bin/mkdir -p /var/log/bas/agent
 ExecStart=/bin/sh -c 'exec /usr/bin/basagent /var/lib/bas/conf/server.xml >>/var/log/bas/agent/console.out 2>&1'

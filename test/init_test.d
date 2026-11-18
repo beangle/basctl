@@ -63,16 +63,17 @@ private string fakeBasagent(string root) {
   auto result = installScripts(root, false, false);
   assert(result.written == scriptCount);
   assert(result.kept == 0);
-  assert(result.confWritten);
-  assert(!result.confKept);
   assert(exists(buildPath(root, "conf")));
+  assert(!exists(buildPath(root, "conf", "basctl.env")));
   foreach (name; names) {
     auto path = buildPath(root, "bin", name);
     assert(exists(path));
     assert(readText(path).length > 0);
   }
-  assert(readText(buildPath(root, "bin", "env.sh")).canFind("basctl_cmd"));
-  assert(readText(buildPath(root, "bin", "env.sh")).canFind("basagent_cmd"));
+  auto env = readText(buildPath(root, "bin", "env.sh"));
+  assert(env.canFind("basctl_cmd"));
+  assert(env.canFind("basagent_cmd"));
+  assert(env.canFind("/etc/bas/conf/basctl.env"));
 }
 
 @("installScripts keeps existing scripts unless forced") unittest {
@@ -85,37 +86,11 @@ private string fakeBasagent(string root) {
 
   auto kept = installScripts(root, false, false);
   assert(kept.written == 0 && kept.kept == scriptCount);
-  assert(!kept.confWritten && kept.confKept);
   assert(readText(bas) == "CUSTOM");
 
   auto forced = installScripts(root, true, false);
   assert(forced.written == scriptCount && forced.kept == 0);
-  assert(!forced.confWritten && forced.confKept);
   assert(readText(bas).canFind("basctl_cmd"));
-}
-
-@("installScripts writes a basctl.env template with empty remote fields") unittest {
-  auto root = newRoot("remote-template");
-  scope (exit) if (exists(root)) rmdirRecurse(root);
-
-  auto result = installScripts(root, false, false);
-  assert(result.confWritten);
-
-  auto conf = buildPath(root, "conf", "basctl.env");
-  auto text = readText(conf);
-  assert(text.canFind("# basctl.env"), text);
-  assert(text.canFind("BAS_PRINCIPAL="), text);
-  assert(text.canFind("BAS_TOKEN="), text);
-
-  version (Posix) {
-    import core.sys.posix.sys.stat : lstat, stat_t;
-    import std.conv : octal;
-    import std.string : toStringz;
-
-    stat_t st;
-    assert(lstat(conf.toStringz, &st) == 0);
-    assert((st.st_mode & octal!777) == octal!600);
-  }
 }
 
 @("installScripts dry run touches nothing") unittest {
@@ -124,20 +99,7 @@ private string fakeBasagent(string root) {
 
   auto result = installScripts(root, false, true);
   assert(result.written == scriptCount);
-  assert(result.confWritten);
   assert(!exists(root));
-}
-
-@("installScripts never rewrites conf/basctl.env, even with force") unittest {
-  auto root = newRoot("remote-conf");
-  scope (exit) if (exists(root)) rmdirRecurse(root);
-
-  installScripts(root, false, false);
-  auto conf = buildPath(root, "conf", "basctl.env");
-  write(conf, "BAS_PRINCIPAL=openurp.prod@https://hub.example.com\n");
-
-  installScripts(root, true, false);
-  assert(readText(conf) == "BAS_PRINCIPAL=openurp.prod@https://hub.example.com\n");
 }
 
 @("runInit rejects unknown options") unittest {
@@ -151,7 +113,7 @@ private string fakeBasagent(string root) {
   installScripts(root, false, false);
   auto fake = fakeBasctl(root);
   auto result = execute(["bash", buildPath(root, "bin", "start.sh"), "tools"],
-      ["beangle_basctl": fake]);
+      ["beangle_basctl": fake, "BAS_ENV_FILE": buildPath(root, "no.env")]);
 
   assert(result.status == 0, result.output);
   auto calls = readText(buildPath(root, "fake-calls"));
@@ -166,7 +128,7 @@ private string fakeBasagent(string root) {
   installScripts(root, false, false);
   auto fake = fakeBasctl(root);
   auto result = execute(["bash", buildPath(root, "bin", "restart.sh"), "tools"],
-      ["beangle_basctl": fake]);
+      ["beangle_basctl": fake, "BAS_ENV_FILE": buildPath(root, "no.env")]);
 
   assert(result.status == 0, result.output);
   auto calls = readText(buildPath(root, "fake-calls"));
@@ -183,7 +145,7 @@ private string fakeBasagent(string root) {
   installScripts(root, false, false);
   auto fake = fakeBasagent(root);
   auto result = execute(["bash", buildPath(root, "bin", "bas.sh"), "pull"],
-      ["beangle_basagent": fake]);
+      ["beangle_basagent": fake, "BAS_ENV_FILE": buildPath(root, "no.env")]);
 
   assert(result.status == 0, result.output);
   assert(readText(buildPath(root, "fake-agent-calls")) == "pull " ~ root ~ "\n");
