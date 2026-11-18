@@ -22,7 +22,8 @@
 `/etc/logrotate.d/bas`，并在 `/var/lib/bas` 预置 `bin/*.sh`，仍是一个安装包。
 `basctl.env` 是主机级凭证/配置，模板直接装到 `/etc/bas/conf/basctl.env`
 （root:beangle 0640）：RPM 用 `%config(noreplace)`，DEB 用 conffile；卸载、重装、升级都不覆盖，
-`apt purge` 才删除。`basctl` 是本地命令；
+`apt purge` 才删除。包内还安装 `proxy:apply` 的 root helper（`/usr/libexec/basproxy-apply`）、
+`basproxy-apply@.service` 和 polkit 规则（`/etc/polkit-1/rules.d/49-basproxy.rules`）。`basctl` 是本地命令；
 `basagent` 由 systemd 以专用账号 `bas:beangle` 常驻，主目录固定为 `/var/lib/bas`，日志写在
 `/var/log/bas/agent/console.out`。
 运行时用宿主 `curl` 下载，`make` / `start` / `resolve` / `run` 另需宿主 `jstart` 在 `PATH` 上。

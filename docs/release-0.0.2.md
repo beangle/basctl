@@ -71,6 +71,8 @@ basctl 校验角色、路径和 SHA-256，拒绝绝对路径和 `..`。
 - `start` 在删除实例目录前预检 jstart，缺失时给出明确错误。
 - `vibe-stream` 依赖范围对齐 1.5。
 - `proxy apply` 在服务 inactive 时启动，运行中才 reload。
+- 新增 `proxy:apply`：basagent 下载 bundle 后触发受 polkit 限制的 root helper；安装包附带
+  `/usr/libexec/basproxy-apply`、`basproxy-apply@.service` 和 CentOS 7 可用的 polkit JS 规则。
 
 ## 升级
 
@@ -91,5 +93,5 @@ basctl 校验角色、路径和 SHA-256，拒绝绝对路径和 `..`。
 
 ```text
 dub build: 通过
-dub test: 149 passed
+dub test: 150 passed
 ```

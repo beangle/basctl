@@ -35,12 +35,14 @@ module bas.agent;
 
 import bas.channel;
 import bas.config : Container, Host, parseServerXmlFile;
+import bas.fsutil : mkdirPrivate, setPrivateFile;
 import bas.hub : agentUrl;
 import bas.download : curlDownload;
 import bas.logs : agentLog, consoleLog, countLines, maxLogLines, plainName, readLogWindow;
 import bas.net : hostName, localAddresses;
 import bas.pull : runPull;
-import bas.remote : RemoteConfig, agentChannelUrl, bearerCredential, loadRemoteEnv, validateRemoteConf;
+import bas.remote : RemoteConfig, agentChannelUrl, bearerCredential, loadRemoteEnv, proxyBundleUrl,
+  validateRemoteConf;
 import bas.report : basReport, healthReport, osReport;
 import bas.starter : serviceAction;
 
@@ -59,7 +61,7 @@ import core.stdc.stdlib : abort;
 import std.algorithm : canFind, filter, sort;
 import std.array : array, join;
 import std.datetime.stopwatch : MonoTime;
-import std.file : exists, readText, remove, tempDir;
+import std.file : exists, readText, remove, tempDir, write;
 import std.json : JSONType, JSONValue;
 import std.path : absolutePath, buildPath, dirName;
 import std.uuid : randomUUID;
@@ -121,6 +123,8 @@ struct AgentContext {
   string endpoint;
   /** 握手凭证：`<project>:<Project.key>`。 */
   string credential;
+  /** 远程控制台/Project 信息；proxy:apply 用它拼 bundle 地址。 */
+  RemoteConfig remote;
   /** 当前配置路径；service:* 动作与 report:bas 都从同一份 server.xml 找实例。 */
   string configFile;
   string host;
@@ -240,6 +244,7 @@ private AgentContext agentContext(const Container conf, const RemoteConfig remot
     string basctlVersion, bool once) {
   AgentContext ctx;
   ctx.credential = bearerCredential(remote);
+  ctx.remote = remote;
   ctx.configFile = configFile;
   ctx.host = hostName();
   ctx.basHome = dirName(dirName(absolutePath(configFile)));
@@ -598,8 +603,10 @@ private void serveMaster(ref AgentContext ctx, scope WebSocket ws, RelayState st
 private string bodyText(JSONValue body, string key) {
   if (body.type != JSONType.object)
     return "";
-  auto value = body[key];
-  return value.type == JSONType.string ? value.get!string.strip : "";
+  auto value = key in body.object;
+  if (value is null || value.type != JSONType.string)
+    return "";
+  return value.str.strip;
 }
 
 /** 带 token/follower 身份探测目标 master；会验证 /agent 的准入条件。 */
@@ -1140,6 +1147,21 @@ private void handle(ref AgentContext ctx, scope WebSocket ws, string text) {
     rememberResult(ctx, msg.id, reloadReply);
     ws.send(reloadReply);
     break;
+  case "proxy:apply":
+    if (!msg.isRequest()) {
+      logWarn("channel: ignore %s without id", msg.type);
+      break;
+    }
+    if (!requestTimestampFresh(msg.at)) {
+      auto reply = resultMessage(msg.id, false, JSONValue(null), "bad-request: stale or missing timestamp");
+      rememberResult(ctx, msg.id, reply);
+      ws.send(reply);
+      break;
+    }
+    auto proxyReply = proxyApplyResult(ctx, msg.id, msg.body);
+    rememberResult(ctx, msg.id, proxyReply);
+    ws.send(proxyReply);
+    break;
   case "service:start":
   case "service:stop":
   case "service:restart":
@@ -1258,6 +1280,89 @@ private string logWindowResult(string path, string id, ref JSONValue body) {
     "lines": JSONValue(items),
     "truncated": JSONValue(truncated)
   ];
+  return resultMessage(id, true, data, "");
+}
+
+/** `proxy:apply` 只接受两个引擎；endpoint 是可选的安全名字。 */
+private bool validProxyEndpoint(string endpoint) {
+  if (endpoint.length > 64 || endpoint == "." || endpoint == "..")
+    return false;
+  foreach (ch; endpoint) {
+    if (!((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9')
+        || ch == '.' || ch == '_' || ch == '-'))
+      return false;
+  }
+  return true;
+}
+
+/** `proxy:apply`：下载 bundle 到 basagent 私有目录，再请 root oneshot helper 落盘/reload。
+ *
+ *  agent 不直接调用 basctl（它需要 root）；只写固定路径的 bundle/endpoint 请求文件，
+ *  通过 `systemctl start basproxy-apply@<engine>.service` 触发受 polkit 限制的 helper。
+ *  helper 负责路径/属主校验、`basctl proxy apply --bundle`、输出结果文件；agent 只读结果。
+ */
+string proxyApplyResult(ref AgentContext ctx, string id, ref JSONValue body) {
+  auto engine = bodyText(body, "engine").strip;
+  auto endpoint = bodyText(body, "endpoint").strip;
+  if (engine != "haproxy" && engine != "nginx")
+    return resultMessage(id, false, JSONValue(null), "bad-request: engine must be haproxy or nginx");
+  if (!validProxyEndpoint(endpoint))
+    return resultMessage(id, false, JSONValue(null), "bad-request: invalid endpoint");
+
+  auto dir = buildPath(ctx.basHome, "proxy");
+  auto bundle = buildPath(dir, engine ~ ".zip");
+  auto endpointFile = buildPath(dir, engine ~ ".endpoint");
+  auto resultFile = buildPath(dir, engine ~ ".result");
+  scope (exit) {
+    foreach (path; [bundle, endpointFile])
+      if (exists(path))
+        remove(path);
+  }
+
+  try
+    mkdirPrivate(dir);
+  catch (Exception e)
+    return resultMessage(id, false, JSONValue(null), "proxy-dir-failed: " ~ e.msg);
+
+  // 旧结果不能被本次误读；目录属于 bas，bas 可以删 root:beangle 的结果文件。
+  if (exists(resultFile))
+    remove(resultFile);
+
+  if (!curlDownload(proxyBundleUrl(ctx.remote, engine, endpoint), bundle,
+      ["Authorization: Bearer " ~ ctx.credential], false, 32 * 1024 * 1024))
+    return resultMessage(id, false, JSONValue(null), "proxy-download-failed");
+
+  try {
+    write(endpointFile, endpoint);
+    setPrivateFile(endpointFile);
+  } catch (Exception e) {
+    return resultMessage(id, false, JSONValue(null), "proxy-request-failed: " ~ e.msg);
+  }
+
+  int status;
+  string output;
+  try {
+    auto run = execute(["/usr/bin/systemctl", "start", "basproxy-apply@" ~ engine ~ ".service"]);
+    status = run.status;
+    output = run.output;
+  } catch (Exception e) {
+    return resultMessage(id, false, JSONValue(null), "proxy-helper-unavailable: " ~ e.msg);
+  }
+
+  string detail;
+  if (exists(resultFile)) {
+    try
+      detail = readText(resultFile);
+    catch (Exception e)
+      detail = output ~ "\n" ~ e.msg;
+  } else {
+    detail = output;
+  }
+  auto ok = status == 0 && detail.length >= 2 && detail[0 .. 2] == "ok";
+  JSONValue data = ["engine": JSONValue(engine), "endpoint": JSONValue(endpoint),
+      "detail": JSONValue(detail.strip)];
+  if (!ok)
+    return resultMessage(id, false, data, "proxy-apply-failed");
   return resultMessage(id, true, data, "");
 }
 

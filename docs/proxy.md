@@ -185,23 +185,27 @@ use_backend micdn if { path_beg /maven }
 
 当前方案保持 ACL，避免为少量路由引入 map 文件和状态同步。
 
-## 集中触发与 polkit（规划）
+## 集中触发与 polkit
 
-当前 `basctl proxy apply` 需要在节点上以 root 手工执行。后续由 bashub 管理台触发时，
+`basagent` 与 bashub 管理台已接通 `proxy:apply`：管理台按 endpoint 的 `ips` 找在线 agent，
 执行链固定为：
 
 ```text
 bashub 管理台（登录会话）
   → basagent（bas:beangle，无权）
-  → 下载 bundle 到 basagent 私有目录（使用 Project token，不交给 root）
+  → 下载 bundle 到 /var/lib/bas/proxy/<engine>.zip（使用 Project token，不交给 root）
+  → 写 /var/lib/bas/proxy/<engine>.endpoint
   → systemctl start basproxy-apply@<engine>.service（polkit 仅授权这一种 unit）
-  → root-owned helper 校验 bundle 路径并执行
+  → root-owned /usr/libexec/basproxy-apply 校验路径并执行
        basctl proxy apply --engine=<engine> --bundle=<path>
   → 校验 / 原子替换 / reload / 失败回滚
+  → 写 /var/lib/bas/proxy/<engine>.result，agent 读取后回给 hub
 ```
 
-bashub 只发固定动作，不接受任意命令、URL、service 名或配置路径；root helper 不联网，
-也不读取 `BAS_TOKEN`。
+bashub 只发固定动作（`engine` + `endpoint`），不接受任意命令、URL、service 名或配置路径；
+目标 IP 来自 endpoint 的 `ips`，bundle 下载由 agent 完成，
+root helper 不联网，也不读取 `BAS_TOKEN`。`proxy:apply` 的 body 只有 `engine`（`haproxy` /
+`nginx`）和可选的 `endpoint`；agent 校验后才会写请求文件。
 
 ### 为什么按 CentOS 7 设计
 
@@ -239,11 +243,12 @@ polkit.addRule(function(action, subject) {
 Description=Apply a bas proxy bundle for %i
 [Service]
 Type=oneshot
-ExecStart=/usr/local/libexec/basproxy-apply %i
+ExecStart=/usr/libexec/basproxy-apply %i
 ```
 
-`basproxy-apply` 只接受 `haproxy` / `nginx` 两个参数和 basagent 私有目录下的 bundle 路径；
-路径必须属于 `bas`、非 symlink，且位于固定目录。验证时可用：
+`basproxy-apply` 随 basctl 安装包部署，只接受 systemd 模板实例的 `haproxy` / `nginx` 参数；
+bundle 路径固定为 `/var/lib/bas/proxy/<engine>.zip`，必须属于 `bas`、权限 `0600`、非 symlink。
+helper 用 `flock` 串行化同一引擎的 apply，结果写给 `bas` 读取。验证时可用：
 
 ```bash
 pkaction --action-id org.freedesktop.systemd1.manage-units --verbose

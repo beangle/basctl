@@ -24,7 +24,8 @@
  */
 module test.agent_test;
 
-import bas.agent : agentLogResult, channelEnabled, logReadResult, runAgent, runReport, serviceResult;
+import bas.agent : AgentContext, agentLogResult, channelEnabled, logReadResult, proxyApplyResult, runAgent,
+  runReport, serviceResult;
 import bas.channel : Envelope, parseEnvelope;
 import bas.remote : loadRemoteEnv;
 import std.exception : assertThrown;
@@ -138,3 +139,18 @@ import std.uuid : randomUUID;
  *
  * 起在**另一个线程**上（阻塞收发），因为被测方 `runReport` 要独占主线程的事件循环。
  */
+
+
+@("proxyApplyResult rejects unsupported engines and unsafe endpoints")
+unittest {
+  AgentContext ctx;
+  auto request = parseJSON(`{"engine":"ftp"}`);
+  auto reply = parseEnvelope(proxyApplyResult(ctx, "r1", request));
+  assert(!reply.body["ok"].boolean, reply.body.toString());
+  assert(reply.body["error"].str == "bad-request: engine must be haproxy or nginx", reply.body.toString());
+
+  request = parseJSON(`{"engine":"haproxy","endpoint":"../etc"}`);
+  reply = parseEnvelope(proxyApplyResult(ctx, "r2", request));
+  assert(!reply.body["ok"].boolean, reply.body.toString());
+  assert(reply.body["error"].str == "bad-request: invalid endpoint", reply.body.toString());
+}

@@ -36,7 +36,7 @@ BAS_TOKEN=9f8e7d6c5b4a39281706f5e4d3c2b1a0
 | 命令 | 做什么 | 什么时候用 |
 |---|---|---|
 | `basagent report [server.xml]` | 连一次、发 `hello` + 两份上报、断开；报上去了退出码 0 | 手工对一次账；脚本 / cron |
-| `systemctl start basagent.service` | 常驻：连上发一次完整快照，之后按 hub 下发的 `report:health` 即时返回实例状态、回保活、执行固定指令（读日志 / 启停实例 / micdn reload），断线 10s 后重连 | 生产机由系统级 systemd 管理，账号固定为 `bas:beangle` |
+| `systemctl start basagent.service` | 常驻：连上发一次完整快照，之后按 hub 下发的 `report:health` 即时返回实例状态、回保活、执行固定指令（读日志 / 启停实例 / micdn reload / proxy apply），断线 10s 后重连 | 生产机由系统级 systemd 管理，账号固定为 `bas:beangle` |
 | `bin/bas.sh pull` | 显式拉取一次 `conf/server.xml`（底层调用 `basagent pull`） | 需要从 bashub 更新配置时 |
 
 `basctl start` / `basctl stop` 与 `bin/start.sh` / `bin/restart.sh` 只做本地动作，不拉配置、

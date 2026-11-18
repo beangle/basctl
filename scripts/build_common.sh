@@ -41,10 +41,17 @@ basctl_stage_runtime_home() {
   local pkgroot="$1"
   local bindir="$pkgroot/var/lib/bas/bin"
   local etcdir="$pkgroot/etc/bas/conf"
-  install -d -m 0755 "$bindir"
+  local libexecdir="$pkgroot/usr/libexec"
+  local unitdir="$pkgroot/usr/lib/systemd/system"
+  local polkitdir="$pkgroot/etc/polkit-1/rules.d"
+  install -d -m 0755 "$bindir" "$libexecdir" "$unitdir" "$polkitdir"
   install -d -m 0750 "$etcdir"
   for script in env.sh bas.sh start.sh stop.sh restart.sh; do
     install -m 0755 "$root/resources/bas/bin/$script" "$bindir/$script"
   done
   install -m 0640 "$root/resources/bas/init/basctl.env" "$etcdir/basctl.env"
+  # proxy:apply 的 root helper 与 polkit 规则：agent 只触发固定模板 unit。
+  install -m 0755 "$root/resources/basproxy/basproxy-apply" "$libexecdir/basproxy-apply"
+  install -m 0644 "$root/resources/systemd/basproxy-apply@.service" "$unitdir/basproxy-apply@.service"
+  install -m 0644 "$root/resources/polkit/49-basproxy.rules" "$polkitdir/49-basproxy.rules"
 }

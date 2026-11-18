@@ -10,6 +10,9 @@
   `BAS_ENV_FILE` 覆盖。
 - **不提供旧路径回退**：程序不读取 `/var/lib/bas/conf/basctl.env`；升级时需自行迁移文件。
 - 安装包把 `basctl.env` 作为 `/etc` 下的 conffile 下发；RPM/DEB 的旧路径条目已移除。
+- **新增 `proxy:apply`**：basagent 用 Project token 下载代理 bundle，再触发受 polkit 限制的
+  `basproxy-apply@<engine>.service`；root helper 校验路径后调用 `basctl proxy apply --bundle`。
+  安装包附带 `/usr/libexec/basproxy-apply`、模板 unit 和 CentOS 7 可用的 polkit JS 规则。
 
 ## v0.0.2 (2026-11-17)
 

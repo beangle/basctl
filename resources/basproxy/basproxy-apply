@@ -1,0 +1,95 @@
+#!/bin/sh
+# basproxy-apply：由 root oneshot unit 调用，落实 basagent 已下载的代理 bundle。
+#
+# basagent 只写固定目录下的 <engine>.zip / <engine>.endpoint；本脚本不联网、不读 token，
+# 校验路径/属主/权限后调用 basctl proxy apply --bundle，并把结果写到 <engine>.result。
+# 输入只有 systemd 模板实例的 engine；不接受额外参数、URL 或任意路径。
+set -eu
+
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+
+BASE=/var/lib/bas/proxy
+ENGINE="${1:-}"
+BASCTL="${BASCTL_BIN:-/usr/bin/basctl}"
+
+case "$ENGINE" in
+  haproxy|nginx) ;;
+  *)
+    echo "invalid engine: $ENGINE" >&2
+    exit 2
+    ;;
+esac
+
+bundle="$BASE/$ENGINE.zip"
+endpoint_file="$BASE/$ENGINE.endpoint"
+result="$BASE/$ENGINE.result"
+out=""
+cleanup() {
+  [ -n "$out" ] && rm -f "$out"
+}
+trap cleanup EXIT
+
+# result 由 root 写入 bas 可读；用 /run 下的临时文件再 mv，避免 bas 预置 symlink 让 root
+# 跟着写到别处（mv 替换 symlink 本身，不跟随目标）。
+write_result() {
+  local status="$1" detail="$2" tmp
+  tmp="$(mktemp /run/basproxy-result.XXXXXX)" || return 1
+  { echo "$status"; echo "$detail"; } > "$tmp"
+  chown root:beangle "$tmp" 2>/dev/null || true
+  chmod 0640 "$tmp"
+  # -T 把目标当普通文件：即使 bas 预置了指向目录的 symlink，也替换 symlink 本身。
+  mv -fT "$tmp" "$result"
+}
+
+fail() {
+  write_result failed "$*" || true
+  echo "$*" >&2
+  exit 1
+}
+
+[ -d "$BASE" ] && [ ! -L "$BASE" ] || fail "proxy request directory is missing"
+[ -f "$bundle" ] && [ ! -L "$bundle" ] || fail "bundle is missing or is a symlink"
+[ "$(stat -c '%U' "$bundle")" = "bas" ] || fail "bundle is not owned by bas"
+[ "$(stat -c '%a' "$bundle")" = "600" ] || fail "bundle permissions are not 0600"
+[ -f "$endpoint_file" ] && [ ! -L "$endpoint_file" ] || fail "endpoint file is missing or is a symlink"
+[ "$(stat -c '%U' "$endpoint_file")" = "bas" ] || fail "endpoint file is not owned by bas"
+[ "$(stat -c '%a' "$endpoint_file")" = "600" ] || fail "endpoint file permissions are not 0600"
+
+real="$(readlink -f "$bundle")" || fail "cannot resolve bundle path"
+case "$real" in
+  "$BASE"/*) ;;
+  *) fail "bundle escapes the proxy directory" ;;
+esac
+
+endpoint="$(cat "$endpoint_file")" || fail "cannot read endpoint"
+case "$endpoint" in
+  "") ;;
+  *[!A-Za-z0-9._-]*) fail "invalid endpoint name" ;;
+esac
+[ "$endpoint" != "." ] && [ "$endpoint" != ".." ] || fail "invalid endpoint name"
+[ "${#endpoint}" -le 64 ] || fail "endpoint name is too long"
+
+[ -x "$BASCTL" ] || fail "basctl is not executable: $BASCTL"
+
+# 同一引擎同时只允许一个 apply；锁放在 root 的 /run，避免 bas 用 symlink 干扰。
+exec 9>"/run/basproxy-$ENGINE.lock"
+flock -n 9 || fail "another proxy apply is running for $ENGINE"
+
+if [ -n "$endpoint" ]; then
+  set -- --engine="$ENGINE" --endpoint="$endpoint" --bundle="$bundle"
+else
+  set -- --engine="$ENGINE" --bundle="$bundle"
+fi
+
+out="$(mktemp /run/basproxy-out.XXXXXX)" || fail "cannot create output file"
+if "$BASCTL" proxy apply "$@" > "$out" 2>&1; then
+  status=0
+  write_result ok "$(cat "$out")" || fail "cannot write result"
+else
+  status=$?
+  write_result failed "$(cat "$out")" || fail "cannot write result"
+fi
+
+rm -f "$bundle" "$endpoint_file"
+exit "$status"

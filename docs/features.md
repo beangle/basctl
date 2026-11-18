@@ -18,7 +18,7 @@
 | 容器入口（creator） | `basctl make <type>` | jstart `[engine] init` 协议的回调，把容器启动命令写回 spec | [engine-creator.md](engine-creator.md) |
 | 环境自检 | `basctl doctor` | 检查 `java`（必需）与 `jstart`（可选提示） | [usage.md](usage.md) |
 | 防火墙 | `basctl firewall` | 按 `server.xml` 交互式配置 firewalld 的放行端口 | [usage.md](usage.md) |
-| 汇报与指令通道 | `basagent report` / `basagent` | 主动拨一条出站 WebSocket 到控制台（bashub），把本机现状（主机家底 + 活着的实例）报上去，并接收固定原语（立即上报 / 取实例或 agent 日志）；后台由发行包安装的 `basagent.service` 管理 | [channel.md](channel.md)、[channel-protocol.md](channel-protocol.md) |
+| 汇报与指令通道 | `basagent report` / `basagent` | 主动拨一条出站 WebSocket 到控制台（bashub），把本机现状（主机家底 + 活着的实例）报上去，并接收固定原语（立即上报 / 取实例或 agent 日志 / micdn reload / proxy apply）；后台由发行包安装的 `basagent.service` 管理 | [channel.md](channel.md)、[channel-protocol.md](channel-protocol.md) |
 | 拉取配置 | `bas.sh pull`（`basagent pull`） | 从控制端拉取 `conf/server.xml`（旧配置备份为 `server_old.xml`）；`start` / `restart` 不隐式拉取 | [usage.md](usage.md) |
 | 横幅与版本 | `basctl banner` / `basctl version` | `bas.sh version` 调前者：ASCII logo + bas 引擎版本 + basctl 版本 + 本机地址 | [usage.md](usage.md) |
 | 发行 | `scripts/build_deb.sh` / `build_rpm.sh` | deb / rpm 包 | [scripts/README.md](../scripts/README.md) |

@@ -1,0 +1,8 @@
+[Unit]
+Description=Apply a bas proxy bundle for %i
+Documentation=https://github.com/beangle/basctl
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/basproxy-apply %i
+TimeoutStartSec=300

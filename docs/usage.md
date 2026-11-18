@@ -148,8 +148,8 @@ sudo basctl proxy apply --engine=haproxy --bundle=/tmp/proxy-bundle.zip
 sudo basctl proxy status --engine=haproxy
 ```
 
-认证仍来自 `BAS_PRINCIPAL` / `BAS_TOKEN`。`basctl proxy` 目前是手工/一次性命令，不安装
-systemd service，也不提供定时器；需要定时执行时由运维在外层调度。由 bashub 集中触发的
+认证仍来自 `BAS_PRINCIPAL` / `BAS_TOKEN`。`basctl proxy` 仍可手工执行，也可由 bashub 管理台
+触发 `proxy:apply`：agent 下载 bundle 后调用受 polkit 限制的 `basproxy-apply@.service`。
 权限设计（含 CentOS 7 的 polkit 兼容说明）见 [proxy.md](proxy.md) 的「集中触发与 polkit」。
 
 直接执行时需要先加载环境：

@@ -64,8 +64,13 @@ struct RemoteConfig {
 
 /// 从进程环境读取 `BAS_PRINCIPAL` / `BAS_TOKEN`；两者都为空表示离线。
 RemoteConfig loadRemoteEnv() {
-  auto principal = environment.get("BAS_PRINCIPAL", "").strip;
-  auto token = environment.get("BAS_TOKEN", "").strip;
+  return loadRemoteEnv(environment.get("BAS_PRINCIPAL", ""), environment.get("BAS_TOKEN", ""));
+}
+
+/// 显式传入两项，便于测试和调用方做纯解析；语义与读环境版本相同。
+RemoteConfig loadRemoteEnv(string principalText, string tokenText) {
+  auto principal = principalText.strip;
+  auto token = tokenText.strip;
   if (principal.length == 0 && token.length == 0)
     return RemoteConfig.init;
   if (principal.length == 0 || token.length == 0)
@@ -118,6 +123,16 @@ string serverConfigUrl(const RemoteConfig conf) {
 /** 节点通道的 HTTP(S) 地址；拨号时再转换成 WebSocket scheme。 */
 string agentChannelUrl(const RemoteConfig conf) {
   return hubApiRoot(conf) ~ "/monitor/agents/" ~ conf.project ~ "/channel";
+}
+
+/** 代理 bundle 的下载地址；`endpoint` 为空时使用服务端 default。 */
+string proxyBundleUrl(const RemoteConfig conf, string engine, string endpoint = "") {
+  import std.uri : encode;
+
+  auto url = hubApiRoot(conf) ~ "/config/" ~ conf.project ~ "/proxy-bundle?engine=" ~ engine;
+  if (endpoint.length > 0)
+    url ~= "&endpoint=" ~ encode(endpoint);
+  return url;
 }
 
 /** `pull` 与通道握手共用的 Bearer 凭证；bashub 会同时校验 Project 与 key。 */
