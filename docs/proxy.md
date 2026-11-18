@@ -184,3 +184,73 @@ use_backend micdn if { path_beg /maven }
 - 多个 Project 共享同一个 HAProxy 实例
 
 当前方案保持 ACL，避免为少量路由引入 map 文件和状态同步。
+
+## 集中触发与 polkit（规划）
+
+当前 `basctl proxy apply` 需要在节点上以 root 手工执行。后续由 bashub 管理台触发时，
+执行链固定为：
+
+```text
+bashub 管理台（登录会话）
+  → basagent（bas:beangle，无权）
+  → 下载 bundle 到 basagent 私有目录（使用 Project token，不交给 root）
+  → systemctl start basproxy-apply@<engine>.service（polkit 仅授权这一种 unit）
+  → root-owned helper 校验 bundle 路径并执行
+       basctl proxy apply --engine=<engine> --bundle=<path>
+  → 校验 / 原子替换 / reload / 失败回滚
+```
+
+bashub 只发固定动作，不接受任意命令、URL、service 名或配置路径；root helper 不联网，
+也不读取 `BAS_TOKEN`。
+
+### 为什么按 CentOS 7 设计
+
+CentOS 7 长期存在于生产环境，必须作为一等目标而不是“兼容补丁”。它的 polkit 是 **0.112**，
+已经支持 `/etc/polkit-1/rules.d/*.rules` 的 JavaScript 规则，systemd 219 也支持模板 unit
+（`basproxy-apply@.service`）。因此这套方案在 CentOS 7 和现代发行版上使用同一套 JS 规则，
+不需要依赖 `polkit-pkla-compat`。
+
+**不使用 `.pkla` 的原因**：0.105 时代的 `.pkla` 只能按 action 授权，无法把
+`org.freedesktop.systemd1.manage-units` 限定到某个 unit；允许它等于允许 `bas` 启停/管理
+任意 systemd unit，权限过大。CentOS 7 本身有 JS 规则，没必要为了兼容旧格式引入这个宽口子。
+如果某个环境确实只有 polkit <= 0.105（没有 JS 规则），`proxy:apply` 应**失败关闭**并提示
+部署 root helper/升级 polkit，而不是退化成宽泛的 `.pkla` 或 sudo。
+
+规则示例（root:root 0644，放在 `/etc/polkit-1/rules.d/`）：
+
+```js
+polkit.addRule(function(action, subject) {
+  if (action.id !== "org.freedesktop.systemd1.manage-units")
+    return;
+
+  var unit = action.lookup("unit");
+  var verb = action.lookup("verb");
+  if (subject.user === "bas" && verb === "start" &&
+      (unit === "basproxy-apply@haproxy.service" ||
+       unit === "basproxy-apply@nginx.service"))
+    return polkit.Result.YES;
+});
+```
+
+对应的 root oneshot unit：
+
+```ini
+[Unit]
+Description=Apply a bas proxy bundle for %i
+[Service]
+Type=oneshot
+ExecStart=/usr/local/libexec/basproxy-apply %i
+```
+
+`basproxy-apply` 只接受 `haproxy` / `nginx` 两个参数和 basagent 私有目录下的 bundle 路径；
+路径必须属于 `bas`、非 symlink，且位于固定目录。验证时可用：
+
+```bash
+pkaction --action-id org.freedesktop.systemd1.manage-units --verbose
+sudo -u bas systemctl start basproxy-apply@haproxy.service
+journalctl -u basproxy-apply@haproxy.service
+```
+
+在 CentOS 7 上重点确认 polkit 版本（`rpm -q polkit`）和 `/etc/polkit-1/rules.d/` 是否被
+polkitd 加载；不要在 CentOS 7 上额外安装宽泛的 `.pkla` 规则。
+
