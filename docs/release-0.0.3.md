@@ -21,6 +21,8 @@ basagent 触发代理 bundle 的校验、落盘和 reload；手工 `basctl proxy
 - `bin/env.sh` 默认加载 `/etc/bas/conf/basctl.env`；源码/自定义目录用 `BAS_ENV_FILE` 指向自己的文件。
 - `basctl init` 不再创建或修改 `basctl.env`，只铺控制脚本并建 `conf/`；缺少
   `BAS_PRINCIPAL`/`BAS_TOKEN` 时打印提示。
+- `report:os` 增加 `proxy.haproxy` / `proxy.nginx` 版本（本机 `-v`），供监控页显示代理版本；
+  未安装时为空串。
 - 文档按职责拆分：basagent 的通道、配置投递、代理触发和排障集中到 `docs/basagent.md`，
   basctl 文档只保留本地 CLI。
 - **不提供旧路径 fallback**：程序不读取 `/var/lib/bas/conf/basctl.env`。升级时需自行迁移：

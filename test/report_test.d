@@ -39,6 +39,9 @@ import std.uuid : randomUUID;
   assert(body["cpu"].type == JSONType.object);
   assert(body["mem"].type == JSONType.object);
   assert(body["disk"].type == JSONType.array);
+  assert(body["proxy"].type == JSONType.object);
+  assert(body["proxy"]["haproxy"].type == JSONType.string);
+  assert(body["proxy"]["nginx"].type == JSONType.string);
 
   version (linux) {
     assert(body["os"]["name"].str.length > 0);

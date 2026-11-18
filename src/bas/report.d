@@ -44,7 +44,8 @@ JSONValue osReport() {
     "os": osFields(),
     "cpu": cpuFields(),
     "mem": memFields(),
-    "disk": JSONValue(diskFields())
+    "disk": JSONValue(diskFields()),
+    "proxy": proxyFields()
   ];
   return body;
 }
@@ -202,6 +203,40 @@ private long processRssBytes(int pid) {
 private:
 
 /** `os`：发行版 / 内核 / 架构。取不到（如 Windows）就留空。 */
+/**
+ * `proxy`：本机安装的 HAProxy / nginx 版本。只读 `-v` 的固定命令，不探测端口或配置；
+ * 没装就留空，控制台按“版本未上报”显示。
+ */
+private JSONValue proxyFields() {
+  return JSONValue([
+    "haproxy": JSONValue(commandVersion("haproxy", "HAProxy version ")),
+    "nginx": JSONValue(commandVersion("nginx", "nginx/"))
+  ]);
+}
+
+private string commandVersion(string command, string marker) {
+  import std.process : execute;
+  import std.string : indexOf, strip;
+
+  auto result = execute(["/bin/sh", "-c",
+      "command -v " ~ command ~ " >/dev/null 2>&1 && " ~ command ~ " -v 2>&1"]);
+  if (result.status != 0)
+    return "";
+  auto output = result.output;
+  auto start = output.indexOf(marker);
+  if (start < 0)
+    return "";
+  start += marker.length;
+  auto end = start;
+  while (end < output.length) {
+    auto ch = output[end];
+    if (ch == ' ' || ch == '\t' || ch == '\r' || ch == '\n')
+      break;
+    end++;
+  }
+  return output[start .. end].strip;
+}
+
 private JSONValue osFields() {
   string name;
   string kernel;

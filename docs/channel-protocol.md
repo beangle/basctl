@@ -60,7 +60,7 @@ basagent 与 bashub 之间那条 WebSocket 连接上说什么、怎么说。**�
 | 原语 | 类别 | body |
 |---|---|---|
 | `hello` | 通知 | `{host, basctl, basHome, bas, supports[]}`：连上后的第一条，见下「能力协商」（`basctl` 字段沿用原协议名，值是同包的发行版本） |
-| `report:os` | 通知 | `{os:{name,kernel,arch}, cpu:{cores,load1,load5,load15}, mem:{total,available}, disk:[{mount,total,available}]}` |
+| `report:os` | 通知 | `{os:{name,kernel,arch}, cpu:{cores,load1,load5,load15}, mem:{total,available}, disk:[{mount,total,available}], proxy:{haproxy,nginx}}`；proxy 是节点上 `haproxy -v` / `nginx -v` 的版本，未安装为空串 |
 | `report:bas` | 通知 | `{instances:[...], declared:[...]}`：`instances` 是活着的实例，每项与 `server.info` 的 `[server]` 同构（`id/pid/engine/httpPort/started` + `webapps[]`）；`declared` 是本机 `server.xml` 声明的可操作实例（`id/engine/httpPort?/webapps[]`） |
 | `report:health` | 通知 | `{servers:[{id,state}]}`：响应 hub 的 `report:health`，只报本机声明实例的 `running` / `stopped`（hub 也接受 `error` 以便扩展）；不带 OS、内存、磁盘与 webapps 明细 |
 | `pong` | 通知 | `{}`：保活应答 |

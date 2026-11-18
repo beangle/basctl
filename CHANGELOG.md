@@ -23,6 +23,8 @@
   安装包附带 `/usr/libexec/basproxy-apply`、模板 unit 和 CentOS 7 可用的 polkit JS 规则。
 - **CentOS 7 polkit**：使用 polkit 0.112 支持的 JavaScript `rules.d` 规则，只允许 `bas` 启动固定
   proxy unit；不使用无法限定 unit 的宽泛 `.pkla`。
+- **节点版本上报**：`report:os` 增加 `proxy.haproxy` / `proxy.nginx`，取本机 `-v` 输出；未安装为空串，
+  控制台在线节点页据此显示代理版本。
 - **文档拆分**：新增 `docs/basagent.md`；basctl 的 features/usage/proxy/start/server-info/run
   只保留本地 CLI 内容，basagent 的通道、配置投递、代理触发和排障集中到 agent 文档。
 
