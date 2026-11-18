@@ -10,7 +10,7 @@
 module test.remote_test;
 
 import bas.remote : RemoteConfig, agentChannelUrl, bearerCredential, isAllowedRemoteUrl,
-  loadRemoteEnv, serverConfigUrl, validateRemoteConf;
+  loadRemoteEnv, micdnXmlUrl, serverConfigUrl, validateRemoteConf;
 
 import std.exception : assertThrown;
 
@@ -50,4 +50,11 @@ import std.exception : assertThrown;
 @("plain HTTP is accepted for configured hosts") unittest {
   assert(isAllowedRemoteUrl("https://hub.example.com/bashub"));
   assert(isAllowedRemoteUrl("http://hub.example.com"));
+}
+
+
+@("micdn XML URL follows the bashub project root") unittest {
+  auto conf = RemoteConfig("https://hub.example.com/bashub/", "org.example", "secret");
+  assert(micdnXmlUrl(conf)
+      == "https://hub.example.com/bashub/api/bashub/micdn/org.example/micdn.xml");
 }

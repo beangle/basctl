@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.0.3 (unreleased)
 
 - **远程配置迁到 `/etc`**：`basctl.env` 从 `$BAS_HOME/conf` 迁到
   `/etc/bas/conf/basctl.env`（root:beangle 0640）；systemd 只读这一处，不再读取
@@ -10,9 +10,21 @@
   `BAS_ENV_FILE` 覆盖。
 - **不提供旧路径回退**：程序不读取 `/var/lib/bas/conf/basctl.env`；升级时需自行迁移文件。
 - 安装包把 `basctl.env` 作为 `/etc` 下的 conffile 下发；RPM/DEB 的旧路径条目已移除。
+- **agent 可无 server.xml 运行**：`basagent pull` 发现远端配置没有本机 bas server 时，不安装
+  server.xml（并清理无效的旧空文件）；`basagent.service` 不再要求该文件存在，micdn/proxy 节点
+  可以只保留 agent 身份与通道。
+- **micdn 配置投递**：`micdn:reload` 不再只调本机 `/admin/reload`；agent 用 Project token 拉取
+  `micdn.xml`，POST 到本机 `/admin/config`，由 micdn 自己校验、原子写文件并 reload。agent 不写
+  micdn 目录，也不把 token 交给 micdn。
+- **`basctl proxy` 改为只应用本地 bundle**：`apply` 必须给 `--bundle=FILE`，不再读取
+  `BAS_PRINCIPAL`/`BAS_TOKEN` 或下载；远程下载和触发统一由 basagent 负责。
 - **新增 `proxy:apply`**：basagent 用 Project token 下载代理 bundle，再触发受 polkit 限制的
   `basproxy-apply@<engine>.service`；root helper 校验路径后调用 `basctl proxy apply --bundle`。
   安装包附带 `/usr/libexec/basproxy-apply`、模板 unit 和 CentOS 7 可用的 polkit JS 规则。
+- **CentOS 7 polkit**：使用 polkit 0.112 支持的 JavaScript `rules.d` 规则，只允许 `bas` 启动固定
+  proxy unit；不使用无法限定 unit 的宽泛 `.pkla`。
+- **文档拆分**：新增 `docs/basagent.md`；basctl 的 features/usage/proxy/start/server-info/run
+  只保留本地 CLI 内容，basagent 的通道、配置投递、代理触发和排障集中到 agent 文档。
 
 ## v0.0.2 (2026-11-17)
 

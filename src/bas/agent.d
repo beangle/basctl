@@ -41,8 +41,8 @@ import bas.download : curlDownload;
 import bas.logs : agentLog, consoleLog, countLines, maxLogLines, plainName, readLogWindow;
 import bas.net : hostName, localAddresses;
 import bas.pull : runPull;
-import bas.remote : RemoteConfig, agentChannelUrl, bearerCredential, loadRemoteEnv, proxyBundleUrl,
-  validateRemoteConf;
+import bas.remote : RemoteConfig, agentChannelUrl, bearerCredential, loadRemoteEnv, micdnXmlUrl,
+  proxyBundleUrl, validateRemoteConf;
 import bas.report : basReport, healthReport, osReport;
 import bas.starter : serviceAction;
 
@@ -61,13 +61,11 @@ import core.stdc.stdlib : abort;
 import std.algorithm : canFind, filter, sort;
 import std.array : array, join;
 import std.datetime.stopwatch : MonoTime;
-import std.file : exists, readText, remove, tempDir, write;
+import std.file : exists, readText, remove, write;
 import std.json : JSONType, JSONValue;
 import std.path : absolutePath, buildPath, dirName;
 import std.uuid : randomUUID;
 
-/// 本机 micdn 的 reload 端点：固定回环地址，hub 不能传入任意 URL。
-private enum string micdnReloadUrl = "http://127.0.0.1:8888/admin/reload";
 import std.process : environment, execute, spawnShell;
 import std.stdio : stderr, writeln;
 import std.conv : to;
@@ -160,10 +158,6 @@ int runAgent(string configFile, string basctlVersion, string[] rest) {
     stderr.writeln("Unknown option: " ~ rest[0]);
     return 1;
   }
-  if (!exists(configFile)) {
-    stderr.writeln("basagent: cannot find config file " ~ configFile);
-    return 1;
-  }
   auto remote = loadRemoteEnv();
   if (!channelEnabled(remote)) {
     stderr.writeln("basagent: warning: BAS_PRINCIPAL/BAS_TOKEN are not set; agent not started.");
@@ -177,7 +171,7 @@ int runAgent(string configFile, string basctlVersion, string[] rest) {
   }
   AgentContext ctx;
   try {
-    ctx = agentContext(parseServerXmlFile(configFile), remote, configFile, basctlVersion, false);
+    ctx = agentContext(containerFrom(configFile), remote, configFile, basctlVersion, false);
   } catch (Exception e) {
     stderr.writeln("basagent: " ~ e.msg);
     return 1;
@@ -195,13 +189,9 @@ int runReport(string configFile, string basctlVersion, string[] rest) {
     stderr.writeln("Unknown option: " ~ rest[0]);
     return 1;
   }
-  if (!exists(configFile)) {
-    stderr.writeln("basagent report: cannot find config file " ~ configFile);
-    return 1;
-  }
   AgentContext ctx;
   try {
-    ctx = agentContext(parseServerXmlFile(configFile), configFile, basctlVersion, true);
+    ctx = agentContext(containerFrom(configFile), configFile, basctlVersion, true);
   } catch (Exception e) {
     stderr.writeln("basagent report: " ~ e.msg);
     return 1;
@@ -219,6 +209,13 @@ int runReport(string configFile, string basctlVersion, string[] rest) {
 /** 两项环境变量齐全即启用通道；只设置一项会在读取时报错。 */
 bool channelEnabled(const RemoteConfig remote) {
   return remote.complete;
+}
+
+/** 没有 server.xml 的 agent（例如只跑 micdn/proxy 的节点）用空配置启动。 */
+private Container containerFrom(string configFile) {
+  if (exists(configFile))
+    return parseServerXmlFile(configFile);
+  return new Container;
 }
 
 /** 组装上下文：地址、Project 与 token 全部来自环境变量。 */
@@ -1143,7 +1140,7 @@ private void handle(ref AgentContext ctx, scope WebSocket ws, string text) {
       ws.send(reply);
       break;
     }
-    auto reloadReply = micdnReloadResult(msg.id);
+    auto reloadReply = micdnReloadResult(ctx, msg.id);
     rememberResult(ctx, msg.id, reloadReply);
     ws.send(reloadReply);
     break;
@@ -1366,27 +1363,53 @@ string proxyApplyResult(ref AgentContext ctx, string id, ref JSONValue body) {
   return resultMessage(id, true, data, "");
 }
 
-/** `micdn:reload`：GET 本机 micdn 的 `/admin/reload`，把结果回给 hub。
+/** `micdn:reload`：用 Project token 拉取 bashub 的 micdn.xml，再 POST 给本机 micdn。
  *
- * 地址固定 127.0.0.1:8888，不接受 hub 传入 URL；响应体只回前 8 KiB（reload 失败时 micdn
- * 的报错正文可能较长）。curl 自身超时 300s，hub 侧 90s 超时后可能先放弃，但 agent 会继续完成。
+ * 投递只走 127.0.0.1:8888/admin/config；micdn 自己校验、原子写自己的 micdn.xml 并 reload。
+ * agent 不写 micdn 的目录，也不把 token 交给 micdn。响应体截断后回给 hub。
  */
-string micdnReloadResult(string id) {
-  auto tmp = buildPath(tempDir(), "micdn-reload-" ~ randomUUID().toString());
+string micdnReloadResult(ref AgentContext ctx, string id) {
+  auto dir = buildPath(ctx.basHome, "micdn");
+  try
+    mkdirPrivate(dir);
+  catch (Exception e)
+    return resultMessage(id, false, JSONValue(null), "micdn-dir-failed: " ~ e.msg);
+
+  auto tmp = buildPath(dir, "micdn-" ~ randomUUID().toString() ~ ".xml");
   scope (exit)
     if (exists(tmp))
       remove(tmp);
-  if (!curlDownload(micdnReloadUrl, tmp, null, false, 64 * 1024))
-    return resultMessage(id, false, JSONValue(null), "reload-failed");
-  string body;
-  try
-    body = readText(tmp);
-  catch (Exception)
-    body = "";
-  if (body.length > 8 * 1024)
-    body = body[0 .. 8 * 1024];
-  JSONValue data = ["body": JSONValue(body)];
-  return resultMessage(id, true, data, "");
+  if (!curlDownload(micdnXmlUrl(ctx.remote), tmp,
+      ["Authorization: Bearer " ~ ctx.credential], false, 4 * 1024 * 1024))
+    return resultMessage(id, false, JSONValue(null), "micdn-download-failed");
+
+  auto responseFile = tmp ~ ".response";
+  scope (exit)
+    if (exists(responseFile))
+      remove(responseFile);
+
+  string output;
+  string code;
+  int status;
+  try {
+    auto run = execute(["/usr/bin/curl", "--silent", "--show-error", "--max-time", "120",
+        "-o", responseFile, "-w", "%{http_code}",
+        "-X", "POST", "-H", "Content-Type: application/xml", "--data-binary", "@" ~ tmp,
+        "http://127.0.0.1:8888/admin/config"]);
+    status = run.status;
+    code = run.output.strip;
+    if (exists(responseFile))
+      output = readText(responseFile);
+    else
+      output = run.output;
+  } catch (Exception e) {
+    return resultMessage(id, false, JSONValue(null), "micdn-apply-failed: " ~ e.msg);
+  }
+  if (output.length > 8 * 1024)
+    output = output[0 .. 8 * 1024];
+  auto ok = status == 0 && code == "200";
+  JSONValue data = ["detail": JSONValue(output.strip)];
+  return resultMessage(id, ok, data, ok ? "" : "micdn-apply-failed");
 }
 
 /**

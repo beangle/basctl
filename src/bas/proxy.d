@@ -19,9 +19,7 @@
 /// 不读取 conf/server.xml，也不理解代理拓扑；bundle 由 bashub 渲染。
 module bas.proxy;
 
-import bas.download : curlDownload;
 import bas.fsutil : setPrivateFile;
-import bas.remote : RemoteConfig, bearerCredential, hubApiRoot, loadRemoteEnv;
 
 import core.sys.posix.unistd : geteuid;
 import std.algorithm : canFind, startsWith;
@@ -35,8 +33,6 @@ import std.path : buildPath, dirName;
 import std.process : environment, execute;
 import std.stdio : stderr, writeln;
 import std.string : indexOf, strip, toStringz;
-import std.uri : encode;
-import std.uuid : randomUUID;
 import std.zip : ZipArchive;
 
 /// 当前代理部署的本地落点。配置路径按实际安装发现，不假设发行版布局。
@@ -203,6 +199,10 @@ int runProxy(string[] args) {
     proxyUsage();
     return 1;
   }
+  if (bundleFile.length == 0) {
+    stderr.writeln("basctl proxy apply: --bundle=FILE is required (basagent downloads the bundle)");
+    return 1;
+  }
   if (geteuid() != 0 && !dryRun) {
     stderr.writeln("basctl proxy apply: root is required");
     return 2;
@@ -263,37 +263,14 @@ private string zipMember(ZipArchive zip, JSONValue files, string role) {
 
 private int applyBundle(ProxyTargets targets, string endpoint, ProxyPaths paths, bool dryRun, string bundleFile) {
   auto engine = targets.engine;
-  auto temp = bundleFile.length ? bundleFile
-      : "/tmp/basctl-proxy-" ~ randomUUID().toString ~ ".zip";
-  auto downloaded = bundleFile.length == 0;
-  scope (exit) if (downloaded && exists(temp)) remove(temp);
   if (bundleFile.length == 0) {
-    RemoteConfig remote;
-    try {
-      remote = loadRemoteEnv();
-      if (!remote.complete)
-        throw new Exception("BAS_PRINCIPAL/BAS_TOKEN are not set");
-    } catch (Exception e) {
-      stderr.writeln("basctl proxy: " ~ e.msg);
-      return 1;
-    }
-    auto url = hubApiRoot(remote) ~ "/config/" ~ remote.project ~ "/proxy-bundle?engine=" ~ engine;
-    if (endpoint.length)
-      url ~= "&endpoint=" ~ endpoint;
-    auto certDir = dirName(paths.certificate);
-    if (certDir.length)
-      url ~= "&cert-dir=" ~ encode(certDir);
-    if (paths.routeMap.length)
-      url ~= "&route-map=" ~ encode(paths.routeMap);
-    if (!curlDownload(url, temp, ["Authorization: Bearer " ~ bearerCredential(remote)], false, 8 * 1024 * 1024)) {
-      stderr.writeln("basctl proxy: failed to download bundle from " ~ url);
-      return 1;
-    }
+    stderr.writeln("basctl proxy apply: --bundle=FILE is required");
+    return 1;
   }
 
   ProxyBundle bundle;
   try
-    bundle = readBundle(temp, engine);
+    bundle = readBundle(bundleFile, engine);
   catch (Exception e) {
     stderr.writeln("basctl proxy: invalid bundle: " ~ e.msg);
     return 1;
@@ -388,6 +365,6 @@ private string sha256(string value) {
 }
 
 private void proxyUsage() {
-  stderr.writeln("Usage: basctl proxy apply --engine=haproxy|nginx [--endpoint=NAME] [--bundle=FILE] [--config=FILE] [--service=NAME] [--dry-run]");
+  stderr.writeln("Usage: basctl proxy apply --engine=haproxy|nginx --bundle=FILE [--endpoint=NAME] [--config=FILE] [--service=NAME] [--dry-run]");
   stderr.writeln("       basctl proxy status --engine=haproxy|nginx [--endpoint=NAME]");
 }

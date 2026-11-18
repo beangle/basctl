@@ -15,7 +15,7 @@ basagent 与 bashub 之间那条 WebSocket 连接上说什么、怎么说。**�
 | 项 | 取值 |
 |---|---|
 | 路径 | `{remote.url}/api/bashub/monitor/agents/{project}/channel` |
-| `{remote.url}` | `BAS_PRINCIPAL` 里的 url 部分，如 `https://hub.example.com` 或 `https://hub.example.com/bas/hub`；`basagent` 允许 HTTP/HTTPS（连接时换成 WS/WSS），`basctl pull` 同样允许 HTTP/HTTPS |
+| `{remote.url}` | `BAS_PRINCIPAL` 里的 url 部分，如 `https://hub.example.com` 或 `https://hub.example.com/bas/hub`；`basagent` 允许 HTTP/HTTPS（连接时换成 WS/WSS） |
 | 凭证 | `Authorization: Bearer <project>:<BAS_TOKEN>`（握手头），token 取值是 bashub 的 `Project.key` |
 | 身份 | `ip: <addr>[,<addr>…]`（握手头）：本机地址，多网卡时全部上报（**回环地址不发**，只有回环的开发机例外）；hub 过滤后只保留与 Host 配置命中的那个作为 `project + server ip` 身份，只顶掉同一 IP 的旧连接 |
 
@@ -97,7 +97,7 @@ basagent 与 bashub 之间那条 WebSocket 连接上说什么、怎么说。**�
 | `migrate:probe` | 请求 | `{target, port}` | 探测目标 master；应答 `result{ok}` |
 | `migrate:to` | 请求 | `{target, port}` | 探测通过后设置新 target；应答 `result{ok}` 后 follower 断开旧连接并连接 target |
 | `config:refresh` | 通知 | `{}` | hub 配置变更后，agent 重新拉取 server.xml 并重报实例清单 |
-| `micdn:reload` | 请求 | `{}` | 让本机 micdn 重新加载配置：agent GET `http://127.0.0.1:8888/admin/reload`；应答 `result{ok, data:{body?}}`，失败 `reload-failed`。不传 URL/令牌，地址固定回环 |
+| `micdn:reload` | 请求 | `{}` | agent 用 Project token 从 bashub 拉取 `micdn.xml`，POST 到本机 `127.0.0.1:8888/admin/config`；micdn 自己校验、原子写配置并 reload。应答 `result{ok, data:{detail?}}`，失败 `micdn-download-failed` / `micdn-apply-failed`；agent 不写 micdn 目录 |
 | `proxy:apply` | 请求 | `{engine, endpoint?}` | `engine` 为 `haproxy` / `nginx`；agent 用 Project token 下载代理 bundle 到私有目录，再触发受 polkit 限制的 `basproxy-apply@<engine>.service`；应答 `result{ok, data:{engine,endpoint,detail}}`。不接受任意命令、路径或 service 名 |
 
 - 动作用**三个原语**而不是一个 `service:control{action}`：白名单落在 `type` 上，信封层就能拒掉不认的

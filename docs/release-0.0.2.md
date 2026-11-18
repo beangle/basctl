@@ -62,8 +62,7 @@ basctl 校验角色、路径和 SHA-256，拒绝绝对路径和 `..`。
   ```
 
 - `pull` 不再接受 `--file`；启动拉取失败即失败，不做本地兜底。
-- 安装包下发 `basctl.env` 到 `/etc/bas/conf/basctl.env`（root:beangle 0640），systemd 通过
-  `EnvironmentFile` 读取；不再读取 `/etc/sysconfig/basagent`、`/etc/default/basagent`。
+- 安装包下发 `basctl.env`，systemd 通过 `EnvironmentFile` 读取。
 - `basagent` 只从环境变量读取 Project 和 token。
 
 ### 其他
@@ -71,19 +70,14 @@ basctl 校验角色、路径和 SHA-256，拒绝绝对路径和 `..`。
 - `start` 在删除实例目录前预检 jstart，缺失时给出明确错误。
 - `vibe-stream` 依赖范围对齐 1.5。
 - `proxy apply` 在服务 inactive 时启动，运行中才 reload。
-- 新增 `proxy:apply`：basagent 下载 bundle 后触发受 polkit 限制的 root helper；安装包附带
-  `/usr/libexec/basproxy-apply`、`basproxy-apply@.service` 和 CentOS 7 可用的 polkit JS 规则。
 
 ## 升级
 
-- 远程配置：把旧的 `/var/lib/bas/conf/basctl.env` 手工迁到
-  `/etc/bas/conf/basctl.env`，属主 `root:beangle`、权限 `0640`；程序不读取旧路径。
-  `basctl init` 不再生成该文件。
 - 代理节点配置：
 
   ```bash
   set -a
-  . /etc/bas/conf/basctl.env
+  . /var/lib/bas/conf/basctl.env
   set +a
   sudo basctl proxy apply --engine=haproxy
   ```
@@ -93,5 +87,5 @@ basctl 校验角色、路径和 SHA-256，拒绝绝对路径和 `..`。
 
 ```text
 dub build: 通过
-dub test: 150 passed
+dub test: 151 passed
 ```

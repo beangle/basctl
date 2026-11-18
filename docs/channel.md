@@ -1,5 +1,6 @@
 # 汇报通道（basagent → bashub）
 
+basagent 的角色、配置投递和固定指令总览见 [basagent.md](basagent.md)；本文展开通道连接与排障。
 basagent 主动拨一条出站 WebSocket 到控制台（bashub），把**这台机器的现状**报上去，并接收控制台下发的
 固定指令。现状 = 主机家底（CPU / 内存 / 磁盘）+ 本机活着的 bas 实例；指令 = 立即上报、取日志区间、
 启动 / 停止 / 重启实例、触发本机 micdn reload。
@@ -21,7 +22,7 @@ BAS_TOKEN=9f8e7d6c5b4a39281706f5e4d3c2b1a0
 
 - `BAS_PRINCIPAL` / `BAS_TOKEN` 两项齐全才启用；只设置一项会报错；`basagent` 拼出
   `https://hub.example.com/api/bashub/monitor/agents/<project>/channel` 拨号，并把 `https`
-  换成 `wss`。`basagent` 和 `basctl pull` 都允许 `http://` 或 `https://`。
+  换成 `wss`。允许 `http://` 或 `https://`；生产建议 HTTPS。
 - TLS 会按系统 CA 校验证书（优先 `SSL_CERT_FILE` / `CURL_CA_BUNDLE`，其次
   `/etc/ssl/certs/ca-certificates.crt`、`/etc/pki/tls/certs/ca-bundle.crt` 等）。
   自签证书或主机名不匹配会直接握手失败，不会降级为不校验。
@@ -36,7 +37,8 @@ BAS_TOKEN=9f8e7d6c5b4a39281706f5e4d3c2b1a0
 | 命令 | 做什么 | 什么时候用 |
 |---|---|---|
 | `basagent report [server.xml]` | 连一次、发 `hello` + 两份上报、断开；报上去了退出码 0 | 手工对一次账；脚本 / cron |
-| `systemctl start basagent.service` | 常驻：连上发一次完整快照，之后按 hub 下发的 `report:health` 即时返回实例状态、回保活、执行固定指令（读日志 / 启停实例 / micdn reload / proxy apply），断线 10s 后重连 | 生产机由系统级 systemd 管理，账号固定为 `bas:beangle` |
+| `basagent pull` | 拉取 server.xml；没有本机 bas server 时不安装/不保留空文件，agent 继续运行 | 只跑 micdn/proxy 的节点 |
+| `systemctl start basagent.service` | 常驻：连上发一次完整快照，之后按 hub 下发的 `report:health` 即时返回实例状态、回保活、执行固定指令（读日志 / 启停实例 / micdn reload / proxy apply）；micdn reload 由 agent 拉取 XML 后投递给本机 micdn，断线 10s 后重连 | 生产机由系统级 systemd 管理，账号固定为 `bas:beangle` |
 | `bin/bas.sh pull` | 显式拉取一次 `conf/server.xml`（底层调用 `basagent pull`） | 需要从 bashub 更新配置时 |
 
 `basctl start` / `basctl stop` 与 `bin/start.sh` / `bin/restart.sh` 只做本地动作，不拉配置、

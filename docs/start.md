@@ -41,7 +41,6 @@ basctl start all --port-range=21000-21999   # <server http="0"> 的实例改在�
 准备失败（端口没得挑、webapp 解析不出来、依赖缺件）或启动失败（进程没起来）的实例不留运行信息，
 端口预留随之撤销；同一批里其余实例照常启动，此时退出码非 0。
 
-basctl 不在启停后调用 basagent，也不触发状态上报；运行态由 basagent 自行上报。
 
 ## 实例目录重建
 
@@ -81,7 +80,6 @@ servers/<farm.server>/
 
 停完删除 `server.info`。因为 pid 记在运行信息里，`servers/<farm.server>/launch.jstart` 删了也能停；
 反过来，**未由 basctl 启动**的实例没有 `server.info`，停不掉，会报 `no run info`。
-basctl 不在停止后调用 basagent。
 
 ## 生成的 spec
 
@@ -176,7 +174,7 @@ org.beangle.bas:beangle-bas-engine:0.14.0
 - `tomcat-server` 走多应用全量发行包（`org.apache.tomcat:tomcat:zip`）；
   `tomcat` / `undertow` / `jetty` 只支持单应用，多于一个 webapp 时报错；
 - `[engine] init` 直接写 `basctl` 的 `make tomcat-server` 命令行（路径取自当前 basctl 的
-  `/proc/self/exe`，由 basagent 生成时取同目录的 basctl；可用环境变量 `beangle_basctl` 覆盖，
+  `/proc/self/exe`；可用环境变量 `beangle_basctl` 覆盖，
   含空格时会加引号）；`jstart` 仍用 `beangle_jstart` 指定；
 - 实例目录靠 `[app] instance` 显式命名（`servers/<farm.server>`），与 `make`/`status`/`logs`
   的布局一致；

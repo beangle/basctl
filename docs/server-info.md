@@ -1,7 +1,7 @@
 # 实例运行信息 `server.info`
 
 每个实例在 `servers/<farm.server>/server.info` 记一份运行信息：**它是谁、进程号多少、实际监听
-哪个端口、跑了哪些 webapp、对外暴露哪些 url**。`basctl status`、stop 和 basagent 都读它，不再
+哪个端口、跑了哪些 webapp、对外暴露哪些 url**。`basctl status` 与 stop 都读它，不再
 各自去猜（`ss`/`netstat` 反查端口）或重新解析 `server.xml`。
 
 **状态：已落地**（basctl 的 `start` / `stop` / `status`，见文末「实现说明」）。
@@ -92,7 +92,7 @@ url = /context2
 
 `<server http>` 有值时按该端口启动；为 `0`（或缺省）时由 basctl 在**端口区间**内挑一个空闲端口，
 用 `--port=<n>` 传给应用（与静态端口同一个参数，引擎不需要区分），并写进 `server.info` 的
-`http.port`。应用不自己选端口，`status` 与 basagent 也不需要反查。
+`http.port`。应用不自己选端口，`status` 也不需要反查。
 
 **缺省区间 `20000-29999`**，理由：
 

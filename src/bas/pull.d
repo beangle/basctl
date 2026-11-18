@@ -24,11 +24,13 @@
  */
 module bas.pull;
 
+import bas.config : parseServerXmlFile;
 import bas.download : curlDownload;
 import bas.remote : RemoteConfig, bearerCredential, loadRemoteEnv, serverConfigUrl,
   validateRemoteConf;
+import bas.starter : localServers;
 
-import std.file : exists, getcwd, mkdirRecurse, rename;
+import std.file : exists, getcwd, mkdirRecurse, remove, rename;
 import std.path : absolutePath, buildPath;
 import std.process : environment;
 import std.stdio : stderr, stdout, write, writeln;
@@ -92,6 +94,29 @@ int runPull(string[] args, bool allowHttp = true) {
   }
 
   auto current = buildPath(confDir, "server.xml");
+  // 没有本机可运行的 bas server 时，不把空/无关的 XML 落到本地；仍返回成功，让
+  // micdn/proxy 这类没有 bas server 的 agent 继续工作。
+  try {
+    if (localServers(parseServerXmlFile(newer), "all").length == 0) {
+      writeln(" no local bas server; not installed");
+      remove(newer);
+      if (exists(current)) {
+        try {
+          if (localServers(parseServerXmlFile(current), "all").length == 0)
+            remove(current);
+        } catch (Exception) {
+          // 旧文件本身无效时保留它，等运维处理；不要因清理失败阻断 agent 启动。
+        }
+      }
+      return 0;
+    }
+  } catch (Exception e) {
+    stderr.writeln("basagent pull: invalid server.xml: " ~ e.msg);
+    if (exists(newer))
+      remove(newer);
+    return 1;
+  }
+
   if (exists(current)) {
     rename(current, buildPath(confDir, "server_old.xml"));
   }

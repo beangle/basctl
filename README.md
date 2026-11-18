@@ -1,8 +1,8 @@
 # basctl
 
 `basctl` is the local control CLI for a Beangle Bas server, written in D. The same
-repository also builds `basagent`, which pulls configuration and maintains an
-outbound control channel.
+repository also builds the separate remote client `basagent`; its role and operations
+are documented in [docs/basagent.md](docs/basagent.md).
 
 `basctl` turns `conf/server.xml` into runnable Tomcat instances: it resolves webapps
 (`gav://`, `http(s)://`, or local paths), creates instance directories and jstart
@@ -20,6 +20,7 @@ instances by farm and provides status, configuration checks, and firewall helper
 | [docs/run.md](docs/run.md) | `run`: embedded single-webapp mode |
 | [docs/server-info.md](docs/server-info.md) | `server.info` format, lifecycle, dynamic port allocation |
 | [docs/engine-creator.md](docs/engine-creator.md) | Engine creator protocol (`jstart [engine] init`) |
+| [docs/basagent.md](docs/basagent.md) | basagent: remote execution client, config delivery, proxy apply, micdn reload |
 | [docs/channel.md](docs/channel.md) | basagent to bashub reporting and control channel |
 | [docs/channel-protocol.md](docs/channel-protocol.md) | Control-channel protocol and extension rules |
 | [scripts/README.md](scripts/README.md) | deb / rpm packaging |
@@ -57,7 +58,6 @@ The published schema is <http://beangle.github.io/schema/bas-1.0.0.xsd>. Add
 Requirements:
 
 - `ldc2` >= 1.32 and `dub` >= 1.34
-- `basagent` requires OpenSSL 3.x for `wss://`; `basctl` does not link OpenSSL or vibe
 - `make`, `resolve`, `start`, and `run` require `jstart`; `basctl doctor` reports it
   as an optional check
 

@@ -125,6 +125,11 @@ string agentChannelUrl(const RemoteConfig conf) {
   return hubApiRoot(conf) ~ "/monitor/agents/" ~ conf.project ~ "/channel";
 }
 
+/** 完整 micdn.xml 的下载地址；由 basagent 用 Project token 拉取后投递给本机 micdn。 */
+string micdnXmlUrl(const RemoteConfig conf) {
+  return hubApiRoot(conf) ~ "/micdn/" ~ conf.project ~ "/micdn.xml";
+}
+
 /** 代理 bundle 的下载地址；`endpoint` 为空时使用服务端 default。 */
 string proxyBundleUrl(const RemoteConfig conf, string engine, string endpoint = "") {
   import std.uri : encode;
