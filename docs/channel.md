@@ -12,7 +12,8 @@ basagent 主动拨一条出站 WebSocket 到控制台（bashub），把**这台�
 
 地址、Project 和凭证都放在 `/etc/bas/conf/basctl.env`（root:beangle 0640），由 systemd `EnvironmentFile` 注入，与 `pull` 共用：
 
-> RPM/DEB 会把模板装到 `/etc/bas/conf/basctl.env`；源码安装或其它目录不再由
+> RPM/DEB 把模板装到 `/usr/share/bas/basctl.env`，安装脚本在缺失时创建
+> `/etc/bas/conf/basctl.env`；源码安装或其它目录不再由
 > `basctl init` 生成，需自行创建该文件（或用 `BAS_ENV_FILE` 指向自己的文件）。
 
 ```sh

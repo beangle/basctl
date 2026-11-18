@@ -162,10 +162,12 @@ chmod 0750 /var/lib/bas /var/lib/bas/bin /var/lib/bas/conf /var/log/bas
 chmod 0755 /var/lib/bas/bin/*.sh
 chown root:beangle /etc/bas/conf
 chmod 0750 /etc/bas/conf
-if [ -e /etc/bas/conf/basctl.env ]; then
-  chown root:beangle /etc/bas/conf/basctl.env
-  chmod 0640 /etc/bas/conf/basctl.env
+# 模板只作为缺失时的初始值；实际文件不由 rpm 跟踪，卸载/重装都不删除、不覆盖。
+if [ ! -e /etc/bas/conf/basctl.env ]; then
+  cp -f /usr/share/bas/basctl.env /etc/bas/conf/basctl.env
 fi
+chown root:beangle /etc/bas/conf/basctl.env
+chmod 0640 /etc/bas/conf/basctl.env
 chmod 0700 /var/log/bas/agent
 if [ ! -e /var/lib/bas/logs ]; then
   ln -s /var/log/bas /var/lib/bas/logs
@@ -198,9 +200,9 @@ EOF
 find "$DESTDIR/$PKGDIR" ! -type d | \
   grep -v -e '/etc/logrotate.d/bas$' -e '/etc/bas/conf/basctl.env$' | \
   sed 's|'"$DESTDIR"'/'"$PKGDIR"'|/|' >> basctl.spec
-# 主机级凭证/配置：/etc 下的 conffile，升级保留；不再由 %post 生成，也不随卸载删除。
+# 主机级凭证/配置：/etc 下文件由 %post 按模板创建，不放进 %files，因此卸载不删除、不覆盖。
 echo '%dir %attr(0750,root,beangle) /etc/bas/conf' >> basctl.spec
-echo '%config(noreplace) %attr(0640,root,beangle) /etc/bas/conf/basctl.env' >> basctl.spec
+echo '%dir /usr/share/bas' >> basctl.spec
 echo '%config(noreplace) /etc/logrotate.d/bas' >> basctl.spec
 
 echo >> basctl.spec

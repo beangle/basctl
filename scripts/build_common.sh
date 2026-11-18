@@ -34,22 +34,24 @@ basctl_prepare_release_build() {
 }
 
 # 把标准 BAS_HOME 的控制树装入包根目录：系统包安装后 /var/lib/bas 可直接使用，无需再跑 init。
-# basctl.env 是主机级凭证/配置：模板直接装到 /etc/bas/conf/basctl.env，由包管理按 conffile
-# 保留；运行状态（server.xml、实例、日志）仍在 /var/lib/bas。属主/权限由 postinst/%post 收紧。
+# basctl.env 是主机级凭证/配置：模板装到 /usr/share/bas/basctl.env，postinst/%post 只在
+# /etc/bas/conf/basctl.env 缺失时创建；该文件不由包管理跟踪，因此卸载/卸载后重装都不会删除。
+# 运行状态（server.xml、实例、日志）仍在 /var/lib/bas。属主/权限由 postinst/%post 收紧。
 basctl_stage_runtime_home() {
   local root="${BASCTL_HOME:?BASCTL_HOME not set}"
   local pkgroot="$1"
   local bindir="$pkgroot/var/lib/bas/bin"
   local etcdir="$pkgroot/etc/bas/conf"
+  local sharedir="$pkgroot/usr/share/bas"
   local libexecdir="$pkgroot/usr/libexec"
   local unitdir="$pkgroot/usr/lib/systemd/system"
   local polkitdir="$pkgroot/etc/polkit-1/rules.d"
-  install -d -m 0755 "$bindir" "$libexecdir" "$unitdir" "$polkitdir"
+  install -d -m 0755 "$bindir" "$libexecdir" "$unitdir" "$polkitdir" "$sharedir"
   install -d -m 0750 "$etcdir"
   for script in env.sh bas.sh start.sh stop.sh restart.sh; do
     install -m 0755 "$root/resources/bas/bin/$script" "$bindir/$script"
   done
-  install -m 0640 "$root/resources/bas/init/basctl.env" "$etcdir/basctl.env"
+  install -m 0640 "$root/resources/bas/init/basctl.env" "$sharedir/basctl.env"
   # proxy:apply 的 root helper 与 polkit 规则：agent 只触发固定模板 unit。
   install -m 0755 "$root/resources/basproxy/basproxy-apply" "$libexecdir/basproxy-apply"
   install -m 0644 "$root/resources/systemd/basproxy-apply@.service" "$unitdir/basproxy-apply@.service"

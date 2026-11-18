@@ -34,7 +34,9 @@ basagent 触发代理 bundle 的校验、落盘和 reload；手工 `basctl proxy
   sudo systemctl restart basagent
   ```
 
-- RPM/DEB 将 `basctl.env` 作为 `/etc` 下的 conffile 下发；旧 `/var/lib` 条目已移除。
+- RPM/DEB 将模板装到 `/usr/share/bas/basctl.env`，`postinst`/`%post` 仅在
+  `/etc/bas/conf/basctl.env` 缺失时创建；实际文件不由包管理跟踪，卸载/重装都不删除、不覆盖。
+  旧 `/var/lib` 条目已移除。这样 `rpm -e` / `apt remove` / `apt purge` 都不会删掉主机凭证。
 
 ## 无 bas server 的 agent
 
@@ -97,7 +99,7 @@ POST /api/bashub/config/projects/{id}/proxy/apply   (bashub 管理台)
 dub build -c basagent: 通过
 dub build -c basctl: 通过
 dub test: 151 passed
-RPM 构建: 通过（/etc/bas/conf/basctl.env、/usr/libexec/basproxy-apply、
+RPM 构建: 通过（/usr/share/bas/basctl.env、/usr/libexec/basproxy-apply、
 basproxy-apply@.service、49-basproxy.rules 均在包内）
 DEB 构建: 本环境未执行
 ```

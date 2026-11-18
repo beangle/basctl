@@ -143,10 +143,10 @@ basctl init --dry-run /opt/bas # 只打印将会写入的文件
 ```
 
 `bin/setenv.sh` 与 `conf/server.xml` 是用户配置，`init` 不生成。使用系统包时，升级会刷新
-`bin/*.sh`；`/etc/bas/conf/basctl.env` 按 conffile 保留，卸载/重装/升级都不会覆盖。
+`bin/*.sh`；`/etc/bas/conf/basctl.env` 由安装脚本在缺失时从
+`/usr/share/bas/basctl.env` 创建，不由 deb/rpm 跟踪，卸载/重装/升级都不会删除或覆盖。
 源码或自定义目录默认也读 `/etc/bas/conf/basctl.env`，需要独立文件时用 `BAS_ENV_FILE`
-指向自己的文件。DEB conffile 语义是 `apt remove` 保留、`apt purge` 删除；RPM 的
-`%config(noreplace)` 同理。
+指向自己的文件。
 
 > **`/etc/bas/conf/basctl.env` 是主机级配置，卸载、重装、升级都不得删除或覆盖。**
 > 需要迁移旧路径时由运维手工处理，程序不读取 `/var/lib/bas/conf/basctl.env`。

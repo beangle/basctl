@@ -84,7 +84,6 @@ EOF
 
 # basagent 以专用账号 bas:beangle 由 systemd 常驻。
 cat > DEBIAN/conffiles << 'EOF'
-/etc/bas/conf/basctl.env
 /etc/logrotate.d/bas
 EOF
 
@@ -110,10 +109,12 @@ chmod 0750 /var/lib/bas /var/lib/bas/bin /var/lib/bas/conf /var/log/bas
 chmod 0755 /var/lib/bas/bin/*.sh
 chown root:beangle /etc/bas/conf
 chmod 0750 /etc/bas/conf
-if [ -e /etc/bas/conf/basctl.env ]; then
-  chown root:beangle /etc/bas/conf/basctl.env
-  chmod 0640 /etc/bas/conf/basctl.env
+# 模板只作为缺失时的初始值；实际文件不由包管理跟踪，卸载/重装都不删除、不覆盖。
+if [ ! -e /etc/bas/conf/basctl.env ]; then
+  cp -f /usr/share/bas/basctl.env /etc/bas/conf/basctl.env
 fi
+chown root:beangle /etc/bas/conf/basctl.env
+chmod 0640 /etc/bas/conf/basctl.env
 chmod 0700 /var/log/bas/agent
 if [ ! -e /var/lib/bas/logs ]; then
   ln -s /var/log/bas /var/lib/bas/logs

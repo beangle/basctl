@@ -20,9 +20,10 @@
 
 `.deb`/`.rpm` 同时安装 `/usr/bin/basctl`、`/usr/bin/basagent`、`basagent.service`、
 `/etc/logrotate.d/bas`，并在 `/var/lib/bas` 预置 `bin/*.sh`，仍是一个安装包。
-`basctl.env` 是主机级凭证/配置，模板直接装到 `/etc/bas/conf/basctl.env`
-（root:beangle 0640）：RPM 用 `%config(noreplace)`，DEB 用 conffile；卸载、重装、升级都不覆盖，
-`apt purge` 才删除。包内还安装 `proxy:apply` 的 root helper（`/usr/libexec/basproxy-apply`）、
+`basctl.env` 是主机级凭证/配置。模板安装在 `/usr/share/bas/basctl.env`，`postinst`/`%post`
+只在 `/etc/bas/conf/basctl.env` 缺失时复制并设为 `root:beangle 0640`；该文件不由 deb/rpm 跟踪，
+卸载、重装、升级都不会删除或覆盖。模板本身只是初始化来源，服务运行时不读取它，但升级/重装需要它。
+卸载、重装、升级都不删除或覆盖该文件；模板只用于首次安装时初始化。包内还安装 `proxy:apply` 的 root helper（`/usr/libexec/basproxy-apply`）、
 `basproxy-apply@.service` 和 polkit 规则（`/etc/polkit-1/rules.d/49-basproxy.rules`）。`basctl` 是本地命令；
 `basagent` 由 systemd 以专用账号 `bas:beangle` 常驻，主目录固定为 `/var/lib/bas`，日志写在
 `/var/log/bas/agent/console.out`。
@@ -31,6 +32,6 @@
 `libssl.so.3` / `libcrypto.so.3` 记在整个安装包上，但只运行 `basctl` 时不会加载它们。
 
 升级安装包会刷新标准控制脚本、`daemon-reload` 并 `try-restart` 正在运行的 `basagent`；
-`/etc/bas/conf/basctl.env`、`server.xml` 和日志目录不会被覆盖。**`basctl.env` 不能删**：不要在
-`%preun`/`%postun` 或 `prerm`/`postrm` 里 `rm`，也不要把它改成普通非 conffile 文件。旧路径
+`/etc/bas/conf/basctl.env`、`server.xml` 和日志目录不会被覆盖。**`basctl.env` 不能删**：不要把它
+重新纳入 `%files`/conffiles，也不要在 `%preun`/`%postun` 或 `prerm`/`postrm` 里 `rm`。旧路径
 `/var/lib/bas/conf/basctl.env` 不做程序回退，迁移由运维手工完成。
