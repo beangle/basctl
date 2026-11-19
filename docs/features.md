@@ -10,6 +10,7 @@
 |---|---|---|---|
 | 组件目录初始化 | `basctl init` | 把 `env.sh` / `bas.sh` / `start.sh` / `stop.sh` / `restart.sh` 铺到 `<workdir>/bin` 并建 `conf/`；**不生成 `basctl.env`** | [usage.md](usage.md) |
 | 解析与预取 | `basctl make` / `basctl resolve` | 解析 webapp（`gav://` / `http(s)://` / 本地路径），生成实例目录与 jstart launch spec，再预取依赖，不起进程 | [start.md](start.md) |
+| 开机自启 | `basctl autostart` | 按 `<auto-start>` / `wait-for` 逐个启动本机节点；不并发 | [usage.md](usage.md) |
 | 起停 | `basctl start` / `stop` | 定端口、写 `server.info`、后台 `jstart run`；停止时按 pid 优雅退出 | [start.md](start.md)、[server-info.md](server-info.md) |
 | 状态 | `basctl status` | 读 `servers/<name>/server.info` 列出运行中的实例 | [server-info.md](server-info.md) |
 | 看实例日志 | `basctl logs <farm.server>` | 读 `logs/<实例>/console.out` 尾部；`-f` 持续跟随 | [usage.md](usage.md) |

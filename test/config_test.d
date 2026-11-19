@@ -539,3 +539,47 @@ import std.exception : assertThrown;
     <webapps><webapp uri="gav://x:y:1" endpoints="missing"/></webapps>
   </bas>`));
 }
+
+
+@("auto-start parses wait-for conditions") unittest {
+  auto cfg = parseServerXml(`<bas version="1">
+    <engines><engine name="t" type="tomcat-server" version="11"/></engines>
+    <farms><farm name="f" engine="t">
+      <server name="s1" http="8080">
+        <auto-start>
+          <wait-for ref="f.s2"/>
+          <wait-for url="https://db.example/health" timeout="30" interval="1"/>
+          <wait-for tcp="db.example:5432"/>
+        </auto-start>
+      </server>
+      <server name="s2" http="8081"/>
+    </farm></farms>
+  </bas>`);
+  auto autoStart = cfg.farms[0].servers[0].autoStart;
+  assert(autoStart !is null);
+  assert(autoStart.waits.length == 3);
+  assert(autoStart.waits[0].refName == "f.s2");
+  assert(autoStart.waits[1].url == "https://db.example/health");
+  assert(autoStart.waits[1].timeoutSec == 30);
+  assert(autoStart.waits[1].intervalSec == 1);
+  assert(autoStart.waits[2].tcp == "db.example:5432");
+  assert(cfg.farms[0].servers[1].autoStart is null);
+}
+
+@("auto-start rejects malformed conditions") unittest {
+  assertThrown!ServerXmlException(parseServerXml(`<bas version="1">
+    <engines><engine name="t" type="tomcat-server" version="11"/></engines>
+    <farms><farm name="f" engine="t"><server name="s" http="8080">
+      <auto-start><wait-for ref="f.x" url="https://x"/></auto-start>
+    </server></farm></farms></bas>`));
+  assertThrown!ServerXmlException(parseServerXml(`<bas version="1">
+    <engines><engine name="t" type="tomcat-server" version="11"/></engines>
+    <farms><farm name="f" engine="t"><server name="s" http="8080">
+      <auto-start><wait-for url="ftp://x"/></auto-start>
+    </server></farm></farms></bas>`));
+  assertThrown!ServerXmlException(parseServerXml(`<bas version="1">
+    <engines><engine name="t" type="tomcat-server" version="11"/></engines>
+    <farms><farm name="f" engine="t"><server name="s" http="8080">
+      <wait-for ref="f.s"/>
+    </server></farm></farms></bas>`));
+}

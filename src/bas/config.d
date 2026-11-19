@@ -423,6 +423,21 @@ class Farm {
   }
 }
 
+/** `<auto-start>` 的一个就绪条件。 */
+class WaitFor {
+  /** 本机受管节点 `farm.server`；与 url/tcp 三选一。 */
+  string refName;
+  string url;
+  string tcp;
+  uint timeoutSec = 120;
+  uint intervalSec = 2;
+}
+
+/** `<server><auto-start>...</auto-start></server>`；存在即参与开机自启。 */
+class AutoStart {
+  WaitFor[] waits;
+}
+
 /** A single JVM instance under a farm（`<server>`）。 */
 class Server {
   Farm farm;
@@ -430,6 +445,7 @@ class Server {
   int http;
   Host host;
   string maxHeapSize;
+  AutoStart autoStart;
 
   this(Farm farm, string name) {
     this.farm = farm;
@@ -1199,6 +1215,67 @@ string expandServerOptions(string opts, string remoteUrl) {
   return trimmed.replace(marker, remoteBaseUrl(remoteUrl));
 }
 
+/** 读取正整数秒；缺省值，0 或非数字都拒绝。 */
+private uint positiveUintAttr(XmlElem elem, string name, uint fallback, string where) {
+  auto v = optAttr(elem, name);
+  if (v.isNull)
+    return fallback;
+  auto text = strip(v.get);
+  try {
+    auto n = text.to!uint;
+    if (n == 0)
+      throw new Exception("zero");
+    return n;
+  } catch (Exception) {
+    throw new ServerXmlException(where ~ "." ~ name ~ " must be a positive integer: " ~ text);
+  }
+}
+
+/** 解析 `<wait-for>`：ref/url/tcp 三选一，timeout/interval 可选。 */
+private WaitFor parseWaitFor(XmlElem elem) {
+  auto w = new WaitFor;
+  auto refAttr = nonBlankAttr(elem, "ref");
+  auto urlAttr = nonBlankAttr(elem, "url");
+  auto tcpAttr = nonBlankAttr(elem, "tcp");
+  uint count = (!refAttr.isNull) + (!urlAttr.isNull) + (!tcpAttr.isNull);
+  if (count != 1)
+    throw new ServerXmlException("<wait-for> requires exactly one of ref/url/tcp");
+  if (!refAttr.isNull)
+    w.refName = refAttr.get;
+  else if (!urlAttr.isNull) {
+    w.url = urlAttr.get;
+    if (!w.url.startsWith("http://") && !w.url.startsWith("https://"))
+      throw new ServerXmlException("<wait-for url> must use http:// or https://");
+  } else {
+    w.tcp = tcpAttr.get;
+    auto colon = w.tcp.lastIndexOf(':');
+    if (colon <= 0 || colon == w.tcp.length - 1)
+      throw new ServerXmlException("<wait-for tcp> must be host:port");
+    auto portText = w.tcp[colon + 1 .. $];
+    uint port;
+    try
+      port = portText.to!uint;
+    catch (Exception)
+      throw new ServerXmlException("<wait-for tcp> has invalid port: " ~ portText);
+    if (port == 0 || port > 65535)
+      throw new ServerXmlException("<wait-for tcp> port out of range: " ~ portText);
+  }
+  w.timeoutSec = positiveUintAttr(elem, "timeout", 120, "<wait-for>");
+  w.intervalSec = positiveUintAttr(elem, "interval", 2, "<wait-for>");
+  return w;
+}
+
+/** 解析 `<auto-start>`；空元素合法，表示没有额外等待条件。 */
+private AutoStart parseAutoStart(XmlElem elem) {
+  auto a = new AutoStart;
+  foreach (c; elementChildren(elem)) {
+    if (c.name != "wait-for")
+      throw new ServerXmlException("unexpected <" ~ c.name ~ "> in <auto-start>");
+    a.waits ~= parseWaitFor(c);
+  }
+  return a;
+}
+
 /** 解析 `<server>`：http 端口、host 归属与堆大小（缺省继承 farm）。 */
 Server parseServer(Container conf, Farm farm, XmlElem elem) {
   auto s = new Server(farm, requireAttr(elem, "name", "<server>"));
@@ -1209,6 +1286,15 @@ Server parseServer(Container conf, Farm farm, XmlElem elem) {
 
   auto mhs = nonBlankAttr(elem, "max-heap-size");
   s.maxHeapSize = mhs.isNull ? farm.maxHeapSize : mhs.get;
+  foreach (c; elementChildren(elem)) {
+    if (c.name == "auto-start") {
+      if (s.autoStart !is null)
+        throw new ServerXmlException("duplicate <auto-start> on server " ~ s.qualifiedName);
+      s.autoStart = parseAutoStart(c);
+    } else if (c.name == "wait-for") {
+      throw new ServerXmlException("<wait-for> must be inside <auto-start>");
+    }
+  }
   return s;
 }
 

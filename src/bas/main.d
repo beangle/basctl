@@ -90,6 +90,10 @@ version (unittest) {
       auto rest = args[2 .. $];
       return runStart(takeConfigFile(rest), rest);
     }
+    case "autostart": {
+      auto rest = args[2 .. $];
+      return runAutostart(takeConfigFile(rest), rest);
+    }
     case "stop": {
       auto rest = args[2 .. $];
       return runStop(takeConfigFile(rest), rest);
@@ -130,6 +134,7 @@ void printUsage() {
   stderr.writeln("  make [server.xml] <pattern>   Generate specs and resolve dependencies (no start)");
   stderr.writeln("  make <type> [options]         Prepare a container for jstart `[engine] init` (creator)");
   stderr.writeln("  resolve <server.xml> [pattern...]  Resolve webapps only");
+  stderr.writeln("  autostart [server.xml] [--dry-run]  Start local servers with <auto-start>, in dependency order");
   stderr.writeln("  start [server.xml] <pattern>  Allocate ports, generate a jstart spec per server and start it");
   stderr.writeln("                                (--port-range=<from>-<to>, default 20000-29999, when");
   stderr.writeln("                                <server http=\"0\">: basctl picks and records the port;");

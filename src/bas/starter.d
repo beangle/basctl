@@ -62,7 +62,7 @@ import bas.spec : SubappSpec, basctlExecutable, engineInitCommand, renderLaunchS
 import core.thread : Thread;
 import core.time : MonoTime, msecs;
 
-import std.algorithm : canFind, map;
+import std.algorithm : canFind, map, sort;
 import std.array : join, split;
 import std.conv : to;
 import std.datetime.systime : Clock;
@@ -307,6 +307,174 @@ private void applyEngineDefaults(Container container, const(Server)[] servers) {
         engines ~= farm.engine;
   foreach (engine; engines)
     applyEngineDefault(container, engine);
+}
+
+/** 一次 autostart 的结果；dry-run 只填 planned。 */
+struct AutostartResult {
+  bool ok = true;
+  string[] planned;
+  string[] started;
+  string[] skipped;
+  string[] failed;
+}
+
+/** 启动前检查全部 wait-for；超时返回 false。 */
+private bool waitForCondition(scope bool delegate() ready, uint timeoutSec, uint intervalSec) {
+  auto attempts = timeoutSec / intervalSec + 1;
+  foreach (i; 0 .. attempts) {
+    if (ready())
+      return true;
+    if (i + 1 < attempts)
+      Thread.sleep(msecs(intervalSec * 1000));
+  }
+  return false;
+}
+
+private bool probeHttp(string url) {
+  auto result = execute(["curl", "-fsS", "--max-time", "3", "-o", "/dev/null", url]);
+  return result.status == 0;
+}
+
+private bool probeTcp(string target) {
+  // curl 的 telnet:// 只做 TCP 连接；没有 nc 也不会依赖额外工具。
+  auto result = execute(["curl", "-sS", "--max-time", "3", "telnet://" ~ target]);
+  return result.status == 0;
+}
+
+/** 启动后等本实例的 HTTP 端口监听；没有端口或读不到 info 时不阻塞。 */
+private bool waitForInstancePort(string basHome, string instance) {
+  auto info = readInstanceInfo(basHome, instance);
+  if (info.isNull || info.get.httpPort == 0)
+    return true;
+  auto target = "127.0.0.1:" ~ info.get.httpPort.to!string;
+  return waitForCondition(() => probeTcp(target), 30, 1);
+}
+
+/**
+ * 按 `<auto-start>` 逐个启动本机节点。
+ *
+ * - 只处理本机 server，并且只处理存在 `<auto-start>` 的节点；
+ * - `wait-for ref` 同时是本地拓扑边，引用必须存在且在本机；
+ * - 所有节点串行启动，不并发；没有选中节点返回空成功。
+ */
+AutostartResult autoStart(Container container, string basHome, bool dryRun = false) {
+  AutostartResult result;
+  Server[] allLocal = localServers(container, "all");
+  Server[string] localByName;
+  foreach (server; allLocal)
+    localByName[server.qualifiedName] = server;
+
+  Server[] selected;
+  foreach (server; allLocal)
+    if (server.autoStart !is null)
+      selected ~= server;
+  sort!((a, b) => a.qualifiedName < b.qualifiedName)(selected);
+
+  size_t[string] index;
+  foreach (i, server; selected)
+    index[server.qualifiedName] = i;
+
+  size_t[][] deps = new size_t[][](selected.length);
+  size_t[] indegree = new size_t[](selected.length);
+  foreach (i, server; selected) {
+    foreach (wait; server.autoStart.waits) {
+      if (wait.refName.length == 0)
+        continue;
+      if ((wait.refName in localByName) is null)
+        throw new Exception("autostart: wait-for ref is not a local server: " ~ wait.refName);
+      if (auto target = wait.refName in index) {
+        deps[i] ~= *target;
+        indegree[i]++;
+      }
+    }
+  }
+
+  bool[] done = new bool[](selected.length);
+  size_t[] order;
+  while (order.length < selected.length) {
+    size_t pick = size_t.max;
+    foreach (i, server; selected) {
+      if (done[i] || indegree[i] != 0)
+        continue;
+      if (pick == size_t.max || server.qualifiedName < selected[pick].qualifiedName)
+        pick = i;
+    }
+    if (pick == size_t.max)
+      throw new Exception("autostart: cycle in wait-for refs");
+    done[pick] = true;
+    order ~= pick;
+    foreach (i; 0 .. selected.length)
+      if (deps[i].canFind(pick))
+        indegree[i]--;
+  }
+
+  foreach (i; order) {
+    auto server = selected[i];
+    if (dryRun) {
+      writeln("would start " ~ server.qualifiedName);
+      result.planned ~= server.qualifiedName;
+      continue;
+    }
+
+    bool waitsOk = true;
+    foreach (wait; server.autoStart.waits) {
+      bool ready;
+      if (wait.refName.length) {
+        ready = waitForCondition(() => !liveInstancePid(basHome, wait.refName).isNull,
+            wait.timeoutSec, wait.intervalSec);
+      } else if (wait.url.length) {
+        ready = waitForCondition(() => probeHttp(wait.url), wait.timeoutSec, wait.intervalSec);
+      } else {
+        ready = waitForCondition(() => probeTcp(wait.tcp), wait.timeoutSec, wait.intervalSec);
+      }
+      if (!ready) {
+        waitsOk = false;
+        stderr.writeln("autostart: skip " ~ server.qualifiedName ~ " (wait-for failed: " ~
+            (wait.refName.length ? wait.refName : wait.url.length ? wait.url : wait.tcp) ~ ")");
+        break;
+      }
+    }
+    if (!waitsOk) {
+      result.skipped ~= server.qualifiedName;
+      continue;
+    }
+
+    auto code = startServers(container, basHome, [server], defaultPortRange);
+    if (code == 0 && waitForInstancePort(basHome, server.qualifiedName)) {
+      result.started ~= server.qualifiedName;
+      writeln("autostart: started " ~ server.qualifiedName);
+    } else {
+      result.failed ~= server.qualifiedName;
+      result.ok = false;
+      stderr.writeln("autostart: failed " ~ server.qualifiedName);
+    }
+  }
+  return result;
+}
+
+/** `basctl autostart`：只打印计划/执行本机 auto-start 节点。 */
+int runAutostart(string configFile, string[] rest) {
+  bool dryRun;
+  foreach (arg; rest) {
+    if (arg == "--dry-run")
+      dryRun = true;
+    else {
+      stderr.writeln("Unknown option: " ~ arg);
+      return 1;
+    }
+  }
+  if (!exists(configFile)) {
+    stderr.writeln("Cannot find config file " ~ configFile);
+    return 1;
+  }
+  try {
+    auto container = parseServerXmlFile(configFile);
+    auto result = autoStart(container, dirName(dirName(absolutePath(configFile))), dryRun);
+    return result.ok ? 0 : 1;
+  } catch (Exception e) {
+    stderr.writeln("basctl autostart: " ~ e.msg);
+    return 1;
+  }
 }
 
 /**

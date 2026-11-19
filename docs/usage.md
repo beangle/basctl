@@ -74,6 +74,7 @@ basctl stop all
 | `basctl init [--force] [--dry-run] [workdir]` | 初始化组件目录：把控制脚本铺到 `<workdir>/bin` 并建 `conf/`；**不生成 `basctl.env`**，未设置 `BAS_PRINCIPAL`/`BAS_TOKEN` 时提示使用 `/etc/bas/conf/basctl.env` |
 | `basctl make [server.xml] <farm\|server\|all>` | 只准备不启动：生成 jstart spec 并 `jstart resolve` 预取依赖 |
 | `basctl resolve <server.xml> [pattern...]` | 只解析 webapp，不生成实例 |
+| `basctl autostart [server.xml] [--dry-run]` | 按 `<auto-start>` 和 `wait-for` 逐个启动本机节点；无匹配节点返回 0 |
 | `basctl start [server.xml] <farm\|server\|all> [--port-range=<from>-<to>]` | 为实例定端口（`<server http="0">` 时在区间内分配，缺省 `20000-29999`）、写 `server.info`、生成 jstart spec、resolve 并后台启动 |
 | `basctl stop [server.xml] <farm\|server\|all> [--force] [--timeout=<sec>]` | 按 `server.info` 里的 pid 停止 `start` 启动的实例：SIGTERM 后等 `--timeout`（缺省 15 秒），`--force` 直接 SIGKILL；`server.info` 缺失时按命令行 `-Dbas.server` + `-Dbas.home` 找回本实例的残留进程并停止，`restart` 因此在 info 丢失后也能先停旧进程 |
 | `basctl run --engine=<type>-<version> <app>` | 嵌入式运行单个 webapp：`--engine=tomcat-11.0.25` 同时给出容器类型与版本，生成单应用 spec 后前台 `jstart run` |

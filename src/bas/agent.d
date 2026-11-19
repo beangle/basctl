@@ -44,7 +44,7 @@ import bas.pull : runPull;
 import bas.remote : RemoteConfig, agentChannelUrl, bearerCredential, loadRemoteEnv, micdnXmlUrl,
   proxyBundleUrl, validateRemoteConf;
 import bas.report : basReport, healthReport, osReport;
-import bas.starter : serviceAction;
+import bas.starter : autoStart, serviceAction;
 
 import vibe.core.core : exitEventLoop, runApplication, runTask, sleep;
 import vibe.core.sync : TaskMutex;
@@ -163,11 +163,22 @@ int runAgent(string configFile, string basctlVersion, string[] rest) {
     stderr.writeln("basagent: warning: BAS_PRINCIPAL/BAS_TOKEN are not set; agent not started.");
     return 0;
   }
-  // 启动时先对齐 hub 的 server.xml；没有本地 fallback，拉取失败即启动失败。
+  // 启动时先对齐 hub 的 server.xml；拉取失败但本地已有配置时按离线正常情况继续。
   auto bootHome = dirName(dirName(absolutePath(configFile)));
-  if (runPull([bootHome], true) != 0) {
-    stderr.writeln("basagent: startup pull failed");
-    return 1;
+  auto pulled = runPull([bootHome], true) == 0;
+  auto hasConfig = exists(configFile);
+  if (!pulled && hasConfig)
+    logInfo("agent: startup pull failed; using local server.xml");
+  if (hasConfig) {
+    try {
+      auto result = autoStart(containerFrom(configFile), bootHome, false);
+      if (result.failed.length)
+        logWarn("agent: autostart failed for %s", result.failed.join(", "));
+      else if (result.skipped.length)
+        logInfo("agent: autostart skipped %s", result.skipped.join(", "));
+    } catch (Exception e) {
+      logWarn("agent: autostart: %s", e.msg);
+    }
   }
   AgentContext ctx;
   try {

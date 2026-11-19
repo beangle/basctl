@@ -342,6 +342,13 @@ accept-count/connection-timeout；Undertow 只用 accept-count/connection-timeou
   </xs:complexType>
 
   <xs:complexType name="serverType">
+    <xs:sequence>
+      <xs:element name="auto-start" type="autoStartType" minOccurs="0" maxOccurs="1">
+        <xs:annotation>
+          <xs:documentation>存在即参与 basagent 开机自启；没有该元素则不自动启动。</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+    </xs:sequence>
     <xs:attribute name="name" type="xs:string" use="required"/>
     <xs:attribute name="http" type="xs:nonNegativeInteger">
       <xs:annotation>
@@ -368,6 +375,44 @@ accept-count/connection-timeout；Undertow 只用 accept-count/connection-timeou
     <xs:attribute name="proxy-options" type="xs:string">
       <xs:annotation>
         <xs:documentation>由 bashub 生成；basctl 不消费。</xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+  </xs:complexType>
+
+  <xs:complexType name="autoStartType">
+    <xs:sequence>
+      <xs:element name="wait-for" type="waitForType" minOccurs="0" maxOccurs="unbounded">
+        <xs:annotation>
+          <xs:documentation>启动前必须全部满足的就绪条件；按配置顺序检查，全部通过才启动。</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="waitForType">
+    <xs:attribute name="ref" type="xs:string">
+      <xs:annotation>
+        <xs:documentation>本机受管节点 farm.server；同时作为本地启动顺序依赖。</xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+    <xs:attribute name="url" type="xs:string">
+      <xs:annotation>
+        <xs:documentation>外部 HTTP health；2xx/3xx 视为就绪。</xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+    <xs:attribute name="tcp" type="xs:string">
+      <xs:annotation>
+        <xs:documentation>外部 TCP 地址 host:port；只验证网络可达。</xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+    <xs:attribute name="timeout" type="xs:positiveInteger" default="120">
+      <xs:annotation>
+        <xs:documentation>等待超时秒数。</xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+    <xs:attribute name="interval" type="xs:positiveInteger" default="2">
+      <xs:annotation>
+        <xs:documentation>重试间隔秒数。</xs:documentation>
       </xs:annotation>
     </xs:attribute>
   </xs:complexType>

@@ -40,11 +40,14 @@ BAS_TOKEN=<Project.key>
 
 1. 用 Project token 拉取 `GET /api/bashub/config/{project}/server`；如果返回的配置没有本机
    可运行的 bas server，就**不安装** `server.xml`（也不留下临时文件），agent 以空实例集继续
-   运行。只有存在本机 server 时才原子替换 `$BAS_HOME/conf/server.xml`；下载或解析失败则启动失败。
-   这让只跑 micdn / proxy 的节点不需要伪造一份空 `server.xml`。
-2. 拨出站 WebSocket 到
+   运行。只有存在本机 server 时才原子替换 `$BAS_HOME/conf/server.xml`。
+2. 拉取失败但本地已有 `server.xml`：按离线正常情况直接使用本地文件，不告警；没有本地文件
+   时不调用 autostart。
+3. 本地有 `server.xml` 时调用 `basctl autostart`：只启动带 `<auto-start>` 的本机节点，按
+   `wait-for ref` 排序并逐个启动；外部 `wait-for url/tcp` 有界等待。
+4. 拨出站 WebSocket 到
    `/api/bashub/monitor/agents/{project}/channel`，发送 `hello`、主机与实例快照。
-3. 按 hub 节奏回保活、`report:health`、`report:now`。
+5. 按 hub 节奏回保活、`report:health`、`report:now`。
 
 ## 固定指令
 

@@ -38,6 +38,26 @@ basagent 触发代理 bundle 的校验、落盘和 reload；手工 `basctl proxy
   `/etc/bas/conf/basctl.env` 缺失时创建；实际文件不由包管理跟踪，卸载/重装都不删除、不覆盖。
   旧 `/var/lib` 条目已移除。这样 `rpm -e` / `apt remove` / `apt purge` 都不会删掉主机凭证。
 
+## 本机开机自启
+
+`server.xml` 的 server 可声明：
+
+```xml
+<server name="app" http="8080">
+  <auto-start>
+    <wait-for ref="platform.db"/>
+    <wait-for url="https://db.example/health" timeout="300"/>
+    <wait-for tcp="db.example:5432" timeout="60"/>
+  </auto-start>
+</server>
+```
+
+- 只有带 `<auto-start>` 的本机 server 才由 `basctl autostart` 自动启动；
+- `wait-for` 只允许作为 `auto-start` 的子元素；`ref` 是本机受管节点，`url/tcp` 是外部依赖；
+- 本机 ref 形成 DAG，逐节点串行启动，不并发；
+- basagent 有本地 `server.xml` 就调用 autostart；pull 失败但本地已有配置是正常离线场景；
+- 没有 `server.xml` 不调用 autostart。
+
 ## 无 bas server 的 agent
 
 `basagent pull` 会解析远端 `server.xml`；如果没有本机可运行的 bas server，就不安装该文件，
@@ -98,7 +118,7 @@ POST /api/bashub/config/projects/{id}/proxy/apply   (bashub 管理台)
 ```text
 dub build -c basagent: 通过
 dub build -c basctl: 通过
-dub test: 151 passed
+dub test: 153 passed
 RPM 构建: 通过（/usr/share/bas/basctl.env、/usr/libexec/basproxy-apply、
 basproxy-apply@.service、49-basproxy.rules 均在包内）
 DEB 构建: 本环境未执行
