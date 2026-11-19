@@ -110,7 +110,8 @@ POST /api/bashub/config/projects/{id}/proxy/apply   (bashub 管理台)
 1. 按上面的命令迁移 `/etc/bas/conf/basctl.env`，确认属主/权限后重启 `basagent`。
 2. 代理节点安装新版 basctl/basagent 后，确认 `basproxy-apply@.service`、
    `/usr/libexec/basproxy-apply` 和 polkit rule 已就位；用 `pkaction`/`journalctl` 验证。
-3. bashub 端升级到支持 `proxy:apply` 的版本；管理台按 Project 的 endpoint `ips` 触发。
+3. bashub 端升级到 **0.0.9** 及以上，支持 `proxy:apply`、`micdn:reload` 和 server.xml 的
+   `<auto-start>` / `<wait-for>`；管理台按 Project 的 endpoint `ips` 触发。
 4. `basctl init` 不再生成 env；源码安装请显式设置 `BAS_ENV_FILE`。
 
 ## 验证

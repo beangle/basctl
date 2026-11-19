@@ -32,6 +32,8 @@
   控制台在线节点页据此显示代理版本。
 - **文档拆分**：新增 `docs/basagent.md`；basctl 的 features/usage/proxy/start/server-info/run
   只保留本地 CLI 内容，basagent 的通道、配置投递、代理触发和排障集中到 agent 文档。
+- **测试**：`dub test` 通过 153 个用例；新增 auto-start / wait-for 解析与 `basctl autostart`
+  回归测试。
 
 ## v0.0.2 (2026-11-17)
 
