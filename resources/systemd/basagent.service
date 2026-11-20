@@ -20,7 +20,9 @@ TimeoutStopSec=20
 # agent 自己，别把正在运行的应用一起 SIGTERM（实例的生命周期归 basctl / server.info）。
 KillMode=process
 UMask=0077
-NoNewPrivileges=true
+# proxy:apply 通过固定 sudoers 命令触发 root oneshot；sudo 是 setuid，必须允许提升。
+# 真正的能力边界由 /etc/sudoers.d/basproxy 的两个固定命令保证。
+NoNewPrivileges=false
 
 [Install]
 WantedBy=multi-user.target

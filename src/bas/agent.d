@@ -1350,7 +1350,8 @@ string proxyApplyResult(ref AgentContext ctx, string id, ref JSONValue body) {
   int status;
   string output;
   try {
-    auto run = execute(["/usr/bin/systemctl", "start", "basproxy-apply@" ~ engine ~ ".service"]);
+    auto run = execute(["/usr/bin/sudo", "-n", "/usr/bin/systemctl", "start",
+        "basproxy-apply@" ~ engine ~ ".service"]);
     status = run.status;
     output = run.output;
   } catch (Exception e) {

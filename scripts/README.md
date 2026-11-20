@@ -24,7 +24,7 @@
 只在 `/etc/bas/conf/basctl.env` 缺失时复制并设为 `root:beangle 0640`；该文件不由 deb/rpm 跟踪，
 卸载、重装、升级都不会删除或覆盖。模板本身只是初始化来源，服务运行时不读取它，但升级/重装需要它。
 卸载、重装、升级都不删除或覆盖该文件；模板只用于首次安装时初始化。包内还安装 `proxy:apply` 的 root helper（`/usr/libexec/basproxy-apply`）、
-`basproxy-apply@.service` 和 polkit 规则（`/etc/polkit-1/rules.d/49-basproxy.rules`）。`basctl` 是本地命令；
+`basproxy-apply@.service` 和固定命令的 sudoers 规则（`/etc/sudoers.d/basproxy`）。`basctl` 是本地命令；
 `basagent` 由 systemd 以专用账号 `bas:beangle` 常驻，主目录固定为 `/var/lib/bas`，日志写在
 `/var/log/bas/agent/console.out`。
 运行时用宿主 `curl` 下载，`make` / `start` / `resolve` / `run` 另需宿主 `jstart` 在 `PATH` 上。

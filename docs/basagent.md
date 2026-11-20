@@ -58,7 +58,7 @@ basagent 只执行白名单原语，不拼 shell，不接收任意命令/URL/路
 | `log:read` / `agent:log` | 读实例或 agent 日志区间 |
 | `service:start` / `stop` / `restart` | 调 `basctl` 启停本机 `server.xml` 里的实例；start/restart 前先拉一次 server.xml |
 | `micdn:reload` | 用 Project key 拉取 micdn.xml，POST 到本机 `127.0.0.1:8888/admin/config`；micdn 自己校验、原子写文件并 reload |
-| `proxy:apply` | 用 Project token 下载代理 bundle，触发本机受 polkit 限制的 `basproxy-apply@<engine>.service`；root helper 再调 `basctl proxy apply --bundle` |
+| `proxy:apply` | 用 Project token 下载代理 bundle，触发本机 sudoers 授权的 `basproxy-apply@<engine>.service`；root helper 再调 `basctl proxy apply --bundle` |
 | `config:refresh` / `report:now` / `report:health` | 重新拉配置 / 立即上报 / 返回健康摘要 |
 
 协议细节见 [channel-protocol.md](channel-protocol.md)；常驻、排障和凭证配置见
@@ -89,7 +89,7 @@ bashub 管理台（登录会话）
   → basagent（bas:beangle，无权）
   → 下载 bundle 到 /var/lib/bas/proxy/<engine>.zip（使用 Project token，不交给 root）
   → 写 /var/lib/bas/proxy/<engine>.endpoint
-  → systemctl start basproxy-apply@<engine>.service（polkit 仅授权这一种 unit）
+  → sudo -n systemctl start basproxy-apply@<engine>.service（sudoers 只授权固定命令）
   → root-owned /usr/libexec/basproxy-apply 校验路径并执行
        basctl proxy apply --engine=<engine> --bundle=<path>
   → 校验 / 原子替换 / reload / 失败回滚
@@ -99,28 +99,25 @@ bashub 管理台（登录会话）
 bashub 只发固定动作（`engine` + `endpoint`），不接受任意命令、URL、service 名或配置路径；
 bundle 下载由 agent 完成，root helper 不联网，也不读取 `BAS_TOKEN`。
 
-### CentOS 7 与 polkit
+### CentOS 7 与 sudoers
 
-CentOS 7 的 polkit 是 **0.112**，支持 `/etc/polkit-1/rules.d/*.rules` 的 JavaScript 规则；
-systemd 219 也支持模板 unit。规则只允许 `bas` 用户 `start`
-`basproxy-apply@haproxy.service` / `basproxy-apply@nginx.service`：
+CentOS 7 的 systemd 219 在 `org.freedesktop.systemd1.manage-units` 检查里不传 `unit` detail，
+polkit 无法把权限限定到固定 unit。安装包因此使用固定的 sudoers 规则：
 
-```js
-polkit.addRule(function(action, subject) {
-  if (action.id !== "org.freedesktop.systemd1.manage-units")
-    return;
-  var unit = action.lookup("unit");
-  var verb = action.lookup("verb");
-  if (subject.user === "bas" && verb === "start" &&
-      (unit === "basproxy-apply@haproxy.service" ||
-       unit === "basproxy-apply@nginx.service"))
-    return polkit.Result.YES;
-});
+```sudoers
+Defaults:bas !requiretty
+Cmnd_Alias BASPROXY_APPLY = /usr/bin/systemctl start basproxy-apply@haproxy.service, /usr/bin/systemctl start basproxy-apply@nginx.service
+bas ALL=(root) NOPASSWD: BASPROXY_APPLY
 ```
 
-不使用 `.pkla`：它只能按 action 授权，无法把 `org.freedesktop.systemd1.manage-units` 限定到固定
-unit；放行它会允许 `bas` 管理所有 systemd unit。没有 JS 规则的环境应失败关闭，而不是加宽 `.pkla`
-或 sudo。
+basagent 只执行：
+
+```text
+sudo -n /usr/bin/systemctl start basproxy-apply@<engine>.service
+```
+
+sudoers 只允许这两个固定命令，不接受任意 unit 或参数；helper 仍会校验 bundle 的属主、权限和路径。
+basagent 因此关闭了 `NoNewPrivileges`，否则 sudo 的 setuid 提升会被内核拒绝。
 
 root oneshot unit 只运行 `/usr/libexec/basproxy-apply %i`；helper 校验 bundle 属于 `bas`、权限
 0600、非 symlink，使用 `flock` 串行化，再调用 `basctl proxy apply --bundle`。
@@ -145,5 +142,5 @@ sudo -u bas -H tail -f /var/log/bas/agent/console.out
 ## 安全
 
 - 只允许出站连接；控制面不暴露入站端口。
-- 管理端点固定 localhost；proxy 只允许 polkit 授权的固定 unit。
-- 失败关闭：缺 token、缺 helper、polkit 未授权都返回失败，不回退到 sudo 或宽泛权限。
+- 管理端点固定 localhost；proxy 只允许 sudoers 授权的两个固定 unit。
+- 失败关闭：缺 token、缺 helper、sudoers 未授权都返回失败，不放宽为任意 systemctl 命令。

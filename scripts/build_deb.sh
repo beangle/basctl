@@ -71,7 +71,7 @@ Priority: optional
 Architecture: ${ARCH}
 Maintainer: ${MAINTAINER}
 Homepage: https://github.com/beangle/basctl
-Depends: curl, logrotate
+Depends: curl, logrotate, sudo
 Description: Beangle Bas Server control-plane CLI and agent
  Basctl parses conf/server.xml into runnable container instances: resolve
  webapps, generate jstart launch specs, start/stop instances and render the
@@ -116,6 +116,9 @@ fi
 chown root:beangle /etc/bas/conf/basctl.env
 chmod 0640 /etc/bas/conf/basctl.env
 chmod 0700 /var/log/bas/agent
+if [ -x /usr/sbin/visudo ]; then
+  /usr/sbin/visudo -cf /etc/sudoers.d/basproxy >/dev/null
+fi
 if [ ! -e /var/lib/bas/logs ]; then
   ln -s /var/log/bas /var/lib/bas/logs
 fi

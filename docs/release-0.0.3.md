@@ -87,18 +87,21 @@ GET /api/bashub/micdn/{project}/micdn.xml   (Bearer <Project.key>)
 ```text
 POST /api/bashub/config/projects/{id}/proxy/apply   (bashub 管理台)
   → basagent 下载 bundle 到 /var/lib/bas/proxy/<engine>.zip
-  → systemctl start basproxy-apply@<engine>.service
+  → sudo -n systemctl start basproxy-apply@<engine>.service
   → root helper 校验路径/属主/权限后执行
        basctl proxy apply --bundle=...
 ```
 
 - 安装包新增 `/usr/libexec/basproxy-apply`、`basproxy-apply@.service` 和
-  `/etc/polkit-1/rules.d/49-basproxy.rules`。
+  `/etc/sudoers.d/basproxy`。
+- CentOS 7 的 systemd 219 不传 unit detail，polkit 无法限定 unit；sudoers 只放行 `bas` 对
+  `basproxy-apply@haproxy.service` / `@nginx.service` 的 `systemctl start`；basagent 关闭
+  `NoNewPrivileges` 以允许 sudo 提升。
 - helper 只接受 `haproxy` / `nginx` 两个模板实例参数，不联网、不读取 `BAS_TOKEN`；bundle 路径固定，
   必须属于 `bas`、权限 0600、非 symlink；用 `flock` 串行化同一引擎的 apply。
 - root helper 复用现有 `basctl proxy apply`：manifest/hash 校验、`haproxy -c` / `nginx -t`、
   原子替换、失败回滚全部保留。
-- 缺少 helper、polkit 未授权或 unit 启动失败时**失败关闭**，不会退化为宽泛 sudo/`.pkla`。
+- 缺少 helper、sudoers 未授权或 unit 启动失败时**失败关闭**，不会放开为任意 systemctl。
 
 ## 修复
 
@@ -110,7 +113,7 @@ POST /api/bashub/config/projects/{id}/proxy/apply   (bashub 管理台)
 
 1. 按上面的命令迁移 `/etc/bas/conf/basctl.env`，确认属主/权限后重启 `basagent`。
 2. 代理节点安装新版 basctl/basagent 后，确认 `basproxy-apply@.service`、
-   `/usr/libexec/basproxy-apply` 和 polkit rule 已就位；用 `pkaction`/`journalctl` 验证。
+   `/usr/libexec/basproxy-apply` 和 `/etc/sudoers.d/basproxy` 已就位；用 `visudo -cf`/`journalctl` 验证。
 3. bashub 端升级到 **0.0.9** 及以上，支持 `proxy:apply`、`micdn:reload` 和 server.xml 的
    `<auto-start>` / `<wait-for>`；管理台按 Project 的 endpoint `ips` 触发。
 4. `basctl init` 不再生成 env；源码安装请显式设置 `BAS_ENV_FILE`。
@@ -122,6 +125,6 @@ dub build -c basagent: 通过
 dub build -c basctl: 通过
 dub test: 153 passed
 RPM 构建: 通过（/usr/share/bas/basctl.env、/usr/libexec/basproxy-apply、
-basproxy-apply@.service、49-basproxy.rules 均在包内）
+basproxy-apply@.service、/etc/sudoers.d/basproxy 均在包内）
 DEB 构建: 本环境未执行
 ```

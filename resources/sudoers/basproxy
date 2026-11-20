@@ -1,0 +1,6 @@
+# Installed by basctl: allow basagent to trigger only the fixed proxy-apply units.
+# CentOS 7's systemd 219 does not pass unit details to polkit, so polkit cannot
+# safely restrict the target unit there.
+Defaults:bas !requiretty
+Cmnd_Alias BASPROXY_APPLY = /usr/bin/systemctl start basproxy-apply@haproxy.service, /usr/bin/systemctl start basproxy-apply@nginx.service
+bas ALL=(root) NOPASSWD: BASPROXY_APPLY

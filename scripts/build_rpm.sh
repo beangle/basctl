@@ -95,7 +95,7 @@ find . -type d -exec chmod 0755 {} +
 # 运行时依赖：curl 负责下载（pull / war 直链）；jstart 由 make/start/resolve/run 使用，
 # 但不作为硬依赖，否则只想用 init/banner/pull 的机器装不上。basagent 的 OpenSSL 3.0
 # 动态库依赖由 rpmbuild 的自动依赖生成记录。
-DEPEND="curl, logrotate"
+DEPEND="curl, logrotate, sudo"
 
 cd ..
 
@@ -169,6 +169,9 @@ fi
 chown root:beangle /etc/bas/conf/basctl.env
 chmod 0640 /etc/bas/conf/basctl.env
 chmod 0700 /var/log/bas/agent
+if [ -x /usr/sbin/visudo ]; then
+  /usr/sbin/visudo -cf /etc/sudoers.d/basproxy >/dev/null
+fi
 if [ ! -e /var/lib/bas/logs ]; then
   ln -s /var/log/bas /var/lib/bas/logs
 fi
