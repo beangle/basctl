@@ -18,6 +18,8 @@
 - **micdn 配置投递**：`micdn:reload` 不再只调本机 `/admin/reload`；agent 用 Project token 拉取
   `micdn.xml`，POST 到本机 `/admin/config`，由 micdn 自己校验、原子写文件并 reload。agent 不写
   micdn 目录，也不把 token 交给 micdn。
+- **修复 `micdn:reload` 下载鉴权**：micdn.xml 端点只接受 Project key，basagent 不再误用
+  握手用的 `<project>:<key>`，否则会报 `micdn-download-failed`。
 - **`basctl proxy` 改为只应用本地 bundle**：`apply` 必须给 `--bundle=FILE`，不再读取
   `BAS_PRINCIPAL`/`BAS_TOKEN` 或下载；远程下载和触发统一由 basagent 负责。
 - **新增 `proxy:apply`**：basagent 用 Project token 下载代理 bundle，再触发受 polkit 限制的

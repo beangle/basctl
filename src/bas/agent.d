@@ -1390,8 +1390,10 @@ string micdnReloadResult(ref AgentContext ctx, string id) {
   scope (exit)
     if (exists(tmp))
       remove(tmp);
+  // micdn.xml 端点只接受 Project key；ctx.credential 是握手用的 `<project>:<key>`，
+  // 不能直接复用，否则会被鉴权拒绝并误报 micdn-download-failed。
   if (!curlDownload(micdnXmlUrl(ctx.remote), tmp,
-      ["Authorization: Bearer " ~ ctx.credential], false, 4 * 1024 * 1024))
+      ["Authorization: Bearer " ~ ctx.remote.token], false, 4 * 1024 * 1024))
     return resultMessage(id, false, JSONValue(null), "micdn-download-failed");
 
   auto responseFile = tmp ~ ".response";

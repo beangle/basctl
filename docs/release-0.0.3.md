@@ -69,12 +69,13 @@ basagent 触发代理 bundle 的校验、落盘和 reload；手工 `basctl proxy
 `micdn:reload` 现在由 basagent 完成完整链路：
 
 ```text
-GET /api/bashub/micdn/{project}/micdn.xml   (Project token)
+GET /api/bashub/micdn/{project}/micdn.xml   (Bearer <Project.key>)
   → POST http://127.0.0.1:8888/admin/config
   → micdn 自己校验、原子写入 micdn.xml → reload
 ```
 
 - basagent 不写 `/etc/micdn`，也不把 `BAS_TOKEN` 交给 micdn。
+- micdn.xml 下载使用 Project key，不是 agent 握手用的 `<project>:<key>`。
 - micdn 的 `/admin/config` 只接受 localhost，body 上限 4 MiB；失败时旧文件和旧 router 不变。
 - micdn 不再读取 `BAS_PRINCIPAL`/`BAS_TOKEN`，`micdn.env` 已移除；启动必须有本地 `micdn.xml`。
 - `/etc/micdn` 由 `micdn:beangle 0750` 所有，`micdn.xml` 为 `micdn:beangle 0640`。

@@ -57,7 +57,7 @@ basagent 只执行白名单原语，不拼 shell，不接收任意命令/URL/路
 |---|---|
 | `log:read` / `agent:log` | 读实例或 agent 日志区间 |
 | `service:start` / `stop` / `restart` | 调 `basctl` 启停本机 `server.xml` 里的实例；start/restart 前先拉一次 server.xml |
-| `micdn:reload` | 用 Project token 拉取 micdn.xml，POST 到本机 `127.0.0.1:8888/admin/config`；micdn 自己校验、原子写文件并 reload |
+| `micdn:reload` | 用 Project key 拉取 micdn.xml，POST 到本机 `127.0.0.1:8888/admin/config`；micdn 自己校验、原子写文件并 reload |
 | `proxy:apply` | 用 Project token 下载代理 bundle，触发本机受 polkit 限制的 `basproxy-apply@<engine>.service`；root helper 再调 `basctl proxy apply --bundle` |
 | `config:refresh` / `report:now` / `report:health` | 重新拉配置 / 立即上报 / 返回健康摘要 |
 
@@ -69,7 +69,7 @@ basagent 只执行白名单原语，不拼 shell，不接收任意命令/URL/路
 `micdn:reload` 的完整链路：
 
 ```text
-GET /api/bashub/micdn/{project}/micdn.xml   (Project token)
+GET /api/bashub/micdn/{project}/micdn.xml   (Bearer <Project.key>)
   → POST 127.0.0.1:8888/admin/config
   → micdn 校验、原子写自己的 micdn.xml、reload
 ```
