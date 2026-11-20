@@ -72,4 +72,5 @@ nginx:
 
 `basagent` 的 `proxy:apply` 会下载 bundle 并触发 `basproxy-apply@<engine>.service`；root helper
 再调用本命令的 `--bundle` 形式。basagent 不写代理文件，sudoers 只授权两个固定 unit；详见
-[basagent.md](basagent.md)。
+[basagent.md](basagent.md)。权限边界和 oneshot 执行链见
+[proxy-oneshot.md](proxy-oneshot.md)。

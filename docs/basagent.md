@@ -97,7 +97,8 @@ bashub 管理台（登录会话）
 ```
 
 bashub 只发固定动作（`engine` + `endpoint`），不接受任意命令、URL、service 名或配置路径；
-bundle 下载由 agent 完成，root helper 不联网，也不读取 `BAS_TOKEN`。
+bundle 下载由 agent 完成，root helper 不联网，也不读取 `BAS_TOKEN`。完整的权限边界与
+oneshot 执行链见 [proxy-oneshot.md](proxy-oneshot.md)。
 
 ### CentOS 7 与 sudoers
 
