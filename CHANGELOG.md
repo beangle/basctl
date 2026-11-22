@@ -2,6 +2,8 @@
 
 ## v0.0.4 (unreleased)
 
+- **修复 root helper 的 runuser 参数**：CentOS 7 的 `runuser` 不允许 `-s` 与 `-u` 同时使用；
+  改为 `runuser -u micdn -- /bin/sh -c ...`，避免 micdn 停止时 apply 失败。
 - **micdn 配置改为 root oneshot**：basagent 下载 `micdn.xml` 到私有目录，触发
   `basmicdn-apply.service`；root helper 用 `micdn --check` 校验、原子安装
   `/etc/micdn/micdn.xml` 并 restart，失败恢复旧配置。移除对 `/admin/config` 的依赖。

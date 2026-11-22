@@ -73,7 +73,8 @@ chown micdn:beangle "$check_file" 2>/dev/null || true
 chmod 0400 "$check_file"
 out="$(mktemp /run/basmicdn-check-out.XXXXXX)" || fail "cannot create output file"
 if command -v runuser >/dev/null 2>&1; then
-  if ! runuser -u micdn -s /bin/sh -- "$MICDN" --check -f "$check_file" >"$out" 2>&1; then
+  # CentOS 7 的 runuser 不允许 -s 与 -u 同时使用；显式 exec /bin/sh 也能避开 nologin。
+  if ! runuser -u micdn -- /bin/sh -c 'exec "$1" --check -f "$2"' sh "$MICDN" "$check_file" >"$out" 2>&1; then
     fail "$(cat "$out")"
   fi
 else
