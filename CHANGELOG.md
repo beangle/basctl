@@ -1,6 +1,18 @@
 # Changelog
 
-## v0.0.3 (unreleased)
+## v0.0.4 (unreleased)
+
+- **micdn 配置改为 root oneshot**：basagent 下载 `micdn.xml` 到私有目录，触发
+  `basmicdn-apply.service`；root helper 用 `micdn --check` 校验、原子安装
+  `/etc/micdn/micdn.xml` 并 restart，失败恢复旧配置。移除对 `/admin/config` 的依赖。
+- **真实服务状态上报**：`report:os` / `report:health` 增加 `micdn` 和
+  `proxyState.haproxy/nginx`，来自 `systemctl is-active`，监控不再用 agent 在线代替服务在线。
+- **启动就绪判定**：`basctl start` / `service:start` 等待进程存活且 HTTP 端口 LISTEN
+  （最多 30 秒），不再把刚 spawn 当成已启动。
+- **删除部署后清理 server.xml**：远端不再包含本机 bas server 时，basagent 删除旧
+  `server.xml`，避免已删除的部署继续出现在监控的 `declared` 中。
+
+## v0.0.3 (2026-11-20)
 
 - **远程配置迁到 `/etc`**：`basctl.env` 从 `$BAS_HOME/conf` 迁到
   `/etc/bas/conf/basctl.env`（root:beangle 0640）；systemd 只读这一处，不再读取
