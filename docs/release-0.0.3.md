@@ -66,17 +66,19 @@ basagent 触发代理 bundle 的校验、落盘和 reload；手工 `basctl proxy
 
 ## micdn 配置投递
 
-`micdn:reload` 现在由 basagent 完成完整链路：
+`micdn:reload` 现在由 basagent 下载，root oneshot 安装：
 
 ```text
 GET /api/bashub/micdn/{project}/micdn.xml   (Bearer <Project.key>)
-  → POST http://127.0.0.1:8888/admin/config
-  → micdn 自己校验、原子写入 micdn.xml → reload
+  → 写 /var/lib/bas/micdn/micdn.xml（bas, 0600）
+  → sudo -n systemctl start basmicdn-apply.service
+  → root helper: micdn --check → 备份 → 原子安装 → restart micdn
+  → 写 apply.result
 ```
 
-- basagent 不写 `/etc/micdn`，也不把 `BAS_TOKEN` 交给 micdn。
+- basagent 不写 `/etc/micdn`，也不把 `BAS_TOKEN` 交给 helper。
 - micdn.xml 下载使用 Project key，不是 agent 握手用的 `<project>:<key>`。
-- micdn 的 `/admin/config` 只接受 localhost，body 上限 4 MiB；失败时旧文件和旧 router 不变。
+- 不依赖 micdn 已运行或管理端口，因此 micdn stopped 时也能投递。
 - micdn 不再读取 `BAS_PRINCIPAL`/`BAS_TOKEN`，`micdn.env` 已移除；启动必须有本地 `micdn.xml`。
 - `/etc/micdn` 由 `micdn:beangle 0750` 所有，`micdn.xml` 为 `micdn:beangle 0640`。
 
@@ -92,11 +94,11 @@ POST /api/bashub/config/projects/{id}/proxy/apply   (bashub 管理台)
        basctl proxy apply --bundle=...
 ```
 
-- 安装包新增 `/usr/libexec/basproxy-apply`、`basproxy-apply@.service` 和
-  `/etc/sudoers.d/basproxy`。
+- 安装包新增 `/usr/libexec/basproxy-apply`、`basproxy-apply@.service`、
+  `/usr/libexec/basmicdn-apply`、`basmicdn-apply.service` 和 `/etc/sudoers.d/basproxy`。
 - CentOS 7 的 systemd 219 不传 unit detail，polkit 无法限定 unit；sudoers 只放行 `bas` 对
-  `basproxy-apply@haproxy.service` / `@nginx.service` 的 `systemctl start`，以及
-  `systemctl start micdn.service`；basagent 关闭 `NoNewPrivileges` 以允许 sudo 提升。
+  `basproxy-apply@haproxy.service` / `@nginx.service` 以及 `basmicdn-apply.service` 的
+  `systemctl start`；basagent 关闭 `NoNewPrivileges` 以允许 sudo 提升。
 - helper 只接受 `haproxy` / `nginx` 两个模板实例参数，不联网、不读取 `BAS_TOKEN`；bundle 路径固定，
   必须属于 `bas`、权限 0600、非 symlink；用 `flock` 串行化同一引擎的 apply。
 - root helper 复用现有 `basctl proxy apply`：manifest/hash 校验、`haproxy -c` / `nginx -t`、

@@ -1,0 +1,109 @@
+#!/bin/sh
+# basmicdn-apply：由 root oneshot unit 调用，校验并安装 basagent 已下载的 micdn.xml。
+# basagent 只写 /var/lib/bas/micdn/micdn.xml；本脚本不联网、不读 token，校验属主/权限/
+# symlink 和配置语法后，原子替换 /etc/micdn/micdn.xml 并 restart micdn。
+set -eu
+
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+
+BASE=/var/lib/bas/micdn
+SRC="$BASE/micdn.xml"
+RESULT="$BASE/apply.result"
+TARGET=/etc/micdn/micdn.xml
+MICDN="${MICDN_BIN:-/usr/bin/micdn}"
+
+out=""
+old=""
+tmp=""
+check_file=""
+cleanup() {
+  [ -n "$out" ] && rm -f "$out"
+  [ -n "$old" ] && rm -f "$old"
+  [ -n "$tmp" ] && rm -f "$tmp"
+  [ -n "$check_file" ] && rm -f "$check_file"
+}
+trap cleanup EXIT
+
+write_result() {
+  local status="$1" detail="$2" rtmp
+  rtmp="$(mktemp /run/basmicdn-result.XXXXXX)" || return 1
+  { echo "$status"; echo "$detail"; } > "$rtmp"
+  chown root:beangle "$rtmp" 2>/dev/null || true
+  chmod 0640 "$rtmp"
+  mv -fT "$rtmp" "$RESULT"
+}
+
+fail() {
+  write_result failed "$*" || true
+  echo "$*" >&2
+  exit 1
+}
+
+restore_old() {
+  if [ -n "$old" ] && [ -f "$old" ]; then
+    cp -p "$old" "$TARGET" || return 1
+    chown micdn:beangle "$TARGET" 2>/dev/null || true
+    chmod 0640 "$TARGET"
+    systemctl restart micdn.service >/dev/null 2>&1 || true
+  else
+    rm -f "$TARGET"
+  fi
+}
+
+[ -d "$BASE" ] && [ ! -L "$BASE" ] || fail "micdn request directory is missing"
+[ -f "$SRC" ] && [ ! -L "$SRC" ] || fail "micdn.xml is missing or is a symlink"
+[ "$(stat -c '%U' "$SRC")" = "bas" ] || fail "micdn.xml is not owned by bas"
+[ "$(stat -c '%a' "$SRC")" = "600" ] || fail "micdn.xml permissions are not 0600"
+real="$(readlink -f "$SRC")" || fail "cannot resolve micdn.xml"
+case "$real" in
+  "$BASE"/*) ;;
+  *) fail "micdn.xml escapes the request directory" ;;
+esac
+[ -x "$MICDN" ] || fail "micdn is not executable: $MICDN"
+
+exec 9>"/run/basmicdn-apply.lock"
+flock -n 9 || fail "another micdn apply is running"
+
+# 先在临时文件上校验；--check 只解析配置，不监听端口，不触碰当前配置。
+# 必须以 micdn 身份校验：配置里的 ~ 要展开为 micdn 的 passwd home，而不是 root 的 home。
+check_file="$(mktemp /run/basmicdn-check.XXXXXX)" || fail "cannot create check file"
+cp "$SRC" "$check_file" || fail "cannot copy micdn.xml for validation"
+chown micdn:beangle "$check_file" 2>/dev/null || true
+chmod 0400 "$check_file"
+out="$(mktemp /run/basmicdn-check-out.XXXXXX)" || fail "cannot create output file"
+if command -v runuser >/dev/null 2>&1; then
+  if ! runuser -u micdn -s /bin/sh -- "$MICDN" --check -f "$check_file" >"$out" 2>&1; then
+    fail "$(cat "$out")"
+  fi
+else
+  if ! su -s /bin/sh micdn -c ""$MICDN" --check -f "$check_file"" >"$out" 2>&1; then
+    fail "$(cat "$out")"
+  fi
+fi
+
+if [ -f "$TARGET" ]; then
+  old="$(mktemp /run/basmicdn-old.XXXXXX)" || fail "cannot create backup"
+  cp -p "$TARGET" "$old" || fail "cannot back up current micdn.xml"
+fi
+
+tmp="$(mktemp /etc/micdn/.micdn.xml.XXXXXX)" || fail "cannot create staged micdn.xml"
+cp "$SRC" "$tmp" || fail "cannot copy micdn.xml"
+chown micdn:beangle "$tmp" 2>/dev/null || true
+chmod 0640 "$tmp"
+mv -fT "$tmp" "$TARGET" || fail "cannot install micdn.xml"
+tmp=""
+
+if ! restart_out="$(systemctl restart micdn.service 2>&1)"; then
+  restore_old || true
+  fail "micdn restart failed: $restart_out"
+fi
+sleep 1
+if ! systemctl is-active --quiet micdn.service; then
+  restore_old || true
+  fail "micdn is not active after restart"
+fi
+
+write_result ok "micdn config applied and service restarted" || fail "cannot write result"
+rm -f "$SRC"
+exit 0

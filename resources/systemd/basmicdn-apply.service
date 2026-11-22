@@ -1,0 +1,8 @@
+[Unit]
+Description=Apply a bas micdn.xml and restart micdn
+Documentation=https://github.com/beangle/basctl
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/basmicdn-apply
+TimeoutStartSec=300

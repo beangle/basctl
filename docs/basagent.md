@@ -57,7 +57,7 @@ basagent 只执行白名单原语，不拼 shell，不接收任意命令/URL/路
 |---|---|
 | `log:read` / `agent:log` | 读实例或 agent 日志区间 |
 | `service:start` / `stop` / `restart` | 调 `basctl` 启停本机 `server.xml` 里的实例；start/restart 前先拉一次 server.xml |
-| `micdn:reload` | 用 Project key 拉取 micdn.xml，确保本机 micdn.service 已启动，再 POST 到 `127.0.0.1:8888/admin/config`；micdn 自己校验、原子写文件并 reload |
+| `micdn:reload` | 用 Project key 拉取 micdn.xml 到 `/var/lib/bas/micdn/`，触发 root oneshot 校验、原子安装并 restart micdn；不经过 admin/config，不猜端口 |
 | `proxy:apply` | 用 Project token 下载代理 bundle，触发本机 sudoers 授权的 `basproxy-apply@<engine>.service`；root helper 再调 `basctl proxy apply --bundle` |
 | `config:refresh` / `report:now` / `report:health` | 重新拉配置 / 立即上报 / 返回健康摘要 |
 
@@ -70,13 +70,16 @@ basagent 只执行白名单原语，不拼 shell，不接收任意命令/URL/路
 
 ```text
 GET /api/bashub/micdn/{project}/micdn.xml   (Bearer <Project.key>)
-  → sudo -n systemctl start micdn.service
-  → POST 127.0.0.1:8888/admin/config
-  → micdn 校验、原子写自己的 micdn.xml、reload
+  → 写 /var/lib/bas/micdn/micdn.xml（bas, 0600）
+  → sudo -n systemctl start basmicdn-apply.service
+  → root oneshot: micdn --check → 原子安装 → systemctl restart micdn
+  → 读 /var/lib/bas/micdn/apply.result
 ```
 
-basagent **不写** `/etc/micdn`，也不把 `BAS_TOKEN` 交给 micdn；micdn 是唯一写自己配置的人。
-失败时旧文件和旧 router 都不变。
+basagent **不写** `/etc/micdn`，也不把 `BAS_TOKEN` 交给 helper。这样 micdn 停止时也能应用，
+且不需要知道/猜测管理端口。详细边界见 [micdn-apply.md](micdn-apply.md)。
+
+HTTP 配置投递 `/admin/config` 已移除。
 
 ## 代理应用
 
@@ -121,11 +124,11 @@ sudo -n /usr/bin/systemctl start basproxy-apply@<engine>.service
 sudoers 只允许这两个固定命令，不接受任意 unit 或参数；helper 仍会校验 bundle 的属主、权限和路径。
 basagent 因此关闭了 `NoNewPrivileges`，否则 sudo 的 setuid 提升会被内核拒绝。
 
-`micdn:reload` 还需要启动本机 `micdn.service`，因此 sudoers 同时放行：
+`micdn:reload` 还需要触发 root oneshot，因此 sudoers 同时放行：
 
 ```sudoers
-Cmnd_Alias MICDN_START = /usr/bin/systemctl start micdn.service
-bas ALL=(root) NOPASSWD: BASPROXY_APPLY, MICDN_START
+Cmnd_Alias MICDN_APPLY = /usr/bin/systemctl start basmicdn-apply.service
+bas ALL=(root) NOPASSWD: BASPROXY_APPLY, MICDN_APPLY
 ```
 
 只允许 `start`，不允许 `stop` / `restart` / 任意 unit。
@@ -153,5 +156,6 @@ sudo -u bas -H tail -f /var/log/bas/agent/console.out
 ## 安全
 
 - 只允许出站连接；控制面不暴露入站端口。
-- 管理端点固定 localhost；proxy 只允许 sudoers 授权的两个固定 unit，另允许启动 `micdn.service`。
+- 管理端点固定 localhost；proxy 只允许 sudoers 授权的两个固定 unit，micdn 只允许触发
+  `basmicdn-apply.service`。
 - 失败关闭：缺 token、缺 helper、sudoers 未授权都返回失败，不放宽为任意 systemctl 命令。

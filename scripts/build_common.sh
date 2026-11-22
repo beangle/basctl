@@ -53,8 +53,10 @@ basctl_stage_runtime_home() {
     install -m 0755 "$root/resources/bas/bin/$script" "$bindir/$script"
   done
   install -m 0640 "$root/resources/bas/init/basctl.env" "$sharedir/basctl.env"
-  # proxy:apply 的 root helper 与固定 sudoers 规则：agent 只触发两个模板 unit。
+  # root helper 与固定 sudoers 规则：agent 只触发固定 unit。
   install -m 0755 "$root/resources/basproxy/basproxy-apply" "$libexecdir/basproxy-apply"
   install -m 0644 "$root/resources/systemd/basproxy-apply@.service" "$unitdir/basproxy-apply@.service"
+  install -m 0755 "$root/resources/basmicdn/basmicdn-apply" "$libexecdir/basmicdn-apply"
+  install -m 0644 "$root/resources/systemd/basmicdn-apply.service" "$unitdir/basmicdn-apply.service"
   install -m 0440 "$root/resources/sudoers/basproxy" "$sudoersdir/basproxy"
 }

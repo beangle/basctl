@@ -69,7 +69,7 @@ import std.uuid : randomUUID;
 import std.process : environment, execute, spawnShell;
 import std.stdio : stderr, writeln;
 import std.conv : to;
-import std.string : format, strip;
+import std.string : format, split, strip;
 
 /** 心跳节拍：循环等消息的超时。等到了就处理消息，等不到就用来看计时器。 */
 private enum tick = 1.seconds;
@@ -1375,10 +1375,11 @@ string proxyApplyResult(ref AgentContext ctx, string id, ref JSONValue body) {
   return resultMessage(id, true, data, "");
 }
 
-/** `micdn:reload`：用 Project token 拉取 bashub 的 micdn.xml，再 POST 给本机 micdn。
+/** `micdn:reload`：用 Project key 拉取 micdn.xml，交给 root oneshot 校验、安装并重启 micdn。
  *
- * 投递只走 127.0.0.1:8888/admin/config；micdn 自己校验、原子写自己的 micdn.xml 并 reload。
- * agent 不写 micdn 的目录，也不把 token 交给 micdn。响应体截断后回给 hub。
+ * basagent 只写 `/var/lib/bas/micdn/micdn.xml`（0600），root helper 校验属主、权限和配置语法后
+ * 原子替换 `/etc/micdn/micdn.xml` 并 restart。这样 micdn 停止时也能应用，且不需要猜测管理端口。
+ * agent 不写 `/etc/micdn`，也不把 token 交给 helper。
  */
 string micdnReloadResult(ref AgentContext ctx, string id) {
   auto dir = buildPath(ctx.basHome, "micdn");
@@ -1387,61 +1388,44 @@ string micdnReloadResult(ref AgentContext ctx, string id) {
   catch (Exception e)
     return resultMessage(id, false, JSONValue(null), "micdn-dir-failed: " ~ e.msg);
 
-  auto tmp = buildPath(dir, "micdn-" ~ randomUUID().toString() ~ ".xml");
+  auto source = buildPath(dir, "micdn.xml");
+  auto result = buildPath(dir, "apply.result");
   scope (exit)
-    if (exists(tmp))
-      remove(tmp);
-  // micdn.xml 端点只接受 Project key；ctx.credential 是握手用的 `<project>:<key>`，
-  // 不能直接复用，否则会被鉴权拒绝并误报 micdn-download-failed。
-  if (!curlDownload(micdnXmlUrl(ctx.remote), tmp,
+    if (exists(result))
+      remove(result);
+  if (!curlDownload(micdnXmlUrl(ctx.remote), source,
       ["Authorization: Bearer " ~ ctx.remote.token], false, 4 * 1024 * 1024))
     return resultMessage(id, false, JSONValue(null), "micdn-download-failed");
+  if (exists(result))
+    remove(result);
 
-  // micdn 可能处于 stopped：显式启动比等待人工操作可靠。start 对已运行服务是幂等的；
-  // sudoers 只放行固定 `systemctl start micdn.service`，不授予 stop/restart。
-  try {
-    auto started = execute(["/usr/bin/sudo", "-n", "/usr/bin/systemctl", "start", "micdn.service"]);
-    if (started.status != 0)
-      return resultMessage(id, false, JSONValue(null),
-          "micdn-start-failed: " ~ started.output.strip);
-  } catch (Exception e) {
-    return resultMessage(id, false, JSONValue(null), "micdn-start-failed: " ~ e.msg);
-  }
-
-  auto responseFile = tmp ~ ".response";
-  scope (exit)
-    if (exists(responseFile))
-      remove(responseFile);
-
-  string output;
-  string code;
   int status;
-  // Type=simple 的 micdn 在 systemctl start 返回时可能还没监听端口；只对连接失败做有界重试，
-  // HTTP 4xx/5xx 是确定的结果，不重试。
-  foreach (attempt; 0 .. 20) {
-    try {
-      auto run = execute(["/usr/bin/curl", "--silent", "--show-error", "--max-time", "120",
-          "-o", responseFile, "-w", "%{http_code}",
-          "-X", "POST", "-H", "Content-Type: application/xml", "--data-binary", "@" ~ tmp,
-          "http://127.0.0.1:8888/admin/config"]);
-      status = run.status;
-      code = run.output.strip;
-      if (exists(responseFile))
-        output = readText(responseFile);
-      else
-        output = run.output;
-    } catch (Exception e) {
-      return resultMessage(id, false, JSONValue(null), "micdn-apply-failed: " ~ e.msg);
-    }
-    if (status == 0 && code.length > 0 && code != "000")
-      break;
-    if (attempt < 19)
-      sleep(250.msecs);
+  string output;
+  try {
+    auto run = execute(["/usr/bin/sudo", "-n", "/usr/bin/systemctl", "start",
+        "basmicdn-apply.service"]);
+    status = run.status;
+    output = run.output;
+  } catch (Exception e) {
+    return resultMessage(id, false, JSONValue(null), "micdn-apply-failed: " ~ e.msg);
   }
-  if (output.length > 8 * 1024)
-    output = output[0 .. 8 * 1024];
-  auto ok = status == 0 && code == "200";
-  JSONValue data = ["detail": JSONValue(output.strip)];
+
+  if (!exists(result)) {
+    auto detail = output.strip;
+    if (detail.length == 0)
+      detail = "basmicdn-apply produced no result";
+    return resultMessage(id, false, JSONValue(null), "micdn-apply-failed: " ~ detail);
+  }
+  string detail;
+  try
+    detail = readText(result);
+  catch (Exception e)
+    return resultMessage(id, false, JSONValue(null), "micdn-apply-failed: " ~ e.msg);
+  if (detail.length > 8 * 1024)
+    detail = detail[0 .. 8 * 1024];
+  auto lines = detail.split("\n");
+  auto ok = status == 0 && lines.length > 0 && lines[0].strip == "ok";
+  JSONValue data = ["detail": JSONValue(detail.strip)];
   return resultMessage(id, ok, data, ok ? "" : "micdn-apply-failed");
 }
 
