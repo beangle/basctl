@@ -20,8 +20,8 @@ basctl start all --port-range=21000-21999   # <server http="0"> 的实例改在�
    `<server>` 所属 host 在本机的实例；
 2. **重建实例目录并定端口**：对未运行的实例先删除整个 `servers/<farm.server>/`
    （引擎、webapps、运行信息全部重新生成），再定端口。`<server http>` 有值就用它（启动前先确认该端口没人监听；
-   被占用时写 `servers/<farm.server>/error` 并跳过，不会拉起一个绑定失败、却因进程存活被误记为
-   running 的实例），为 `0`（或缺省）时在 `--port-range` 区间内分配一个空闲端口（缺省
+   被占用时写 `servers/<farm.server>/error` 并跳过。启动后等待进程存活且端口实际 LISTEN
+   （最多 30 秒），不会因为“刚 spawn 成功”就误报 started），为 `0`（或缺省）时在 `--port-range` 区间内分配一个空闲端口（缺省
    `20000-29999`）；随后写 `servers/<farm.server>/server.info` 的第一段——不含 `pid`，同时兼作
    端口预留。端口先定下来，第 3 步生成的 spec 才能带上 `--port=`。格式见
    [server-info.md](server-info.md)；

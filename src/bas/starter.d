@@ -74,8 +74,9 @@ import std.stdio : stderr, writeln;
 import std.string : startsWith, strip;
 import std.typecons : Nullable, nullable;
 
-/** 启动后等待多久（毫秒）再确认进程存活，用于 Webapp 启动失败/依赖缺失的快速反馈。 */
-private enum startupProbeMs = 2000;
+/** 启动就绪等待：进程存活且 HTTP 端口开始 LISTEN 才算成功。 */
+private enum startupReadyTimeoutMs = 30000;
+private enum startupPollMs = 250;
 
 /// 只输出超过该值的阶段，避免正常启动刷屏。
 private enum slowPhaseMs = 500;
@@ -126,6 +127,25 @@ int runStart(string configFile, string[] rest) {
     return 1;
   }
   return startServers(container, basHome, servers, range);
+}
+
+/** 等待进程存活并开始监听端口；只以实际 LISTEN 为准，避免“刚 spawn 就报 started”。 */
+private bool waitForStartup(int pid, ushort port, int timeoutMs) {
+  auto deadline = MonoTime.currTime + msecs(timeoutMs);
+  while (MonoTime.currTime < deadline) {
+    if (!processRunning(pid))
+      return false;
+    if (port > 0) {
+      auto listeners = listeningProcessIds(port);
+      if (listeners.canFind(pid))
+        return true;
+      // /proc 不可读时退回“端口已被占用”的判断；仍然要求进程存活。
+      if (listeners.length == 0 && !canBindPort("", port))
+        return true;
+    }
+    Thread.sleep(msecs(startupPollMs));
+  }
+  return false;
 }
 
 /**
@@ -205,11 +225,9 @@ private int startServers(Container container, string basHome, Server[] servers,
     reportSlow(p.server.qualifiedName, "launch", phase);
   }
 
-  Thread.sleep(msecs(startupProbeMs));
-
   int started;
   foreach (i, ref p; prepared) {
-    if (pids[i] > 0 && processRunning(pids[i])) {
+    if (pids[i] > 0 && waitForStartup(pids[i], p.info.httpPort, startupReadyTimeoutMs)) {
       p.info.pid = pids[i];
       writeInstanceInfo(basHome, p.server.qualifiedName, p.info);
       writeln(format!"%s started (pid=%s, port=%s, log=%s)"(p.server.qualifiedName, pids[i],

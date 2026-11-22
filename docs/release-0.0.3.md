@@ -58,10 +58,15 @@ basagent 触发代理 bundle 的校验、落盘和 reload；手工 `basctl proxy
 - basagent 有本地 `server.xml` 就调用 autostart；pull 失败但本地已有配置是正常离线场景；
 - 没有 `server.xml` 不调用 autostart。
 
+## 启动就绪
+
+`basctl start` / `service:start` 不再只检查 spawn 后进程还在：现在等待进程存活且端口实际
+LISTEN（最多 30 秒）。进程提前退出、端口未监听或启动超时都会删除 `server.info` 并返回失败。
+
 ## 无 bas server 的 agent
 
 `basagent pull` 会解析远端 `server.xml`；如果没有本机可运行的 bas server，就不安装该文件，
-也不留下临时/空文件。`basagent.service` 不再要求 `server.xml` 存在。只跑 micdn 或代理的节点
+删除旧 `server.xml`，也不留下临时/空文件。`basagent.service` 不再要求 `server.xml` 存在。只跑 micdn 或代理的节点
 仍然可以启动 agent、建立通道并执行 `micdn:reload` / `proxy:apply`。
 
 ## micdn 配置投递

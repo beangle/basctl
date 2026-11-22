@@ -12,9 +12,14 @@
 - **本机开机自启**：`<server>` 增加 `<auto-start>` 子元素和 `wait-for`（本机 ref / 外部 url / tcp）；
   `basctl autostart` 按依赖逐个启动本机节点，basagent 启动时在有 server.xml 的情况下调用它。
   不引入 `autostart` 属性、`autostart-order` 或 `depends-on`。
+- **删除部署节点后清理本地配置**：远端 `server.xml` 不再包含本机 bas server 时，basagent
+  删除本地旧 `server.xml`，避免已删除的 server 继续出现在 `declared`/监控中；proxy/micdn-only
+  agent 仍可无配置运行。
 - **agent 可无 server.xml 运行**：`basagent pull` 发现远端配置没有本机 bas server 时，不安装
   server.xml（并清理无效的旧空文件）；`basagent.service` 不再要求该文件存在，micdn/proxy 节点
   可以只保留 agent 身份与通道。
+- **启动就绪判定**：`basctl start` / `service:start` 现在等待进程存活且 HTTP 端口开始 LISTEN
+  （最多 30 秒），避免进程启动 1–2 秒后退出却被报告为已启动。
 - **micdn 配置投递**：`micdn:reload` 不再调 `/admin/reload`；agent 用 Project key 拉取
   `micdn.xml` 到 `/var/lib/bas/micdn/`，触发 root oneshot `basmicdn-apply.service`，由 helper
   校验、原子安装并 restart micdn。agent 不写 `/etc/micdn`，也不把 token 交给 helper。

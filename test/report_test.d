@@ -42,6 +42,12 @@ import std.uuid : randomUUID;
   assert(body["proxy"].type == JSONType.object);
   assert(body["proxy"]["haproxy"].type == JSONType.string);
   assert(body["proxy"]["nginx"].type == JSONType.string);
+  assert(body["micdn"].type == JSONType.object);
+  assert(body["micdn"]["active"].type == JSONType.true_ || body["micdn"]["active"].type == JSONType.false_);
+  assert(body["micdn"]["state"].type == JSONType.string);
+  assert(body["proxyState"].type == JSONType.object);
+  assert(body["proxyState"]["haproxy"].type == JSONType.object);
+  assert(body["proxyState"]["nginx"].type == JSONType.object);
 
   version (linux) {
     assert(body["os"]["name"].str.length > 0);

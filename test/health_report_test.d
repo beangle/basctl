@@ -19,6 +19,7 @@ module test.health_report_test;
 
 import bas.config : parseServerXml;
 import bas.report : healthReport;
+import std.json : JSONType;
 import bas.serverinfo : ServerInfo, writeInstanceInfo;
 
 import core.sys.posix.unistd : getpid;
@@ -41,6 +42,9 @@ import std.uuid : randomUUID;
   assert(runningOnly["servers"].array.length == 1);
   assert(runningOnly["servers"][0]["id"].str == "platform.server1");
   assert(runningOnly["servers"][0]["state"].str == "running");
+  assert(runningOnly["micdn"].type == JSONType.object);
+  assert(runningOnly["micdn"]["active"].type == JSONType.true_ || runningOnly["micdn"]["active"].type == JSONType.false_);
+  assert(runningOnly["proxyState"].type == JSONType.object);
 
   auto container = parseServerXml(`<bas version="0.14.0">
     <hosts>

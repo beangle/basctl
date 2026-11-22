@@ -45,7 +45,9 @@ JSONValue osReport() {
     "cpu": cpuFields(),
     "mem": memFields(),
     "disk": JSONValue(diskFields()),
-    "proxy": proxyFields()
+    "proxy": proxyFields(),
+    "proxyState": proxyStateFields(),
+    "micdn": micdnFields()
   ];
   return body;
 }
@@ -171,7 +173,9 @@ JSONValue healthReport(string basHome, Container container = null) {
   return JSONValue([
     "servers": JSONValue(servers),
     "cpu": cpuFields(),
-    "mem": memFields()
+    "mem": memFields(),
+    "micdn": micdnFields(),
+    "proxyState": proxyStateFields()
   ]);
 }
 
@@ -207,6 +211,37 @@ private:
  * `proxy`：本机安装的 HAProxy / nginx 版本。只读 `-v` 的固定命令，不探测端口或配置；
  * 没装就留空，控制台按“版本未上报”显示。
  */
+/** 只执行 `systemctl is-active`，不启动、不重启、不读端口。取不到时报 unknown。 */
+private JSONValue serviceState(string unit) {
+  version (linux) {
+    import std.process : execute;
+    import std.string : strip;
+
+    try {
+      auto result = execute(["/usr/bin/systemctl", "is-active", unit]);
+      auto state = strip(result.output);
+      if (state.length == 0)
+        state = result.status == 0 ? "active" : "unknown";
+      auto active = result.status == 0 && state == "active";
+      return JSONValue(["active": JSONValue(active), "state": JSONValue(state)]);
+    } catch (Exception) {
+      // 取不到就报 unknown，不把未知伪装成 stopped。
+    }
+  }
+  return JSONValue(["active": JSONValue(false), "state": JSONValue("unknown")]);
+}
+
+private JSONValue micdnFields() {
+  return serviceState("micdn.service");
+}
+
+private JSONValue proxyStateFields() {
+  return JSONValue([
+    "haproxy": serviceState("haproxy.service"),
+    "nginx": serviceState("nginx.service")
+  ]);
+}
+
 private JSONValue proxyFields() {
   return JSONValue([
     "haproxy": JSONValue(commandVersion("haproxy", "HAProxy version ")),
