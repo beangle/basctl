@@ -20,14 +20,16 @@
   micdn 目录，也不把 token 交给 micdn。
 - **修复 `micdn:reload` 下载鉴权**：micdn.xml 端点只接受 Project key，basagent 不再误用
   握手用的 `<project>:<key>`，否则会报 `micdn-download-failed`。
+- **micdn 停止时可投递配置**：`micdn:reload` 先用固定 sudoers 命令启动 `micdn.service`，
+  再 POST `/admin/config`；连接失败做有界重试，不要求人工先启动 micdn。
 - **`basctl proxy` 改为只应用本地 bundle**：`apply` 必须给 `--bundle=FILE`，不再读取
   `BAS_PRINCIPAL`/`BAS_TOKEN` 或下载；远程下载和触发统一由 basagent 负责。
 - **新增 `proxy:apply`**：basagent 用 Project token 下载代理 bundle，再通过固定 sudoers 规则触发
   `basproxy-apply@<engine>.service`；root helper 校验路径后调用 `basctl proxy apply --bundle`。
   安装包附带 `/usr/libexec/basproxy-apply`、模板 unit 和 `/etc/sudoers.d/basproxy`。
 - **CentOS 7 权限**：systemd 219 不传 unit detail，polkit 无法限定 unit；改用只允许
-  `bas` 启动两个固定 proxy unit 的 sudoers 规则，并关闭 basagent 的 `NoNewPrivileges`，
-  不放开任意 `systemctl`。
+  `bas` 启动两个固定 proxy unit 和 `micdn.service` 的 sudoers 规则，并关闭 basagent 的
+  `NoNewPrivileges`，不放开任意 `systemctl`。
 - **卸载保留 `basctl.env`**：安装包只把模板放到 `/usr/share/bas/basctl.env`，
   `/etc/bas/conf/basctl.env` 由 `postinst`/`%post` 在缺失时创建，不再作为 deb conffile 或 rpm
   `%files` 条目；卸载、重装、升级都不会删除或覆盖主机级配置。模板只用于首次安装时初始化。

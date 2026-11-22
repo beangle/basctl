@@ -10,7 +10,7 @@ agent 的通道与下载流程见 [basagent.md](basagent.md)。
 |---|---|---|---|
 | bashub | 中心服务 | 生成代理 bundle | 不接触目标机文件系统 |
 | basagent | `bas:beangle` | 下载 bundle、写请求文件、触发固定 unit | 不写代理配置、不读 token 以外凭证、不启动任意 unit |
-| sudoers | root 配置 | 只放行两个固定 `systemctl start` 命令 | 不授予通用 sudo |
+| sudoers | root 配置 | 只放行两个 proxy unit 和 `micdn.service` 的固定 `systemctl start` | 不授予通用 sudo |
 | `basproxy-apply@.service` | root oneshot | 作为权限边界启动 helper | 不长期运行、不提供网络接口 |
 | `/usr/libexec/basproxy-apply` | root | 校验请求文件，调用 `basctl proxy apply` | 不接受 URL、路径或任意 engine |
 | `basctl proxy apply` | root | 校验 bundle、写配置/证书、语法检查、reload/回滚 | 不下载、不理解项目拓扑 |
@@ -37,7 +37,8 @@ basagent 只被允许“按固定名字启动一个 root oneshot unit”。
   → basagent 读取 result，回传管理台
 ```
 
-`sudoers` 只包含：
+`sudoers` 对本文这条链路只涉及两个 proxy unit（同一文件还放行 `micdn:reload` 启动
+`micdn.service`，不属于 proxy 应用链）：
 
 ```sudoers
 Defaults:bas !requiretty

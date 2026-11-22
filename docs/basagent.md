@@ -57,7 +57,7 @@ basagent 只执行白名单原语，不拼 shell，不接收任意命令/URL/路
 |---|---|
 | `log:read` / `agent:log` | 读实例或 agent 日志区间 |
 | `service:start` / `stop` / `restart` | 调 `basctl` 启停本机 `server.xml` 里的实例；start/restart 前先拉一次 server.xml |
-| `micdn:reload` | 用 Project key 拉取 micdn.xml，POST 到本机 `127.0.0.1:8888/admin/config`；micdn 自己校验、原子写文件并 reload |
+| `micdn:reload` | 用 Project key 拉取 micdn.xml，确保本机 micdn.service 已启动，再 POST 到 `127.0.0.1:8888/admin/config`；micdn 自己校验、原子写文件并 reload |
 | `proxy:apply` | 用 Project token 下载代理 bundle，触发本机 sudoers 授权的 `basproxy-apply@<engine>.service`；root helper 再调 `basctl proxy apply --bundle` |
 | `config:refresh` / `report:now` / `report:health` | 重新拉配置 / 立即上报 / 返回健康摘要 |
 
@@ -70,6 +70,7 @@ basagent 只执行白名单原语，不拼 shell，不接收任意命令/URL/路
 
 ```text
 GET /api/bashub/micdn/{project}/micdn.xml   (Bearer <Project.key>)
+  → sudo -n systemctl start micdn.service
   → POST 127.0.0.1:8888/admin/config
   → micdn 校验、原子写自己的 micdn.xml、reload
 ```
@@ -120,6 +121,15 @@ sudo -n /usr/bin/systemctl start basproxy-apply@<engine>.service
 sudoers 只允许这两个固定命令，不接受任意 unit 或参数；helper 仍会校验 bundle 的属主、权限和路径。
 basagent 因此关闭了 `NoNewPrivileges`，否则 sudo 的 setuid 提升会被内核拒绝。
 
+`micdn:reload` 还需要启动本机 `micdn.service`，因此 sudoers 同时放行：
+
+```sudoers
+Cmnd_Alias MICDN_START = /usr/bin/systemctl start micdn.service
+bas ALL=(root) NOPASSWD: BASPROXY_APPLY, MICDN_START
+```
+
+只允许 `start`，不允许 `stop` / `restart` / 任意 unit。
+
 root oneshot unit 只运行 `/usr/libexec/basproxy-apply %i`；helper 校验 bundle 属于 `bas`、权限
 0600、非 symlink，使用 `flock` 串行化，再调用 `basctl proxy apply --bundle`。
 
@@ -143,5 +153,5 @@ sudo -u bas -H tail -f /var/log/bas/agent/console.out
 ## 安全
 
 - 只允许出站连接；控制面不暴露入站端口。
-- 管理端点固定 localhost；proxy 只允许 sudoers 授权的两个固定 unit。
+- 管理端点固定 localhost；proxy 只允许 sudoers 授权的两个固定 unit，另允许启动 `micdn.service`。
 - 失败关闭：缺 token、缺 helper、sudoers 未授权都返回失败，不放宽为任意 systemctl 命令。

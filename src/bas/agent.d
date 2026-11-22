@@ -1397,6 +1397,17 @@ string micdnReloadResult(ref AgentContext ctx, string id) {
       ["Authorization: Bearer " ~ ctx.remote.token], false, 4 * 1024 * 1024))
     return resultMessage(id, false, JSONValue(null), "micdn-download-failed");
 
+  // micdn 可能处于 stopped：显式启动比等待人工操作可靠。start 对已运行服务是幂等的；
+  // sudoers 只放行固定 `systemctl start micdn.service`，不授予 stop/restart。
+  try {
+    auto started = execute(["/usr/bin/sudo", "-n", "/usr/bin/systemctl", "start", "micdn.service"]);
+    if (started.status != 0)
+      return resultMessage(id, false, JSONValue(null),
+          "micdn-start-failed: " ~ started.output.strip);
+  } catch (Exception e) {
+    return resultMessage(id, false, JSONValue(null), "micdn-start-failed: " ~ e.msg);
+  }
+
   auto responseFile = tmp ~ ".response";
   scope (exit)
     if (exists(responseFile))
@@ -1405,19 +1416,27 @@ string micdnReloadResult(ref AgentContext ctx, string id) {
   string output;
   string code;
   int status;
-  try {
-    auto run = execute(["/usr/bin/curl", "--silent", "--show-error", "--max-time", "120",
-        "-o", responseFile, "-w", "%{http_code}",
-        "-X", "POST", "-H", "Content-Type: application/xml", "--data-binary", "@" ~ tmp,
-        "http://127.0.0.1:8888/admin/config"]);
-    status = run.status;
-    code = run.output.strip;
-    if (exists(responseFile))
-      output = readText(responseFile);
-    else
-      output = run.output;
-  } catch (Exception e) {
-    return resultMessage(id, false, JSONValue(null), "micdn-apply-failed: " ~ e.msg);
+  // Type=simple 的 micdn 在 systemctl start 返回时可能还没监听端口；只对连接失败做有界重试，
+  // HTTP 4xx/5xx 是确定的结果，不重试。
+  foreach (attempt; 0 .. 20) {
+    try {
+      auto run = execute(["/usr/bin/curl", "--silent", "--show-error", "--max-time", "120",
+          "-o", responseFile, "-w", "%{http_code}",
+          "-X", "POST", "-H", "Content-Type: application/xml", "--data-binary", "@" ~ tmp,
+          "http://127.0.0.1:8888/admin/config"]);
+      status = run.status;
+      code = run.output.strip;
+      if (exists(responseFile))
+        output = readText(responseFile);
+      else
+        output = run.output;
+    } catch (Exception e) {
+      return resultMessage(id, false, JSONValue(null), "micdn-apply-failed: " ~ e.msg);
+    }
+    if (status == 0 && code.length > 0 && code != "000")
+      break;
+    if (attempt < 19)
+      sleep(250.msecs);
   }
   if (output.length > 8 * 1024)
     output = output[0 .. 8 * 1024];

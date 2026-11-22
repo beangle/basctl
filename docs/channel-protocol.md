@@ -97,7 +97,7 @@ basagent 与 bashub 之间那条 WebSocket 连接上说什么、怎么说。**�
 | `migrate:probe` | 请求 | `{target, port}` | 探测目标 master；应答 `result{ok}` |
 | `migrate:to` | 请求 | `{target, port}` | 探测通过后设置新 target；应答 `result{ok}` 后 follower 断开旧连接并连接 target |
 | `config:refresh` | 通知 | `{}` | hub 配置变更后，agent 重新拉取 server.xml 并重报实例清单 |
-| `micdn:reload` | 请求 | `{}` | agent 用 Project token 从 bashub 拉取 `micdn.xml`，POST 到本机 `127.0.0.1:8888/admin/config`；micdn 自己校验、原子写配置并 reload。应答 `result{ok, data:{detail?}}`，失败 `micdn-download-failed` / `micdn-apply-failed`；agent 不写 micdn 目录 |
+| `micdn:reload` | 请求 | `{}` | agent 用 Project token 从 bashub 拉取 `micdn.xml`，先启动本机 `micdn.service`，再 POST 到 `127.0.0.1:8888/admin/config`；micdn 自己校验、原子写配置并 reload。应答 `result{ok, data:{detail?}}`，失败 `micdn-download-failed` / `micdn-start-failed` / `micdn-apply-failed`；agent 不写 micdn 目录 |
 | `proxy:apply` | 请求 | `{engine, endpoint?}` | `engine` 为 `haproxy` / `nginx`；agent 用 Project token 下载代理 bundle 到私有目录，再通过固定 sudoers 规则触发 `basproxy-apply@<engine>.service`；应答 `result{ok, data:{engine,endpoint,detail}}`。不接受任意命令、路径或 service 名 |
 
 - 动作用**三个原语**而不是一个 `service:control{action}`：白名单落在 `type` 上，信封层就能拒掉不认的

@@ -95,8 +95,8 @@ POST /api/bashub/config/projects/{id}/proxy/apply   (bashub 管理台)
 - 安装包新增 `/usr/libexec/basproxy-apply`、`basproxy-apply@.service` 和
   `/etc/sudoers.d/basproxy`。
 - CentOS 7 的 systemd 219 不传 unit detail，polkit 无法限定 unit；sudoers 只放行 `bas` 对
-  `basproxy-apply@haproxy.service` / `@nginx.service` 的 `systemctl start`；basagent 关闭
-  `NoNewPrivileges` 以允许 sudo 提升。
+  `basproxy-apply@haproxy.service` / `@nginx.service` 的 `systemctl start`，以及
+  `systemctl start micdn.service`；basagent 关闭 `NoNewPrivileges` 以允许 sudo 提升。
 - helper 只接受 `haproxy` / `nginx` 两个模板实例参数，不联网、不读取 `BAS_TOKEN`；bundle 路径固定，
   必须属于 `bas`、权限 0600、非 symlink；用 `flock` 串行化同一引擎的 apply。
 - root helper 复用现有 `basctl proxy apply`：manifest/hash 校验、`haproxy -c` / `nginx -t`、
