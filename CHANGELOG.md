@@ -9,6 +9,8 @@
   `/etc/micdn/micdn.xml` 并 restart，失败恢复旧配置。移除对 `/admin/config` 的依赖。
 - **真实服务状态上报**：`report:os` / `report:health` 增加 `micdn` 和
   `proxyState.haproxy/nginx`，来自 `systemctl is-active`，监控不再用 agent 在线代替服务在线。
+- **安装包补齐 basctl.env**：DEB/RPM 仍把模板装到 `/usr/share/bas/basctl.env`，`postinst/%post`
+  在 `/etc/bas/conf/basctl.env` 缺失**或为空**时重新生成；模板缺失时安装直接失败并报明原因。
 - **启动就绪判定**：`basctl start` / `service:start` 等待进程存活且 HTTP 端口 LISTEN
   （最多 30 秒），不再把刚 spawn 当成已启动。
 - **删除部署后清理 server.xml**：远端不再包含本机 bas server 时，basagent 删除旧
@@ -32,6 +34,8 @@
 - **agent 可无 server.xml 运行**：`basagent pull` 发现远端配置没有本机 bas server 时，不安装
   server.xml（并清理无效的旧空文件）；`basagent.service` 不再要求该文件存在，micdn/proxy 节点
   可以只保留 agent 身份与通道。
+- **安装包补齐 basctl.env**：DEB/RPM 仍把模板装到 `/usr/share/bas/basctl.env`，`postinst/%post`
+  在 `/etc/bas/conf/basctl.env` 缺失**或为空**时重新生成；模板缺失时安装直接失败并报明原因。
 - **启动就绪判定**：`basctl start` / `service:start` 现在等待进程存活且 HTTP 端口开始 LISTEN
   （最多 30 秒），避免进程启动 1–2 秒后退出却被报告为已启动。
 - **micdn 配置投递**：`micdn:reload` 不再调 `/admin/reload`；agent 用 Project key 拉取

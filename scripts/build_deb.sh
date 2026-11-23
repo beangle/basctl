@@ -109,9 +109,15 @@ chmod 0750 /var/lib/bas /var/lib/bas/bin /var/lib/bas/conf /var/log/bas
 chmod 0755 /var/lib/bas/bin/*.sh
 chown root:beangle /etc/bas/conf
 chmod 0750 /etc/bas/conf
-# 模板只作为缺失时的初始值；实际文件不由包管理跟踪，卸载/重装都不删除、不覆盖。
-if [ ! -e /etc/bas/conf/basctl.env ]; then
-  cp -f /usr/share/bas/basctl.env /etc/bas/conf/basctl.env
+# 模板只作为缺失时的初始值；空文件也视为未初始化并重新生成。
+# 实际文件不由包管理跟踪，卸载/重装都不删除、不覆盖。
+template=/usr/share/bas/basctl.env
+if [ ! -r "$template" ]; then
+  echo "basctl: package is missing $template" >&2
+  exit 1
+fi
+if [ ! -s /etc/bas/conf/basctl.env ]; then
+  cp -f "$template" /etc/bas/conf/basctl.env
 fi
 chown root:beangle /etc/bas/conf/basctl.env
 chmod 0640 /etc/bas/conf/basctl.env

@@ -33,6 +33,11 @@ CentOS 7 的 `runuser` 不允许 `-s` 与 `-u` 同时使用；helper 改为
 
 监控页按实际 `systemctl is-active` 显示在线、已停止、节点离线或状态未知。
 
+## basctl.env 模板
+
+DEB/RPM 把模板装到 `/usr/share/bas/basctl.env`，安装脚本在
+`/etc/bas/conf/basctl.env` 缺失或为空时生成；模板缺失会直接报错，不再静默跳过。
+
 ## 启动就绪
 
 `basctl start` / `service:start` 等待进程存活且 HTTP 端口实际 LISTEN（最多 30 秒）；
