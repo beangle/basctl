@@ -58,6 +58,9 @@ chmod 0755 usr/bin/basctl usr/bin/basagent
 install -m 0644 "$BASCTL_HOME/resources/systemd/basagent.service" lib/systemd/system/basagent.service
 install -m 0644 "$BASCTL_HOME/resources/logrotate/bas" etc/logrotate.d/bas
 basctl_stage_runtime_home "$PKGDIR"
+if [ ! -s "$PKGDIR/usr/share/bas/basctl.env" ]; then
+  ferror "basctl.env template was not staged" "Expected $PKGDIR/usr/share/bas/basctl.env"
+fi
 
 # DEBIAN 控制文件
 mkdir -p DEBIAN
@@ -103,12 +106,6 @@ set -e
 
 mkdir -p /var/lib/bas /var/log/bas /var/log/bas/agent
 mkdir -p /etc/bas/conf
-chown bas:beangle /var/lib/bas /var/log/bas /var/log/bas/agent
-chown -R bas:beangle /var/lib/bas/bin /var/lib/bas/conf
-chmod 0750 /var/lib/bas /var/lib/bas/bin /var/lib/bas/conf /var/log/bas
-chmod 0755 /var/lib/bas/bin/*.sh
-chown root:beangle /etc/bas/conf
-chmod 0750 /etc/bas/conf
 # 模板只作为缺失时的初始值；空文件也视为未初始化并重新生成。
 # 实际文件不由包管理跟踪，卸载/重装都不删除、不覆盖。
 template=/usr/share/bas/basctl.env
@@ -119,6 +116,12 @@ fi
 if [ ! -s /etc/bas/conf/basctl.env ]; then
   cp -f "$template" /etc/bas/conf/basctl.env
 fi
+chown bas:beangle /var/lib/bas /var/log/bas /var/log/bas/agent
+chown -R bas:beangle /var/lib/bas/bin /var/lib/bas/conf
+chmod 0750 /var/lib/bas /var/lib/bas/bin /var/lib/bas/conf /var/log/bas
+chmod 0755 /var/lib/bas/bin/*.sh
+chown root:beangle /etc/bas/conf
+chmod 0750 /etc/bas/conf
 chown root:beangle /etc/bas/conf/basctl.env
 chmod 0640 /etc/bas/conf/basctl.env
 chmod 0700 /var/log/bas/agent
