@@ -24,6 +24,10 @@ micdn 停止时也能应用，不再依赖管理端口。
 CentOS 7 的 `runuser` 不允许 `-s` 与 `-u` 同时使用；helper 改为
 `runuser -u micdn -- /bin/sh -c ...`，避免 micdn 停止时 apply 失败。
 
+## 系统现状字段
+
+`report:os` 增加 `os.id`、`os.versionId` 和 `cpu.model`；bashub 的 Host「从 Agent 更新」使用这些字段。
+
 ## 服务状态上报
 
 `report:os` / `report:health` 增加：

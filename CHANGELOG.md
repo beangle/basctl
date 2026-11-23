@@ -7,6 +7,7 @@
 - **micdn 配置改为 root oneshot**：basagent 下载 `micdn.xml` 到私有目录，触发
   `basmicdn-apply.service`；root helper 用 `micdn --check` 校验、原子安装
   `/etc/micdn/micdn.xml` 并 restart，失败恢复旧配置。移除对 `/admin/config` 的依赖。
+- **系统现状字段**：`report:os` 增加 `os.id`、`os.versionId` 和 `cpu.model`，供 bashub 的 Host 硬件回填使用。
 - **真实服务状态上报**：`report:os` / `report:health` 增加 `micdn` 和
   `proxyState.haproxy/nginx`，来自 `systemctl is-active`，监控不再用 agent 在线代替服务在线。
 - **安装包补齐 basctl.env**：DEB/RPM 仍把模板装到 `/usr/share/bas/basctl.env`，`postinst/%post`

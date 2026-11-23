@@ -276,6 +276,8 @@ private JSONValue osFields() {
   string name;
   string kernel;
   string arch;
+  string id;
+  string versionId;
 
   version (linux) {
     import core.sys.posix.sys.utsname : uname, utsname;
@@ -287,30 +289,36 @@ private JSONValue osFields() {
       arch = fromStringz(u.machine).idup;
       name = fromStringz(u.sysname).idup;
     }
-    auto pretty = osPrettyName();
+    auto pretty = osReleaseValue("PRETTY_NAME");
     if (pretty.length)
       name = pretty;
+    id = osReleaseValue("ID");
+    versionId = osReleaseValue("VERSION_ID");
   }
 
   return JSONValue([
     "name": JSONValue(name),
+    "prettyName": JSONValue(name),
+    "id": JSONValue(id),
+    "versionId": JSONValue(versionId),
     "kernel": JSONValue(kernel),
     "arch": JSONValue(arch)
   ]);
 }
 
-/** `/etc/os-release` 的 `PRETTY_NAME`：`name` 报发行版比报内核名有用。读不到就返回空串。 */
-private string osPrettyName() {
+/** `/etc/os-release` 的字段；未找到返回空串。去引号，不做 shell 解释。 */
+private string osReleaseValue(string key) {
   import std.algorithm : startsWith;
   import std.file : exists, readText;
-  import std.string : splitLines;
+  import std.string : splitLines, strip;
 
   if (!exists("/etc/os-release"))
     return "";
+  auto prefix = key ~ "=";
   foreach (line; readText("/etc/os-release").splitLines()) {
-    if (!line.startsWith("PRETTY_NAME="))
+    if (!line.startsWith(prefix))
       continue;
-    auto value = line["PRETTY_NAME=".length .. $];
+    auto value = strip(line[prefix.length .. $]);
     if (value.length >= 2 && value[0] == '"' && value[$ - 1] == '"')
       value = value[1 .. $ - 1];
     return value;
@@ -322,7 +330,10 @@ private string osPrettyName() {
 private JSONValue cpuFields() {
   import std.parallelism : totalCPUs;
 
-  JSONValue fields = ["cores": JSONValue(cast(long) totalCPUs)];
+  JSONValue fields = [
+    "cores": JSONValue(cast(long) totalCPUs),
+    "model": JSONValue(cpuModel())
+  ];
   version (linux) {
     auto loads = loadAverage();
     if (loads.length == 3) {
@@ -332,6 +343,24 @@ private JSONValue cpuFields() {
     }
   }
   return fields;
+}
+
+/** `/proc/cpuinfo` 的 `model name`；取不到返回空串。 */
+private string cpuModel() {
+  import std.algorithm : startsWith;
+  import std.file : exists, readText;
+  import std.string : indexOf, splitLines, strip;
+
+  if (!exists("/proc/cpuinfo"))
+    return "";
+  foreach (line; readText("/proc/cpuinfo").splitLines()) {
+    if (!line.startsWith("model name"))
+      continue;
+    auto colon = line.indexOf(':');
+    if (colon >= 0)
+      return strip(line[colon + 1 .. $]);
+  }
+  return "";
 }
 
 /** `/proc/loadavg` 的前三个数（1/5/15 分钟平均负载）；读不到返回空数组。 */
