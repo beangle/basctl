@@ -1,9 +1,10 @@
 # Release 0.0.4
 
-发布日期：待定
+发布日期：2026-11-23
 计划 tag：`v0.0.4`
 
-本版本补齐 micdn 配置安装、服务状态上报和启动就绪判定。
+本版本补齐 micdn 配置安装、服务状态上报和启动就绪判定，并修复 CentOS 7 上的
+root helper 参数兼容问题。
 
 ## micdn 配置安装
 
@@ -19,6 +20,9 @@ basagent 下载 micdn.xml 到 /var/lib/bas/micdn/micdn.xml
 ```
 
 micdn 停止时也能应用，不再依赖管理端口。
+
+CentOS 7 的 `runuser` 不允许 `-s` 与 `-u` 同时使用；helper 改为
+`runuser -u micdn -- /bin/sh -c ...`，避免 micdn 停止时 apply 失败。
 
 ## 服务状态上报
 

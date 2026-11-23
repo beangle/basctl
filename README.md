@@ -24,7 +24,7 @@ instances by farm and provides status, configuration checks, and firewall helper
 | [docs/channel.md](docs/channel.md) | basagent to bashub reporting and control channel |
 | [docs/channel-protocol.md](docs/channel-protocol.md) | Control-channel protocol and extension rules |
 | [scripts/README.md](scripts/README.md) | deb / rpm packaging |
-| [docs/release-0.0.2.md](docs/release-0.0.2.md) | 0.0.2 release notes |
+| [docs/release-0.0.4.md](docs/release-0.0.4.md) | Current release notes |
 
 ## Versions
 

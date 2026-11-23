@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.0.4 (unreleased)
+## v0.0.4 (2026-11-23)
 
 - **修复 root helper 的 runuser 参数**：CentOS 7 的 `runuser` 不允许 `-s` 与 `-u` 同时使用；
   改为 `runuser -u micdn -- /bin/sh -c ...`，避免 micdn 停止时 apply 失败。
