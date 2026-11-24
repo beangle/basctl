@@ -41,7 +41,6 @@ basagent 只被允许“按固定名字启动一个 root oneshot unit”。
 `basmicdn-apply.service`，不属于 proxy 应用链）：
 
 ```sudoers
-Defaults:bas !requiretty
 Cmnd_Alias BASPROXY_APPLY = /usr/bin/systemctl start basproxy-apply@haproxy.service, /usr/bin/systemctl start basproxy-apply@nginx.service
 bas ALL=(root) NOPASSWD: BASPROXY_APPLY
 ```

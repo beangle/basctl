@@ -110,7 +110,6 @@ CentOS 7 的 systemd 219 在 `org.freedesktop.systemd1.manage-units` 检查里�
 polkit 无法把权限限定到固定 unit。安装包因此使用固定的 sudoers 规则：
 
 ```sudoers
-Defaults:bas !requiretty
 Cmnd_Alias BASPROXY_APPLY = /usr/bin/systemctl start basproxy-apply@haproxy.service, /usr/bin/systemctl start basproxy-apply@nginx.service
 bas ALL=(root) NOPASSWD: BASPROXY_APPLY
 ```

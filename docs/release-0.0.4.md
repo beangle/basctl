@@ -37,6 +37,11 @@ CentOS 7 的 `runuser` 不允许 `-s` 与 `-u` 同时使用；helper 改为
 
 监控页按实际 `systemctl is-active` 显示在线、已停止、节点离线或状态未知。
 
+## sudoers 兼容性
+
+`/etc/sudoers.d/basproxy` 不再设置 `Defaults:bas !requiretty`。新版 sudo 已移除该选项，
+保留会在 Ubuntu 26 等系统上产生 `unknown setting` 警告；现代 sudo 默认不要求 TTY。
+
 ## basctl.env 模板
 
 DEB/RPM 把模板装到 `/usr/share/bas/basctl.env`，安装脚本在

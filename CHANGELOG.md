@@ -10,6 +10,8 @@
 - **系统现状字段**：`report:os` 增加 `os.id`、`os.versionId` 和 `cpu.model`，供 bashub 的 Host 硬件回填使用。
 - **真实服务状态上报**：`report:os` / `report:health` 增加 `micdn` 和
   `proxyState.haproxy/nginx`，来自 `systemctl is-active`，监控不再用 agent 在线代替服务在线。
+- **移除过时 sudoers requiretty 设置**：新版 sudo（如 Ubuntu 26）已不识别 `!requiretty`，会报
+  `unknown setting`；`/etc/sudoers.d/basproxy` 不再写该行，现代 sudo 默认不要求 TTY。
 - **安装包补齐 basctl.env**：DEB/RPM 仍把模板装到 `/usr/share/bas/basctl.env`，`postinst/%post`
   在 `/etc/bas/conf/basctl.env` 缺失**或为空**时重新生成；模板缺失时安装直接失败并报明原因。
 - **启动就绪判定**：`basctl start` / `service:start` 等待进程存活且 HTTP 端口 LISTEN
@@ -35,6 +37,8 @@
 - **agent 可无 server.xml 运行**：`basagent pull` 发现远端配置没有本机 bas server 时，不安装
   server.xml（并清理无效的旧空文件）；`basagent.service` 不再要求该文件存在，micdn/proxy 节点
   可以只保留 agent 身份与通道。
+- **移除过时 sudoers requiretty 设置**：新版 sudo（如 Ubuntu 26）已不识别 `!requiretty`，会报
+  `unknown setting`；`/etc/sudoers.d/basproxy` 不再写该行，现代 sudo 默认不要求 TTY。
 - **安装包补齐 basctl.env**：DEB/RPM 仍把模板装到 `/usr/share/bas/basctl.env`，`postinst/%post`
   在 `/etc/bas/conf/basctl.env` 缺失**或为空**时重新生成；模板缺失时安装直接失败并报明原因。
 - **启动就绪判定**：`basctl start` / `service:start` 现在等待进程存活且 HTTP 端口开始 LISTEN
