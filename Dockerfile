@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-# basctl 容器镜像：basctl + jstart + setline + JRE，一台机器一个出口（见 docs/container.md）。
+# basctl 容器镜像：basctl + jstart + setline + JRE，一台机器一个出口（见 scripts/build_image.sh）。
 #
 # 三份源码属于三个独立仓库，构建上下文由 scripts/build_image.sh 准备（basctl/ + jstart/ +
 # setline/），因此不要直接 `podman build .`——用 `./scripts/build_image.sh`。

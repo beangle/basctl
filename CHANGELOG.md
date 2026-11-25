@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.0.5 (2026-11-25)
+
+- **主机信息上报**：`report:os` 增加 `os.prettyName`、`os.id`、`os.versionId` 和
+  `cpu.model`；`name` 继续提供发行版展示名，供 bashub 的 Host「从 Agent 更新」回填
+  发行版与 CPU 型号。
+- **修复安装包 basctl.env**：DEB/RPM 在 `/etc/bas/conf/basctl.env` 缺失或为空时从
+  `/usr/share/bas/basctl.env` 初始化，模板缺失则安装失败；DEB 构建阶段先确认模板已
+  暂存且非空，避免产出不完整安装包。
+- **移除过时 sudoers requiretty 设置**：新版 sudo（如 Ubuntu 26）已不识别
+  `!requiretty`，会报 `unknown setting`；`/etc/sudoers.d/basproxy` 不再写该行，
+  现代 sudo 默认不要求 TTY。
+
 ## v0.0.4 (2026-11-23)
 
 - **修复 root helper 的 runuser 参数**：CentOS 7 的 `runuser` 不允许 `-s` 与 `-u` 同时使用；
@@ -7,13 +19,8 @@
 - **micdn 配置改为 root oneshot**：basagent 下载 `micdn.xml` 到私有目录，触发
   `basmicdn-apply.service`；root helper 用 `micdn --check` 校验、原子安装
   `/etc/micdn/micdn.xml` 并 restart，失败恢复旧配置。移除对 `/admin/config` 的依赖。
-- **系统现状字段**：`report:os` 增加 `os.id`、`os.versionId` 和 `cpu.model`，供 bashub 的 Host 硬件回填使用。
 - **真实服务状态上报**：`report:os` / `report:health` 增加 `micdn` 和
   `proxyState.haproxy/nginx`，来自 `systemctl is-active`，监控不再用 agent 在线代替服务在线。
-- **移除过时 sudoers requiretty 设置**：新版 sudo（如 Ubuntu 26）已不识别 `!requiretty`，会报
-  `unknown setting`；`/etc/sudoers.d/basproxy` 不再写该行，现代 sudo 默认不要求 TTY。
-- **安装包补齐 basctl.env**：DEB/RPM 仍把模板装到 `/usr/share/bas/basctl.env`，`postinst/%post`
-  在 `/etc/bas/conf/basctl.env` 缺失**或为空**时重新生成；模板缺失时安装直接失败并报明原因。
 - **启动就绪判定**：`basctl start` / `service:start` 等待进程存活且 HTTP 端口 LISTEN
   （最多 30 秒），不再把刚 spawn 当成已启动。
 - **删除部署后清理 server.xml**：远端不再包含本机 bas server 时，basagent 删除旧

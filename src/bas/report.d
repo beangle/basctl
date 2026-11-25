@@ -206,7 +206,7 @@ private long processRssBytes(int pid) {
 
 private:
 
-/** `os`：发行版 / 内核 / 架构。取不到（如 Windows）就留空。 */
+/** `os`：发行版名称、发行版 ID / 版本、内核 / 架构。取不到（如 Windows）就留空。 */
 /**
  * `proxy`：本机安装的 HAProxy / nginx 版本。只读 `-v` 的固定命令，不探测端口或配置；
  * 没装就留空，控制台按“版本未上报”显示。
@@ -326,7 +326,7 @@ private string osReleaseValue(string key) {
   return "";
 }
 
-/** `cpu`：核数（配置）+ 1/5/15 分钟负载（水位，取不到就没有）。 */
+/** `cpu`：核数、型号与 1/5/15 分钟负载（水位，取不到就没有）。 */
 private JSONValue cpuFields() {
   import std.parallelism : totalCPUs;
 

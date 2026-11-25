@@ -24,10 +24,6 @@ micdn 停止时也能应用，不再依赖管理端口。
 CentOS 7 的 `runuser` 不允许 `-s` 与 `-u` 同时使用；helper 改为
 `runuser -u micdn -- /bin/sh -c ...`，避免 micdn 停止时 apply 失败。
 
-## 系统现状字段
-
-`report:os` 增加 `os.id`、`os.versionId` 和 `cpu.model`；bashub 的 Host「从 Agent 更新」使用这些字段。
-
 ## 服务状态上报
 
 `report:os` / `report:health` 增加：
@@ -36,16 +32,6 @@ CentOS 7 的 `runuser` 不允许 `-s` 与 `-u` 同时使用；helper 改为
 - `proxyState: {haproxy: {active, state}, nginx: {active, state}}`
 
 监控页按实际 `systemctl is-active` 显示在线、已停止、节点离线或状态未知。
-
-## sudoers 兼容性
-
-`/etc/sudoers.d/basproxy` 不再设置 `Defaults:bas !requiretty`。新版 sudo 已移除该选项，
-保留会在 Ubuntu 26 等系统上产生 `unknown setting` 警告；现代 sudo 默认不要求 TTY。
-
-## basctl.env 模板
-
-DEB/RPM 把模板装到 `/usr/share/bas/basctl.env`，安装脚本在
-`/etc/bas/conf/basctl.env` 缺失或为空时生成；模板缺失会直接报错，不再静默跳过。
 
 ## 启动就绪
 

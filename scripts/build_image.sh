@@ -1,5 +1,5 @@
 #!/bin/sh
-# 构建 basctl 容器镜像（Alpine / musl 多阶段），见 docs/container.md。
+# 构建 basctl 容器镜像（Alpine / musl 多阶段），见 Dockerfile。
 #
 # 镜像里装 basctl + jstart + setline + JRE，而这是三个独立仓库：脚本先把三份源码收进一个临时
 # 构建上下文（target/image-context/），再交给 podman 构建——镜像里现编译现用，不搬运宿主二进制

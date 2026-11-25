@@ -179,7 +179,7 @@ private void makeUsage() {
   stderr.writeln("  generates specs and resolves dependencies, start them with `basctl start`.");
 }
 
-/** `version`：纯文本版本，便于脚本取值（`basctl 0.0.1`）。 */
+/** `version`：纯文本版本，便于脚本取值（格式为 `basctl <version>`）。 */
 int cmdVersion() {
   writeln("basctl " ~ basctlVersion);
   return 0;
@@ -322,4 +322,3 @@ public string[] statusLines(const ServerInfo info) {
   }
   return lines;
 }
-

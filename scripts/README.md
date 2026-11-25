@@ -3,7 +3,7 @@
 | 路径 | 用途 |
 |------|------|
 | `build_common.sh` | 打包共用：版本号取自源码常量、`dub clean`、清空 `target/`，分别构建 `basctl` 与 `basagent` |
-| `build_image.sh` | 构建容器镜像 `basctl:<版本>`（podman；三仓库源码在 Alpine 里现编译，见 [../docs/container.md](../docs/container.md)） |
+| `build_image.sh` | 构建容器镜像 `basctl:<版本>`（podman；三仓库源码在 Alpine 里现编译，见 [../Dockerfile](../Dockerfile)） |
 | `build_deb.sh` | 构建 `.deb`（需 Debian 系或 `dpkg-deb`、`fakeroot`） |
 | `build_rpm.sh` | 构建二进制 `.rpm`（需 `rpmbuild >= 4.14`、`fakeroot`） |
 | `container/` | 镜像里的入口脚本与样例 `server.xml`（由 `build_image.sh` 收进构建上下文） |
@@ -21,9 +21,9 @@
 `.deb`/`.rpm` 同时安装 `/usr/bin/basctl`、`/usr/bin/basagent`、`basagent.service`、
 `/etc/logrotate.d/bas`，并在 `/var/lib/bas` 预置 `bin/*.sh`，仍是一个安装包。
 `basctl.env` 是主机级凭证/配置。模板安装在 `/usr/share/bas/basctl.env`，`postinst`/`%post`
-只在 `/etc/bas/conf/basctl.env` 缺失时复制并设为 `root:beangle 0640`；该文件不由 deb/rpm 跟踪，
-卸载、重装、升级都不会删除或覆盖。模板本身只是初始化来源，服务运行时不读取它，但升级/重装需要它。
-卸载、重装、升级都不删除或覆盖该文件；模板只用于首次安装时初始化。包内还安装 `proxy:apply` 的 root helper（`/usr/libexec/basproxy-apply`）、
+在 `/etc/bas/conf/basctl.env` 缺失或为空时复制并设为 `root:beangle 0640`；模板缺失则安装失败。
+该文件不由 deb/rpm 跟踪，卸载、重装、升级都不会删除或覆盖。包内还安装 `proxy:apply` 的
+root helper（`/usr/libexec/basproxy-apply`）、
 `basproxy-apply@.service` 和固定命令的 sudoers 规则（`/etc/sudoers.d/basproxy`）。`basctl` 是本地命令；
 `basagent` 由 systemd 以专用账号 `bas:beangle` 常驻，主目录固定为 `/var/lib/bas`，日志写在
 `/var/log/bas/agent/console.out`。
